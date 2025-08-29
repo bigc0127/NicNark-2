@@ -30,5 +30,9 @@
 	<true/>
 	<key>UISupportsLiveActivitiesFrequentUpdates</key>
 	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2024 Connor Needling. All rights reserved.</string>
 </dict>
 </plist>
