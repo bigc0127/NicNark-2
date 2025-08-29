@@ -79,6 +79,12 @@ struct NicotineLevelView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchRemoved"))) { _ in
             refreshTrigger.toggle()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchEdited"))) { _ in
+            refreshTrigger.toggle()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchDeleted"))) { _ in
+            refreshTrigger.toggle()
+        }
     }
     
     // MARK: - View Components

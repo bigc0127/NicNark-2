@@ -156,6 +156,8 @@ struct UsageGraphView: View {
 
     var streakDays: Int
     @State private var refreshTrigger = false
+    @State private var showingEditSheet = false
+    @State private var selectedPouchForEdit: PouchLog?
 
     init(streakDays: Int = 0) {
         self.streakDays = streakDays
@@ -175,10 +177,18 @@ struct UsageGraphView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     ForEach(vm.hourBuckets) { bucket in
-                        HourRowView(bucket: bucket)
-                            .padding(.horizontal, 12)
-                            .padding(.top, 6)
-                            .padding(.bottom, 16)
+                        HourRowView(
+                            bucket: bucket,
+                            onEditPouch: { event in
+                                if let pouchLog = findPouchLog(for: event) {
+                                    selectedPouchForEdit = pouchLog
+                                    showingEditSheet = true
+                                }
+                            }
+                        )
+                        .padding(.horizontal, 12)
+                        .padding(.top, 6)
+                        .padding(.bottom, 16)
                     }
                 }
             }
@@ -197,10 +207,35 @@ struct UsageGraphView: View {
         .onChange(of: refreshTrigger) { _, _ in
             applyFetchToVM()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchEdited"))) { _ in
+            refreshTrigger.toggle()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchDeleted"))) { _ in
+            refreshTrigger.toggle()
+        }
+        .sheet(isPresented: $showingEditSheet) {
+            if let pouchLog = selectedPouchForEdit {
+                PouchEditView(
+                    pouchLog: pouchLog,
+                    onSave: {
+                        refreshTrigger.toggle()
+                    },
+                    onDelete: {
+                        refreshTrigger.toggle()
+                    }
+                )
+            }
+        }
     }
 
     private func applyFetchToVM() {
         vm.setEvents(Array(recentLogs), context: viewContext)
+    }
+    
+    private func findPouchLog(for event: PouchEvent) -> PouchLog? {
+        return recentLogs.first { pouchLog in
+            pouchLog.pouchId == event.id
+        }
     }
 
     private var headerTopSection: some View {
@@ -237,6 +272,7 @@ struct UsageGraphView: View {
 // MARK: - Hour row
 private struct HourRowView: View {
     let bucket: HourBucket
+    let onEditPouch: (PouchEvent) -> Void
 
     private static let hourLabel: DateFormatter = {
         let f = DateFormatter()
@@ -264,7 +300,9 @@ private struct HourRowView: View {
                             EmptyHourPill()
                         } else {
                             ForEach(bucket.events) { event in
-                                PouchCard(event: event)
+                                PouchCard(event: event, onEdit: {
+                                    onEditPouch(event)
+                                })
                             }
                         }
                     }
@@ -287,6 +325,9 @@ private struct HourRowView: View {
 // MARK: - Pouch card
 private struct PouchCard: View {
     let event: PouchEvent
+    let onEdit: () -> Void
+    
+    @State private var isPressed = false
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -320,19 +361,40 @@ private struct PouchCard: View {
 
             let timeString = Self.timeFormatter.string(from: event.removedAt)
             let absorbed = absorbedAtEvent()
-            Text("\(timeString) • \(String(format: "%.3f", absorbed)) mg")
-                .font(.caption)
-                .foregroundColor(.secondary)
+            HStack {
+                Text("\(timeString) • \(String(format: "%.3f", absorbed)) mg")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                Spacer()
+                
+                Image(systemName: "hand.tap.fill")
+                    .font(.caption2)
+                    .foregroundColor(.secondary.opacity(0.5))
+                    .scaleEffect(isPressed ? 1.2 : 1.0)
+            }
         }
         .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color(.secondarySystemBackground))
+                .scaleEffect(isPressed ? 0.95 : 1.0)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10)
                 .stroke(Color(.separator), lineWidth: 0.5)
         )
+        .onLongPressGesture(minimumDuration: 0.6, maximumDistance: 50) {
+            onEdit()
+            
+            // Haptic feedback
+            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+            impactFeedback.impactOccurred()
+        } onPressingChanged: { pressing in
+            withAnimation(.easeInOut(duration: 0.1)) {
+                isPressed = pressing
+            }
+        }
     }
 }
 
