@@ -4,15 +4,26 @@
 <dict>
 	<key>aps-environment</key>
 	<string>development</string>
+	<key>com.apple.developer.aps-environment</key>
+	<string>development</string>
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>activitycontinuation:com.nicnark.nicnark-2</string>
+	</array>
 	<key>com.apple.developer.icloud-container-identifiers</key>
-	<array/>
+	<array>
+		<string>iCloud.com.nicnark.nicnark-2</string>
+	</array>
 	<key>com.apple.developer.icloud-services</key>
 	<array>
 		<string>CloudKit</string>
+		<string>CloudDocuments</string>
 	</array>
-	<key>com.apple.security.app-sandbox</key>
+	<key>com.apple.developer.siri</key>
 	<true/>
-	<key>com.apple.security.files.user-selected.read-only</key>
-	<true/>
+	<key>com.apple.developer.ubiquity-container-identifiers</key>
+	<array>
+		<string>iCloud.com.nicnark.nicnark-2</string>
+	</array>
 </dict>
 </plist>
