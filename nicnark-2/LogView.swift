@@ -117,10 +117,10 @@ struct LogView: View {
 
     var quickButtonsView: some View {
         VStack(spacing: 12) {
-            // Auto-centering layout with flexible grid for nicotine amount buttons
-            LazyVGrid(columns: [
-                GridItem(.adaptive(minimum: 70, maximum: 100), spacing: 4)
-            ], spacing: 6) {
+            // Centered layout using HStack with Spacers for proper centering
+            HStack(spacing: 8) {
+                Spacer() // Push buttons to center
+                
                 Button("3 mg") { logPouch(3) }
                     .buttonStyle(.bordered)
                     .frame(height: 44)
@@ -136,15 +136,20 @@ struct LogView: View {
                     .buttonStyle(.bordered)
                     .frame(height: 44)
                 }
+                
+                Spacer() // Push buttons to center
             }
             
-            // Separate "Custom" button that's wider to show full word
-            Button("Custom") { showInput.toggle() }
-                .buttonStyle(.borderedProminent)
-                .frame(height: 44)
-                .frame(minWidth: 120) // Ensure "Custom" text is fully visible
+            // Separate "Custom" button that's wider and centered
+            HStack {
+                Spacer()
+                Button("Custom") { showInput.toggle() }
+                    .buttonStyle(.borderedProminent)
+                    .frame(height: 44)
+                    .frame(minWidth: 120) // Ensure "Custom" text is fully visible
+                Spacer()
+            }
         }
-        .frame(maxWidth: .infinity) // Center the entire button group
         .padding(.horizontal)
     }
 
