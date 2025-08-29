@@ -116,30 +116,35 @@ struct LogView: View {
     // MARK: - UI Components
 
     var quickButtonsView: some View {
-        // Use adaptive layout with very tight spacing for compact button layout
-        LazyVGrid(columns: [
-            GridItem(.adaptive(minimum: 75, maximum: 110), spacing: 2)
-        ], spacing: 6) {
-            Button("3 mg") { logPouch(3) }
-                .buttonStyle(.bordered)
-                .frame(height: 44) // Consistent button height
-            
-            Button("6 mg") { logPouch(6) }
-                .buttonStyle(.bordered)
-                .frame(height: 44)
+        VStack(spacing: 12) {
+            // Auto-centering layout with flexible grid for nicotine amount buttons
+            LazyVGrid(columns: [
+                GridItem(.adaptive(minimum: 70, maximum: 100), spacing: 4)
+            ], spacing: 6) {
+                Button("3 mg") { logPouch(3) }
+                    .buttonStyle(.bordered)
+                    .frame(height: 44)
+                
+                Button("6 mg") { logPouch(6) }
+                    .buttonStyle(.bordered)
+                    .frame(height: 44)
 
-            ForEach(customButtons, id: \.self) { button in
-                Button("\(button.nicotineAmount, specifier: "%.0f") mg") {
-                    logPouch(button.nicotineAmount)
+                ForEach(customButtons, id: \.self) { button in
+                    Button("\(button.nicotineAmount, specifier: "%.0f") mg") {
+                        logPouch(button.nicotineAmount)
+                    }
+                    .buttonStyle(.bordered)
+                    .frame(height: 44)
                 }
-                .buttonStyle(.bordered)
-                .frame(height: 44)
             }
-
+            
+            // Separate "Custom" button that's wider to show full word
             Button("Custom") { showInput.toggle() }
                 .buttonStyle(.borderedProminent)
                 .frame(height: 44)
+                .frame(minWidth: 120) // Ensure "Custom" text is fully visible
         }
+        .frame(maxWidth: .infinity) // Center the entire button group
         .padding(.horizontal)
     }
 
