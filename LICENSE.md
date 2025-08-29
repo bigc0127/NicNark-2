@@ -35,6 +35,6 @@ This is a human-readable summary of (and not a substitute for) the license.
 
 ---
 
-Copyright (c) 2024 Connor Needling
+Copyright (c) 2025 Connor Needling
 
 This work is licensed under a Creative Commons Attribution-NonCommercial 4.0 International License.
