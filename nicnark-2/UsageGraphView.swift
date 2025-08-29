@@ -328,6 +328,7 @@ private struct PouchCard: View {
     let onEdit: () -> Void
     
     @State private var isPressed = false
+    @State private var longPressTimer: Timer?
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -368,10 +369,11 @@ private struct PouchCard: View {
                 
                 Spacer()
                 
-                Image(systemName: "hand.tap.fill")
-                    .font(.caption2)
-                    .foregroundColor(.secondary.opacity(0.5))
+Image(systemName: "ellipsis")
+                    .font(.caption)
+                    .foregroundColor(.secondary.opacity(0.7))
                     .scaleEffect(isPressed ? 1.2 : 1.0)
+                    .rotationEffect(.degrees(90))
             }
         }
         .padding(10)
@@ -384,16 +386,50 @@ private struct PouchCard: View {
             RoundedRectangle(cornerRadius: 10)
                 .stroke(Color(.separator), lineWidth: 0.5)
         )
-        .onLongPressGesture(minimumDuration: 0.6, maximumDistance: 50) {
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            // Double tap to edit (temporary for debugging)
+            print("🎯 Double tap triggered for pouch: \(event.name)")
             onEdit()
             
             // Haptic feedback
             let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
             impactFeedback.impactOccurred()
-        } onPressingChanged: { pressing in
-            withAnimation(.easeInOut(duration: 0.1)) {
-                isPressed = pressing
-            }
+        }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    if !isPressed {
+                        withAnimation(.easeInOut(duration: 0.1)) {
+                            isPressed = true
+                        }
+                        
+                        // Start long press timer
+                        longPressTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { _ in
+                            // Trigger long press action
+                            print("🎯 Long press triggered for pouch: \(event.name)")
+                            onEdit()
+                            
+                            // Haptic feedback
+                            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                            impactFeedback.impactOccurred()
+                        }
+                    }
+                }
+                .onEnded { _ in
+                    withAnimation(.easeInOut(duration: 0.1)) {
+                        isPressed = false
+                    }
+                    
+                    // Cancel long press timer if it's still running
+                    longPressTimer?.invalidate()
+                    longPressTimer = nil
+                }
+        )
+        .onDisappear {
+            // Clean up timer when view disappears
+            longPressTimer?.invalidate()
+            longPressTimer = nil
         }
     }
 }
