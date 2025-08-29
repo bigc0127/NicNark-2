@@ -116,7 +116,7 @@ NicNark is built with **privacy by design**:
 - ✅ **No account required** - No sign-up or personal information needed
 - ✅ **Transparent code** - Full source code available for audit
 
-[Read our Privacy Policy](https://connorneedling.github.io/nicnark/privacy-policy)
+[Read our Privacy Policy](https://connorneedling.github.io/NicNark-2/privacy-policy)
 
 ## 🤝 Contributing
 
@@ -172,14 +172,14 @@ This project is licensed under the **Creative Commons Attribution-NonCommercial 
 - [ ] **Advanced Analytics** - Deeper usage insights
 
 ### Community Requests
-Have an idea? [Open an issue](https://github.com/ConnorNeedling/nicnark/issues) and let's discuss it!
+Have an idea? [Open an issue](https://github.com/bigc0127/NicNark-2/issues) and let's discuss it!
 
 ## 🆘 Support
 
 ### Getting Help
 - 📖 **Documentation** - Check this README and code comments
-- 🐛 **Bug Reports** - [Open an issue](https://github.com/ConnorNeedling/nicnark/issues)
-- 💡 **Feature Requests** - [Start a discussion](https://github.com/ConnorNeedling/nicnark/discussions)
+- 🐛 **Bug Reports** - [Open an issue](https://github.com/bigc0127/NicNark-2/issues)
+- 💡 **Feature Requests** - [Start a discussion](https://github.com/ConnorNeedling/NicNark-2/discussions)
 - 💬 **Questions** - Use GitHub Discussions for general questions
 
 ### App Store Version
