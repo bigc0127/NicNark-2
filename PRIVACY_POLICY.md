@@ -1,7 +1,7 @@
 # Privacy Policy for NicNark
 
-**Effective Date:** [INSERT DATE]  
-**Last Updated:** [INSERT DATE]
+**Effective Date:** January 1, 2025  
+**Last Updated:** January 1, 2025
 
 ## Overview
 

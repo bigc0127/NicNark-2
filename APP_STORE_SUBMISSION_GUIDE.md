@@ -76,7 +76,7 @@ Key settings to verify:
 <string>NicNark</string>
 
 <key>NSHumanReadableCopyright</key>
-<string>Copyright © 2024 Connor Needling. All rights reserved.</string>
+<string>Copyright © 2025 Connor Needling. All rights reserved.</string>
 
 <key>ITSAppUsesNonExemptEncryption</key>
 <false/>
@@ -206,7 +206,7 @@ You need screenshots for:
 #### 6.1 Version Information
 1. **Select your uploaded build** in App Store Connect
 2. **Version Release:** Manual or Automatic
-3. **Copyright:** Connor Needling 2024
+3. **Copyright:** Connor Needling 2025
 
 #### 6.2 Age Rating Questionnaire
 **Important answers:**
