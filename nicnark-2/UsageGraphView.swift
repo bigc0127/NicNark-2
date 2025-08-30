@@ -171,71 +171,170 @@ struct UsageGraphView: View {
     }
 
     var body: some View {
+        mainContentView
+            .onAppear(perform: setupView)
+            .onChange(of: Array(recentLogs)) { _, _ in
+                applyFetchToVM()
+            }
+            .onChange(of: refreshTrigger) { _, _ in
+                applyFetchToVM()
+            }
+            .onReceive(pouchRemovedPublisher) { _ in
+                refreshTrigger.toggle()
+            }
+            .onReceive(pouchEditedPublisher) { _ in
+                refreshTrigger.toggle()
+            }
+            .onReceive(pouchDeletedPublisher) { _ in
+                refreshTrigger.toggle()
+            }
+            .sheet(isPresented: $showingEditSheet, content: editSheetContent)
+            .onChange(of: showingEditSheet) { _, newValue in
+                onSheetStateChange(newValue)
+            }
+    }
+    
+    private var mainContentView: some View {
         VStack(spacing: 0) {
             headerTopSection
             Divider()
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
-                    ForEach(vm.hourBuckets) { bucket in
-                        HourRowView(
-                            bucket: bucket,
-                            onEditPouch: { event in
-                                if let pouchLog = findPouchLog(for: event) {
-                                    selectedPouchForEdit = pouchLog
-                                    showingEditSheet = true
-                                }
-                            }
-                        )
+            scrollableContent
+        }
+    }
+    
+    private var scrollableContent: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 12) {
+                ForEach(vm.hourBuckets) { bucket in
+                    HourRowView(bucket: bucket, onEditPouch: handlePouchEdit)
                         .padding(.horizontal, 12)
                         .padding(.top, 6)
                         .padding(.bottom, 16)
-                    }
                 }
             }
         }
-        .onAppear {
-            UsageGraphViewModel.contextProvider = { viewContext }
-            viewContext.automaticallyMergesChangesFromParent = true
-            applyFetchToVM()
-        }
-        .onChange(of: Array(recentLogs)) { _, _ in
-            applyFetchToVM()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchRemoved"))) { _ in
-            refreshTrigger.toggle()
-        }
-        .onChange(of: refreshTrigger) { _, _ in
-            applyFetchToVM()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchEdited"))) { _ in
-            refreshTrigger.toggle()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchDeleted"))) { _ in
-            refreshTrigger.toggle()
-        }
-        .sheet(isPresented: $showingEditSheet) {
-            if let pouchLog = selectedPouchForEdit {
-                PouchEditView(
-                    pouchLog: pouchLog,
-                    onSave: {
-                        refreshTrigger.toggle()
-                    },
-                    onDelete: {
-                        refreshTrigger.toggle()
-                    }
-                )
-            }
-        }
+    }
+    
+    private var pouchRemovedPublisher: NotificationCenter.Publisher {
+        NotificationCenter.default.publisher(for: NSNotification.Name("PouchRemoved"))
+    }
+    
+    private var pouchEditedPublisher: NotificationCenter.Publisher {
+        NotificationCenter.default.publisher(for: NSNotification.Name("PouchEdited"))
+    }
+    
+    private var pouchDeletedPublisher: NotificationCenter.Publisher {
+        NotificationCenter.default.publisher(for: NSNotification.Name("PouchDeleted"))
     }
 
     private func applyFetchToVM() {
         vm.setEvents(Array(recentLogs), context: viewContext)
     }
     
-    private func findPouchLog(for event: PouchEvent) -> PouchLog? {
-        return recentLogs.first { pouchLog in
-            pouchLog.pouchId == event.id
+    private func setupView() {
+        UsageGraphViewModel.contextProvider = { viewContext }
+        viewContext.automaticallyMergesChangesFromParent = true
+        applyFetchToVM()
+    }
+    
+    private func handlePouchEdit(_ event: PouchEvent) {
+        print("🔍 Looking for pouch with ID: \(event.id)")
+        print("🔍 Available pouches: \(recentLogs.map { $0.pouchId?.uuidString ?? "nil" })")
+        
+        if let pouchLog = findPouchLog(for: event) {
+            print("✅ Found matching pouch log!")
+            selectedPouchForEdit = pouchLog
+            showingEditSheet = true
+        } else {
+            print("❌ No matching pouch found for event ID: \(event.id)")
         }
+    }
+    
+    @ViewBuilder
+    private func editSheetContent() -> some View {
+        if let pouchLog = selectedPouchForEdit {
+            let _ = print("📋 Presenting edit sheet for pouch: \(pouchLog.pouchId?.uuidString ?? "unknown")")
+            PouchEditView(
+                pouchLog: pouchLog,
+                onSave: {
+                    print("💾 Edit saved")
+                    refreshTrigger.toggle()
+                },
+                onDelete: {
+                    print("🗑️ Edit deleted")
+                    refreshTrigger.toggle()
+                }
+            )
+        } else {
+            let _ = print("❌ No pouch selected for editing")
+            Text("Error: No pouch selected")
+                .presentationDetents([.medium])
+        }
+    }
+    
+    private func onSheetStateChange(_ newValue: Bool) {
+        print("🔄 Sheet state changed to: \(newValue)")
+        print("🔄 Selected pouch: \(selectedPouchForEdit?.pouchId?.uuidString ?? "nil")")
+    }
+    
+    private func findPouchLog(for event: PouchEvent) -> PouchLog? {
+        print("🔎 FindPouchLog - Looking for: \(event.id)")
+        print("🔎 FindPouchLog - Event nicotine: \(event.nicotineMg)mg")
+        print("🔎 FindPouchLog - Event time: \(event.removedAt)")
+        
+        // First try exact UUID match
+        if let foundPouch = recentLogs.first(where: { $0.pouchId == event.id }) {
+            print("✅ FindPouchLog - Exact UUID match found")
+            return foundPouch
+        }
+        
+        // Enhanced fallback strategy for pouches with nil IDs or timing issues
+        let sortedPouches = recentLogs.sorted { pouch1, pouch2 in
+            guard let time1 = pouch1.insertionTime ?? pouch1.removalTime,
+                  let time2 = pouch2.insertionTime ?? pouch2.removalTime else {
+                return false
+            }
+            return abs(event.removedAt.timeIntervalSince(time1)) < abs(event.removedAt.timeIntervalSince(time2))
+        }
+        
+        for (index, pouchLog) in sortedPouches.enumerated() {
+            guard let insertionTime = pouchLog.insertionTime else { continue }
+            
+            let timeDifferenceFromInsertion = abs(event.removedAt.timeIntervalSince(insertionTime))
+            let nicotineMatch = abs(pouchLog.nicotineAmount - event.nicotineMg) < 0.1
+            
+            // Check against removal time if it exists
+            let timeDifferenceFromRemoval: Double
+            if let removalTime = pouchLog.removalTime {
+                timeDifferenceFromRemoval = abs(event.removedAt.timeIntervalSince(removalTime))
+            } else {
+                timeDifferenceFromRemoval = Double.infinity
+            }
+            
+            let minTimeDifference = min(timeDifferenceFromInsertion, timeDifferenceFromRemoval)
+            
+            print("🔎 Pouch #\(index): Nicotine \(pouchLog.nicotineAmount)mg, ID: \(pouchLog.pouchId?.uuidString ?? "nil")")
+            print("🔎   Time diff (insertion): \(timeDifferenceFromInsertion)s")
+            print("🔎   Time diff (removal): \(timeDifferenceFromRemoval == Double.infinity ? "N/A" : "\(timeDifferenceFromRemoval)s")")
+            print("🔎   Nicotine match: \(nicotineMatch)")
+            
+            // More lenient matching: within 2 hours and exact nicotine match
+            if nicotineMatch && minTimeDifference < 7200 { // 2 hours = 7200 seconds
+                print("✅ FindPouchLog - Fallback match found (Pouch #\(index))")
+                return pouchLog
+            }
+        }
+        
+        // Last resort: just match by nicotine amount (for debugging)
+        if let lastResortPouch = recentLogs.first(where: { abs($0.nicotineAmount - event.nicotineMg) < 0.1 }) {
+            print("🆘 FindPouchLog - Last resort match by nicotine amount only")
+            return lastResortPouch
+        }
+        
+        print("❌ FindPouchLog - No match found")
+        print("🔎 Available pouches count: \(recentLogs.count)")
+        
+        return nil
     }
 
     private var headerTopSection: some View {
