@@ -95,24 +95,33 @@ public final class WidgetPersistenceHelper {
     
     // MARK: Core Data Support for Widgets
     private lazy var persistentContainer: NSPersistentContainer = {
-        let container = NSPersistentContainer(name: "DataModel")
+        let container = NSPersistentContainer(name: "nicnark_2")
         
         // Use the App Group container URL for shared data
-        let storeURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.ConnorNeedling.nicnark-2")?.appendingPathComponent("DataModel.sqlite")
+        guard let storeURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.ConnorNeedling.nicnark-2")?.appendingPathComponent("nicnark_2.sqlite") else {
+            print("❌ Widget Core Data: Failed to get App Group container URL")
+            return container
+        }
         
-        let description = NSPersistentStoreDescription()
-        description.url = storeURL
+        let description = NSPersistentStoreDescription(url: storeURL)
         description.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
         description.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
+        description.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
+        
+        // Configure for read-only access in widget to avoid conflicts
+        description.setOption(true as NSNumber, forKey: NSReadOnlyPersistentStoreOption)
+        
         container.persistentStoreDescriptions = [description]
         
         container.loadPersistentStores { _, error in
             if let error = error as NSError? {
                 print("❌ Widget Core Data error: \(error), \(error.userInfo)")
+            } else {
+                print("✅ Widget Core Data loaded successfully from: \(storeURL.path)")
             }
         }
         return container
-    }()
+    }
     
     public func backgroundContext() -> NSManagedObjectContext {
         return persistentContainer.newBackgroundContext()

@@ -58,11 +58,14 @@ struct NicotineGraphProvider: TimelineProvider {
         Task {
             let currentEntry = await generateEntry()
             
-            // Update every 15 minutes, or every 2 minutes if there's an active pouch
-            let updateInterval = currentEntry.hasActivePouches ? 120.0 : 900.0
+            // More aggressive update schedule:
+            // - Every 1 minute if there are active pouches (for real-time updates)
+            // - Every 5 minutes otherwise (to catch new activity)
+            let updateInterval = currentEntry.hasActivePouches ? 60.0 : 300.0
             let nextUpdateDate = Date().addingTimeInterval(updateInterval)
             
-            let timeline = Timeline(entries: [currentEntry], policy: .after(nextUpdateDate))
+            // Use atEnd policy to ensure widget updates when timeline expires
+            let timeline = Timeline(entries: [currentEntry], policy: .atEnd)
             completion(timeline)
         }
     }

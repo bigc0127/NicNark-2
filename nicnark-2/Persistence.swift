@@ -45,6 +45,13 @@ struct PersistenceController {
             guard let storeDescription = container.persistentStoreDescriptions.first else {
                 fatalError("Failed to get store description")
             }
+            
+            // Set App Group container URL so widgets can access the same data
+            if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.ConnorNeedling.nicnark-2") {
+                let storeURL = appGroupURL.appendingPathComponent("nicnark_2.sqlite")
+                storeDescription.url = storeURL
+                print("📱 Main app Core Data will use App Group URL: \(storeURL.path)")
+            }
 
             // Enable history tracking and remote change notifications
             storeDescription.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)

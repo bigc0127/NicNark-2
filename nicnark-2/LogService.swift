@@ -7,6 +7,7 @@
 
 import Foundation
 import CoreData
+import WidgetKit
 
 @MainActor
 enum LogService {
@@ -70,6 +71,9 @@ enum LogService {
         
         // Update widget persistence helper for immediate widget updates
         updateWidgetPersistenceHelperAfterLogging(pouch: pouch, ctx: ctx)
+        
+        // Reload all widget timelines to ensure immediate updates
+        WidgetCenter.shared.reloadAllTimelines()
         
         // Nudge a near-term background refresh to keep the Live Activity fresh soon after start
         if #available(iOS 16.1, *) {
