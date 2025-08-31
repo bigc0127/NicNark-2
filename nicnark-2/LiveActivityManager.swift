@@ -83,7 +83,7 @@ class LiveActivityManager: ObservableObject {
         
         let content = ActivityContent(
             state: initialState,
-            staleDate: Calendar.current.date(byAdding: .minute, value: 35, to: start)
+            staleDate: Calendar.current.date(byAdding: .minute, value: 40, to: start) // Longer stale date to prevent throttling
         )
         
         do {
@@ -136,8 +136,8 @@ class LiveActivityManager: ObservableObject {
                 currentNicotineLevel: currentLevel
             )
             
-            // Update every 30 seconds in foreground for more current nicotine levels
-            try? await Task.sleep(nanoseconds: 30 * NSEC_PER_SEC)
+            // Update every 60 seconds in foreground - iOS throttles more frequent updates
+            try? await Task.sleep(nanoseconds: 60 * NSEC_PER_SEC)
         }
     }
     
@@ -168,11 +168,11 @@ class LiveActivityManager: ObservableObject {
         
         let content = ActivityContent(
             state: newState,
-            staleDate: Calendar.current.date(byAdding: .minute, value: 2, to: now)
+            staleDate: Calendar.current.date(byAdding: .minute, value: 5, to: now) // Longer stale date for better reliability
         )
         
         await activity.update(content)
-        log.debug("Local update applied for pouch: \(pouchId, privacy: .public)")
+        log.info("✅ Live Activity updated: pouch=\(pouchId, privacy: .public) level=\(String(format: "%.3f", currentNicotineLevel))mg progress=\(Int(absorptionProgress * 100))% status=\(status, privacy: .public)")
     }
     
     static func updateLiveActivity(
@@ -269,26 +269,18 @@ actor BackgroundMaintainer {
         await registerIfNeeded()
         
         await MainActor.run {
-            // More frequent refresh for Live Activity updates - every 5 minutes
+            // Cancel existing tasks to prevent conflicts
+            BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: refreshId)
+            BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: processId)
+            
+            // More frequent refresh for Live Activity updates - every 3 minutes
             let refresh = BGAppRefreshTaskRequest(identifier: refreshId)
-            refresh.earliestBeginDate = Date(timeIntervalSinceNow: 5 * 60) // 5 minutes
+            refresh.earliestBeginDate = Date(timeIntervalSinceNow: 3 * 60) // 3 minutes - more frequent for better reliability
             do {
                 try BGTaskScheduler.shared.submit(refresh)
-                log.info("Scheduled regular refresh in 5 minutes")
+                log.info("Scheduled regular refresh in 3 minutes")
             } catch {
                 log.error("Submit refresh failed: \(error.localizedDescription, privacy: .public)")
-            }
-            
-            // Processing task for more intensive updates - every 10 minutes
-            let process = BGProcessingTaskRequest(identifier: processId)
-            process.requiresNetworkConnectivity = false
-            process.requiresExternalPower = false
-            process.earliestBeginDate = Date(timeIntervalSinceNow: 10 * 60) // 10 minutes
-            do {
-                try BGTaskScheduler.shared.submit(process)
-                log.info("Scheduled processing task in 10 minutes")
-            } catch {
-                log.error("Submit processing failed: \(error.localizedDescription, privacy: .public)")
             }
         }
     }
@@ -297,11 +289,15 @@ actor BackgroundMaintainer {
         await registerIfNeeded()
         
         await MainActor.run {
+            // Cancel existing tasks to prevent conflicts
+            BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: refreshId)
+            BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: processId)
+            
             let refresh = BGAppRefreshTaskRequest(identifier: refreshId)
-            refresh.earliestBeginDate = Date(timeIntervalSinceNow: 60) // 1 minute after start - more aggressive
+            refresh.earliestBeginDate = Date(timeIntervalSinceNow: 30) // 30 seconds - faster initial response
             do {
                 try BGTaskScheduler.shared.submit(refresh)
-                log.info("Scheduled immediate refresh in 1 minute")
+                log.info("Scheduled immediate refresh in 30 seconds")
             } catch {
                 log.error("Submit 'soon' refresh failed: \(error.localizedDescription, privacy: .public)")
             }
@@ -313,11 +309,15 @@ actor BackgroundMaintainer {
         await registerIfNeeded()
         
         await MainActor.run {
+            // Cancel existing tasks to prevent conflicts
+            BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: refreshId)
+            BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: processId)
+            
             let refresh = BGAppRefreshTaskRequest(identifier: refreshId)
-            refresh.earliestBeginDate = Date(timeIntervalSinceNow: 2 * 60) // Every 2 minutes for active Live Activities
+            refresh.earliestBeginDate = Date(timeIntervalSinceNow: 90) // 1.5 minutes for active Live Activities - more frequent
             do {
                 try BGTaskScheduler.shared.submit(refresh)
-                log.info("Scheduled frequent refresh in 2 minutes for Live Activity")
+                log.info("Scheduled frequent refresh in 1.5 minutes for Live Activity")
             } catch {
                 log.error("Submit frequent refresh failed: \(error.localizedDescription, privacy: .public)")
             }
@@ -325,7 +325,7 @@ actor BackgroundMaintainer {
     }
     
     private func handleRefresh(_ task: BGAppRefreshTask) async {
-        log.info("BG refresh invoked")
+        log.info("🔔 BG refresh invoked at \(DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium), privacy: .public)")
         
         await withTaskCancellationHandler {
             await applyBatchedActivityUpdates()
@@ -347,7 +347,7 @@ actor BackgroundMaintainer {
     }
     
     private func handleProcess(_ task: BGProcessingTask) async {
-        log.info("BG processing invoked")
+        log.info("⚙️ BG processing invoked at \(DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium), privacy: .public)")
         await scheduleRegular()
         
         await withTaskCancellationHandler {
@@ -403,6 +403,6 @@ actor BackgroundMaintainer {
                 )
             }
         }
-        log.info("Applied batched updates to \(items.count, privacy: .public) activities")
+        log.info("🔄 Applied batched updates to \(items.count, privacy: .public) activities at \(DateFormatter.localizedString(from: now, dateStyle: .none, timeStyle: .medium), privacy: .public)")
     }
 }
