@@ -64,8 +64,8 @@ struct NicotineGraphProvider: TimelineProvider {
             let updateInterval = currentEntry.hasActivePouches ? 60.0 : 300.0
             let nextUpdateDate = Date().addingTimeInterval(updateInterval)
             
-            // Use atEnd policy to ensure widget updates when timeline expires
-            let timeline = Timeline(entries: [currentEntry], policy: .atEnd)
+            // Use after policy with calculated next update date
+            let timeline = Timeline(entries: [currentEntry], policy: .after(nextUpdateDate))
             completion(timeline)
         }
     }
