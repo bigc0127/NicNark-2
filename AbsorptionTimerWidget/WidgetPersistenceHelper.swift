@@ -94,32 +94,45 @@ public final class WidgetPersistenceHelper {
     }
     
     // MARK: Core Data Support for Widgets
-    private lazy var persistentContainer: NSPersistentContainer = {
+    private var _persistentContainer: NSPersistentContainer?
+    
+    private func createPersistentContainer() -> NSPersistentContainer {
         let container = NSPersistentContainer(name: "nicnark_2")
         
         // Use the App Group container URL for shared data
-        guard let storeURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.ConnorNeedling.nicnark-2")?.appendingPathComponent("nicnark_2.sqlite") else {
-            print("❌ Widget Core Data: Failed to get App Group container URL")
-            return container
+        if let storeURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.ConnorNeedling.nicnark-2")?.appendingPathComponent("nicnark_2.sqlite") {
+            
+            let description = NSPersistentStoreDescription(url: storeURL)
+            description.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
+            description.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
+            
+            // Configure for read-only access in widget to avoid conflicts
+            description.setOption(true as NSNumber, forKey: NSReadOnlyPersistentStoreOption)
+            
+            container.persistentStoreDescriptions = [description]
+            
+            print("📱 Widget Core Data: Configuring with App Group URL: \(storeURL.path)")
+        } else {
+            print("⚠️ Widget Core Data: Using default container (App Group not available)")
         }
-        
-        let description = NSPersistentStoreDescription(url: storeURL)
-        description.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
-        description.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
-        description.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
-        
-        // Configure for read-only access in widget to avoid conflicts
-        description.setOption(true as NSNumber, forKey: NSReadOnlyPersistentStoreOption)
-        
-        container.persistentStoreDescriptions = [description]
         
         container.loadPersistentStores { _, error in
             if let error = error as NSError? {
                 print("❌ Widget Core Data error: \(error), \(error.userInfo)")
             } else {
-                print("✅ Widget Core Data loaded successfully from: \(storeURL.path)")
+                print("✅ Widget Core Data loaded successfully")
             }
         }
+        
+        return container
+    }
+    
+    private var persistentContainer: NSPersistentContainer {
+        if let container = _persistentContainer {
+            return container
+        }
+        let container = createPersistentContainer()
+        _persistentContainer = container
         return container
     }
     
