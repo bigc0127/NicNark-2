@@ -47,8 +47,8 @@
 /* Begin PBXCopyFilesBuildPhase section */
 		C84223BE2E4FB52A003E73E3 /* Embed ExtensionKit Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
-			dstPath = "$(EXTENSIONS_FOLDER_PATH)";
-			dstSubfolder = Product;
+			dstPath = "";
+			dstSubfolder = PlugIns;
 			files = (
 				C84223BD2E4FB52A003E73E3 /* NicNarkShortcutsIntents.appex in Embed ExtensionKit Extensions */,
 			);
