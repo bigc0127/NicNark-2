@@ -28,6 +28,11 @@ struct SettingsView: View {
     @State private var isDeleting = false
     @State private var showingFullDisclaimer = false
     @State private var isCloudKitSyncEnabled = UserDefaults.standard.object(forKey: "cloudKitSyncEnabled") as? Bool ?? true
+    @State private var showingDiagnostics = false
+    @State private var diagnosticsResult = ""
+    @State private var isRunningDiagnostics = false
+    @State private var isTestingSyncData = false
+    @State private var showingSyncProgress = false
     
     private let logger = Logger(subsystem: "com.nicnark.nicnark-2", category: "Settings")
 
@@ -59,6 +64,34 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showingFullDisclaimer) {
             FirstRunDisclaimerView(isPresented: $showingFullDisclaimer)
+        }
+        .sheet(isPresented: $showingDiagnostics) {
+            NavigationView {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(diagnosticsResult)
+                            .font(.system(.caption, design: .monospaced))
+                            .padding()
+                            .background(Color(.secondarySystemBackground))
+                            .cornerRadius(8)
+                    }
+                    .padding()
+                }
+                .navigationTitle("CloudKit Diagnostics")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Done") {
+                            showingDiagnostics = false
+                        }
+                    }
+                }
+            }
+        }
+        .alert("Test Sync Complete", isPresented: .constant(isTestingSyncData && !isTestingSyncData)) {
+            Button("OK") { }
+        } message: {
+            Text("CloudKit sync test completed. Check the console logs for details.")
         }
     }
 
@@ -160,24 +193,34 @@ struct SettingsView: View {
             if syncManager.isCloudKitAvailable {
                 HStack {
                     Button("Diagnose") {
+                        isRunningDiagnostics = true
                         Task {
-                            let diagnostics = await syncManager.diagnoseCloudKitSync()
-                            print("=== CloudKit Diagnostics ===")
-                            print(diagnostics)
+                            diagnosticsResult = await syncManager.diagnoseCloudKitSync()
+                            isRunningDiagnostics = false
+                            showingDiagnostics = true
                         }
                     }
                     .font(.caption2)
                     .buttonStyle(.bordered)
                     .controlSize(.mini)
+                    .disabled(isRunningDiagnostics)
                     
                     Button("Test Sync") {
+                        isTestingSyncData = true
                         Task {
                             await syncManager.testDataSync()
+                            isTestingSyncData = false
                         }
                     }
                     .font(.caption2)
                     .buttonStyle(.bordered)
                     .controlSize(.mini)
+                    .disabled(isTestingSyncData)
+                    
+                    if isRunningDiagnostics || isTestingSyncData {
+                        ProgressView()
+                            .scaleEffect(0.6)
+                    }
                 }
                 .padding(.top, 4)
             }

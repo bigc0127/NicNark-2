@@ -21,11 +21,14 @@ class CloudKitSyncManager: ObservableObject {
     
     @Published var isCloudKitAvailable = false
     @Published var lastSyncDate: Date?
+    @Published var syncStatus: String = "Initializing..."
     
     private init() {
         Task {
             await checkCloudKitAvailability()
             await setupSyncMonitoring()
+            // Force an initial sync check
+            await triggerInitialSync()
         }
     }
     
@@ -269,6 +272,54 @@ class CloudKitSyncManager: ObservableObject {
             }
         } catch {
             logger.error("❌ CloudKit operations failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+    
+    // MARK: - Initial Sync
+    
+    private func triggerInitialSync() async {
+        guard isCloudKitAvailable && isSyncEnabled else {
+            logger.info("⚠️ Skipping initial sync - CloudKit unavailable or sync disabled")
+            return
+        }
+        
+        logger.info("🚀 Triggering initial CloudKit sync")
+        
+        // Initialize CloudKit schema
+        await initializeCloudKitSchema()
+        
+        // Force a comprehensive sync to ensure data consistency
+        await triggerManualSync()
+        
+        // Also try to pull any remote changes
+        await handleRemoteDataChanges()
+        
+        logger.info("✅ Initial sync completed")
+    }
+    
+    private func initializeCloudKitSchema() async {
+        do {
+            logger.info("📶 Initializing CloudKit schema")
+            
+            // Access the private database to ensure schema is initialized
+            let privateDB = container.privateCloudDatabase
+            
+            // Try to fetch user record to trigger schema initialization
+            let userRecordID = try await container.userRecordID()
+            
+            // Try to create the schema by accessing the database
+            let query = CKQuery(recordType: "PouchLog", predicate: NSPredicate(value: false))
+            
+            do {
+                _ = try await privateDB.records(matching: query)
+                logger.info("✅ CloudKit schema initialized successfully")
+            } catch {
+                // This is expected on first run - schema will be created automatically by Core Data
+                logger.info("📝 CloudKit schema will be created by Core Data on first sync: \(error.localizedDescription, privacy: .public)")
+            }
+            
+        } catch {
+            logger.error("❌ CloudKit schema initialization failed: \(error.localizedDescription, privacy: .public)")
         }
     }
     

@@ -887,7 +887,7 @@
 				C84223BF2E4FB52A003E73E3 /* Debug configuration for PBXNativeTarget "NicNarkShortcutsIntents" */,
 				C84223C02E4FB52A003E73E3 /* Release configuration for PBXNativeTarget "NicNarkShortcutsIntents" */,
 			);
-			defaultConfigurationName = Debug;
+			defaultConfigurationName = Release;
 		};
 		C8D96E5A2E40739F002AA8C9 /* Build configuration list for PBXNativeTarget "AbsorptionTimerWidgetExtension" */ = {
 			isa = XCConfigurationList;
@@ -895,7 +895,7 @@
 				C8D96E582E40739F002AA8C9 /* Debug configuration for PBXNativeTarget "AbsorptionTimerWidgetExtension" */,
 				C8D96E592E40739F002AA8C9 /* Release configuration for PBXNativeTarget "AbsorptionTimerWidgetExtension" */,
 			);
-			defaultConfigurationName = Debug;
+			defaultConfigurationName = Release;
 		};
 		C8E730572E405AC700F0C29D /* Build configuration list for PBXProject "nicnark-2" */ = {
 			isa = XCConfigurationList;
@@ -903,7 +903,7 @@
 				C8E730862E405AC900F0C29D /* Debug configuration for PBXProject "nicnark-2" */,
 				C8E730872E405AC900F0C29D /* Release configuration for PBXProject "nicnark-2" */,
 			);
-			defaultConfigurationName = Debug;
+			defaultConfigurationName = Release;
 		};
 		C8E730832E405AC900F0C29D /* Build configuration list for PBXNativeTarget "nicnark-2" */ = {
 			isa = XCConfigurationList;
@@ -911,7 +911,7 @@
 				C8E730842E405AC900F0C29D /* Debug configuration for PBXNativeTarget "nicnark-2" */,
 				C8E730852E405AC900F0C29D /* Release configuration for PBXNativeTarget "nicnark-2" */,
 			);
-			defaultConfigurationName = Debug;
+			defaultConfigurationName = Release;
 		};
 		C8E730882E405AC900F0C29D /* Build configuration list for PBXNativeTarget "nicnark-2Tests" */ = {
 			isa = XCConfigurationList;
@@ -919,7 +919,7 @@
 				C8E730892E405AC900F0C29D /* Debug configuration for PBXNativeTarget "nicnark-2Tests" */,
 				C8E7308A2E405AC900F0C29D /* Release configuration for PBXNativeTarget "nicnark-2Tests" */,
 			);
-			defaultConfigurationName = Debug;
+			defaultConfigurationName = Release;
 		};
 		C8E7308B2E405AC900F0C29D /* Build configuration list for PBXNativeTarget "nicnark-2UITests" */ = {
 			isa = XCConfigurationList;
@@ -927,7 +927,7 @@
 				C8E7308C2E405AC900F0C29D /* Debug configuration for PBXNativeTarget "nicnark-2UITests" */,
 				C8E7308D2E405AC900F0C29D /* Release configuration for PBXNativeTarget "nicnark-2UITests" */,
 			);
-			defaultConfigurationName = Debug;
+			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
 	};

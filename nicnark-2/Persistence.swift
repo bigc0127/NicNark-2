@@ -62,6 +62,10 @@ struct PersistenceController {
             storeDescription.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
             storeDescription.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
             
+            // Additional CloudKit optimizations
+            storeDescription.setOption(true as NSNumber, forKey: NSPersistentCloudKitContainerTeardownEnabled)
+            storeDescription.setOption("auto" as NSString, forKey: NSPersistentCloudKitContainerSchemaMigrationModeKey)
+            
             print("📱 CloudKit store configured at default location for sync")
         }
 
