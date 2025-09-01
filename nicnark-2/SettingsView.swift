@@ -176,20 +176,9 @@ struct SettingsView: View {
                 }
                 
                 Spacer()
-                
-                if isCloudKitSyncEnabled && syncManager.isCloudKitAvailable {
-                    Button("Sync Now") {
-                        Task {
-                            await syncManager.triggerManualSync()
-                        }
-                    }
-                    .font(.caption)
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
             }
             
-            // Diagnostic buttons for debugging
+            // Diagnostic and sync buttons
             if syncManager.isCloudKitAvailable {
                 HStack {
                     Button("Diagnose") {
@@ -216,6 +205,17 @@ struct SettingsView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.mini)
                     .disabled(isTestingSyncData)
+                    
+                    if isCloudKitSyncEnabled {
+                        Button("Sync Now") {
+                            Task {
+                                await syncManager.triggerManualSync()
+                            }
+                        }
+                        .font(.caption2)
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                    }
                     
                     if isRunningDiagnostics || isTestingSyncData {
                         ProgressView()

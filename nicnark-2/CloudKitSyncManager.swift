@@ -9,6 +9,7 @@ import Foundation
 import CloudKit
 import CoreData
 import ActivityKit
+import UIKit
 import os.log
 
 @available(iOS 16.1, *)
@@ -333,63 +334,177 @@ class CloudKitSyncManager: ObservableObject {
     // MARK: - CloudKit Diagnostics
     
     func diagnoseCloudKitSync() async -> String {
-        var diagnostics = ["=== CloudKit Sync Diagnostics ==="]
+        var diagnostics = ["=== COMPREHENSIVE CLOUDKIT DIAGNOSTICS ==="]
+        diagnostics.append("Generated: \(Date().formatted(.dateTime))")
+        diagnostics.append("")
         
-        // 1. Check CloudKit Account Status
+        // 1. Device Information
+        diagnostics.append("📱 DEVICE INFO:")
+        diagnostics.append("Device: \(UIDevice.current.model)")
+        diagnostics.append("iOS Version: \(UIDevice.current.systemVersion)")
+        diagnostics.append("Device Name: \(UIDevice.current.name)")
+        diagnostics.append("")
+        
+        // 2. CloudKit Account Status
+        diagnostics.append("☁️ CLOUDKIT ACCOUNT:")
         do {
             let accountStatus = try await container.accountStatus()
-            diagnostics.append("✅ Account Status: \(accountStatus)")
+            diagnostics.append("Status: \(accountStatus)")
             
-            if accountStatus == .available {
-                // 2. Check user record
+            switch accountStatus {
+            case .available:
+                diagnostics.append("✅ Account is available for CloudKit")
+                
+                // Get user record details
                 do {
                     let userRecordID = try await container.userRecordID()
-                    diagnostics.append("✅ User Record ID: \(userRecordID.recordName)")
+                    diagnostics.append("User Record: \(userRecordID.recordName)")
                 } catch {
                     diagnostics.append("❌ User Record Error: \(error.localizedDescription)")
                 }
                 
-                // 3. Check database availability
-                diagnostics.append("✅ Private Database Available")
-            }
-        } catch {
-            diagnostics.append("❌ Account Status Error: \(error.localizedDescription)")
-        }
-        
-        // 4. Check Core Data CloudKit Configuration
-        let container = PersistenceController.shared.container
-        let coordinator = container.persistentStoreCoordinator
-        
-        for store in coordinator.persistentStores {
-            if let options = store.options,
-               let cloudKitOptions = options["NSPersistentCloudKitContainerOptionsKey"] as? NSPersistentCloudKitContainerOptions {
-                diagnostics.append("✅ Store CloudKit Container: \(cloudKitOptions.containerIdentifier)")
-            } else {
-                diagnostics.append("❌ Store missing CloudKit configuration")
+                // Test database access
+                let privateDB = container.privateCloudDatabase
+                diagnostics.append("✅ Private Database accessible")
+                
+                // Try a simple query to test connectivity
+                let query = CKQuery(recordType: "PouchLog", predicate: NSPredicate(value: false))
+                
+                do {
+                    let (_, _) = try await privateDB.records(matching: query, resultsLimit: 1)
+                    diagnostics.append("✅ Database query successful")
+                } catch {
+                    diagnostics.append("⚠️ Database query failed (expected on first run): \(error.localizedDescription)")
+                }
+                
+            case .noAccount:
+                diagnostics.append("❌ No iCloud account signed in")
+            case .restricted:
+                diagnostics.append("❌ iCloud account is restricted")
+            case .couldNotDetermine:
+                diagnostics.append("❌ Could not determine iCloud status")
+            case .temporarilyUnavailable:
+                diagnostics.append("⚠️ iCloud temporarily unavailable")
+            @unknown default:
+                diagnostics.append("❌ Unknown iCloud status")
             }
             
-            if store.options?[NSPersistentHistoryTrackingKey] as? Bool == true {
-                diagnostics.append("✅ History tracking enabled")
-            } else {
-                diagnostics.append("❌ History tracking disabled")
+        } catch {
+            diagnostics.append("❌ Account Status Check Failed: \(error.localizedDescription)")
+        }
+        diagnostics.append("")
+        
+        // 3. Core Data Configuration
+        diagnostics.append("🗄️ CORE DATA CONFIGURATION:")
+        let coreDataContainer = PersistenceController.shared.container
+        let coordinator = coreDataContainer.persistentStoreCoordinator
+        
+        for (index, store) in coordinator.persistentStores.enumerated() {
+            diagnostics.append("Store #\(index + 1):")
+            diagnostics.append("  URL: \(store.url?.absoluteString ?? "Unknown")")
+            diagnostics.append("  Type: \(store.type)")
+            
+            if let options = store.options {
+                if let cloudKitOptions = options["NSPersistentCloudKitContainerOptionsKey"] as? NSPersistentCloudKitContainerOptions {
+                    diagnostics.append("  ✅ CloudKit Container: \(cloudKitOptions.containerIdentifier)")
+                } else {
+                    diagnostics.append("  ❌ No CloudKit configuration found")
+                }
+                
+                if options[NSPersistentHistoryTrackingKey] as? Bool == true {
+                    diagnostics.append("  ✅ History tracking: Enabled")
+                } else {
+                    diagnostics.append("  ❌ History tracking: Disabled")
+                }
+                
+                if options[NSPersistentStoreRemoteChangeNotificationPostOptionKey] as? Bool == true {
+                    diagnostics.append("  ✅ Remote notifications: Enabled")
+                } else {
+                    diagnostics.append("  ❌ Remote notifications: Disabled")
+                }
+            }
+        }
+        diagnostics.append("")
+        
+        // 4. Data Counts and Sample Data
+        diagnostics.append("📊 DATA ANALYSIS:")
+        let context = coreDataContainer.viewContext
+        await context.perform {
+            do {
+                // PouchLog analysis
+                let pouchRequest: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
+                let allPouches = try context.fetch(pouchRequest)
+                diagnostics.append("Total PouchLogs: \(allPouches.count)")
+                
+                let activePouches = allPouches.filter { $0.removalTime == nil }
+                diagnostics.append("Active PouchLogs: \(activePouches.count)")
+                
+                if !allPouches.isEmpty {
+                    let latest = allPouches.max(by: { ($0.insertionTime ?? Date.distantPast) < ($1.insertionTime ?? Date.distantPast) })
+                    if let latest = latest {
+                        diagnostics.append("Latest PouchLog:")
+                        diagnostics.append("  UUID: \(latest.pouchId?.uuidString ?? "Missing UUID!")")
+                        diagnostics.append("  Amount: \(latest.nicotineAmount)mg")
+                        diagnostics.append("  Inserted: \(latest.insertionTime?.formatted(.dateTime) ?? "Unknown")")
+                        diagnostics.append("  Removed: \(latest.removalTime?.formatted(.dateTime) ?? "Still active")")
+                    }
+                }
+                
+                // CustomButton analysis
+                let buttonRequest: NSFetchRequest<CustomButton> = CustomButton.fetchRequest()
+                let buttons = try context.fetch(buttonRequest)
+                diagnostics.append("CustomButtons: \(buttons.count)")
+                if !buttons.isEmpty {
+                    let amounts = buttons.map { "\($0.nicotineAmount)mg" }.joined(separator: ", ")
+                    diagnostics.append("Button amounts: [\(amounts)]")
+                }
+                
+            } catch {
+                diagnostics.append("❌ Data analysis error: \(error.localizedDescription)")
+            }
+        }
+        diagnostics.append("")
+        
+        // 5. Sync Status
+        diagnostics.append("🔄 SYNC STATUS:")
+        diagnostics.append("CloudKit Available: \(isCloudKitAvailable ? "Yes" : "No")")
+        diagnostics.append("Sync Enabled: \(isSyncEnabled ? "Yes" : "No")")
+        if let lastSync = lastSyncDate {
+            diagnostics.append("Last Sync: \(lastSync.formatted(.dateTime))")
+            let timeSinceSync = Date().timeIntervalSince(lastSync)
+            diagnostics.append("Time Since Last Sync: \(Int(timeSinceSync))s ago")
+        } else {
+            diagnostics.append("Last Sync: Never")
+        }
+        diagnostics.append("")
+        
+        // 6. Test a save operation
+        diagnostics.append("🧪 TESTING SAVE OPERATION:")
+        let testContainer = PersistenceController.shared.container
+        let testContext = testContainer.newBackgroundContext()
+        
+        await testContext.perform {
+            do {
+                // Create a test entity
+                let testButton = CustomButton(context: testContext)
+                testButton.nicotineAmount = 999.99 // Unique test value
+                
+                try testContext.save()
+                diagnostics.append("✅ Test save successful")
+                
+                // Clean up test data
+                testContext.delete(testButton)
+                try testContext.save()
+                diagnostics.append("✅ Test cleanup successful")
+                
+            } catch {
+                diagnostics.append("❌ Test save failed: \(error.localizedDescription)")
+                diagnostics.append("❌ Full error: \(error)")
             }
         }
         
-        // 5. Count local data
-        let context = container.viewContext
-        await context.perform {
-            do {
-                let pouchRequest: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
-                let pouchCount = try context.count(for: pouchRequest)
-                diagnostics.append("📊 Local PouchLog count: \(pouchCount)")
-                
-                let buttonRequest: NSFetchRequest<CustomButton> = CustomButton.fetchRequest()
-                let buttonCount = try context.count(for: buttonRequest)
-                diagnostics.append("📊 Local CustomButton count: \(buttonCount)")
-            } catch {
-                diagnostics.append("❌ Local data count error: \(error.localizedDescription)")
-            }
-        }
+        diagnostics.append("")
+        diagnostics.append("=== END DIAGNOSTICS ===")
         
         return diagnostics.joined(separator: "\n")
     }

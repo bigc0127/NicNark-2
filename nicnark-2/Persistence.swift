@@ -65,13 +65,23 @@ struct PersistenceController {
             print("📱 CloudKit store configured at default location for sync")
         }
 
-        container.loadPersistentStores { _, error in
+        container.loadPersistentStores { storeDescription, error in
             if let error = error as NSError? {
-                // Log instead of crashing in production; crash in DEBUG to surface issues early
-                print("Core Data CloudKit error: \(error), \(error.userInfo)")
+                // Log detailed CloudKit error information
+                print("❌ Core Data CloudKit error: \(error), \(error.userInfo)")
+                print("📍 Store URL: \(storeDescription.url?.absoluteString ?? "Unknown")")
+                print("🔧 Store Type: \(storeDescription.type)")
+                if let cloudKitOptions = storeDescription.cloudKitContainerOptions {
+                    print("☁️ CloudKit Container: \(cloudKitOptions.containerIdentifier)")
+                }
                 #if DEBUG
                 fatalError("Unresolved error \(error), \(error.userInfo)")
                 #endif
+            } else {
+                print("✅ Core Data CloudKit store loaded successfully")
+                if let cloudKitOptions = storeDescription.cloudKitContainerOptions {
+                    print("☁️ CloudKit sync enabled for container: \(cloudKitOptions.containerIdentifier)")
+                }
             }
         }
 
@@ -103,9 +113,37 @@ struct PersistenceController {
         if context.hasChanges {
             do {
                 try context.save()
+                print("✅ Core Data context saved successfully")
             } catch {
                 let nsError = error as NSError
-                print("Save error: \(nsError), \(nsError.userInfo)")
+                print("❌ Core Data save error: \(nsError), \(nsError.userInfo)")
+                print("❌ Save error details: \(nsError.localizedDescription)")
+            }
+        }
+    }
+    
+    // MARK: - CloudKit Sync
+    
+    func triggerCloudKitSync() async {
+        // Force a background context save to trigger CloudKit sync
+        let backgroundContext = container.newBackgroundContext()
+        await backgroundContext.perform {
+            do {
+                // Process any pending persistent history
+                let historyRequest = NSPersistentHistoryChangeRequest.fetchHistory(after: .distantPast)
+                _ = try backgroundContext.execute(historyRequest)
+                
+                // Save to trigger CloudKit operations
+                if backgroundContext.hasChanges {
+                    try backgroundContext.save()
+                    print("✅ Background context saved - CloudKit sync triggered")
+                } else {
+                    // Even without changes, save to trigger sync
+                    try backgroundContext.save()
+                    print("✅ CloudKit sync triggered via background save")
+                }
+            } catch {
+                print("❌ Failed to trigger CloudKit sync: \(error.localizedDescription)")
             }
         }
     }

@@ -27,7 +27,12 @@ enum LogService {
         
         let btn = CustomButton(context: ctx)
         btn.nicotineAmount = amount
-        try? ctx.save()
+        do {
+            try ctx.save()
+            print("✅ CustomButton saved successfully for amount: \(amount)")
+        } catch {
+            print("❌ Failed to save CustomButton: \(error)")
+        }
     }
     
     @discardableResult
@@ -45,9 +50,30 @@ enum LogService {
         ensureCustomButton(for: mg, in: ctx)
         
         let pouch = PouchLog(context: ctx)
+        pouch.pouchId = UUID() // Ensure UUID is set for CloudKit
         pouch.insertionTime = .now
         pouch.nicotineAmount = mg
-        try? ctx.save()
+        
+        // Save with proper error handling and CloudKit sync trigger
+        do {
+            try ctx.save()
+            print("✅ PouchLog saved successfully: \(mg)mg at \(Date().formatted(.dateTime.hour().minute()))")
+            
+            // Force CloudKit sync after successful save using multiple methods
+            Task {
+                // Method 1: Use persistence controller sync
+                await PersistenceController.shared.triggerCloudKitSync()
+                
+                // Method 2: Use CloudKit sync manager
+                if #available(iOS 16.1, *) {
+                    await CloudKitSyncManager.shared.triggerManualSync()
+                }
+            }
+        } catch {
+            print("❌ Failed to save PouchLog: \(error)")
+            print("❌ Error details: \(error.localizedDescription)")
+            return false
+        }
         
         if #available(iOS 16.1, *) {
             let pouchId = pouch.objectID.uriRepresentation().absoluteString
