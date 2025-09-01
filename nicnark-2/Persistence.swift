@@ -93,7 +93,7 @@ struct PersistenceController {
         }
         
         // Check CloudKit account status on init
-        Task {
+        Task.detached {
             await Self.checkCloudKitStatus()
         }
     }
