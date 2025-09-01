@@ -156,6 +156,32 @@ struct SettingsView: View {
                 }
             }
             
+            // Diagnostic buttons for debugging
+            if syncManager.isCloudKitAvailable {
+                HStack {
+                    Button("Diagnose") {
+                        Task {
+                            let diagnostics = await syncManager.diagnoseCloudKitSync()
+                            print("=== CloudKit Diagnostics ===")
+                            print(diagnostics)
+                        }
+                    }
+                    .font(.caption2)
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    
+                    Button("Test Sync") {
+                        Task {
+                            await syncManager.testDataSync()
+                        }
+                    }
+                    .font(.caption2)
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                }
+                .padding(.top, 4)
+            }
+            
             // Cross-Device Features Info
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "iphone.and.ipad")

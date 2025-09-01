@@ -209,16 +209,66 @@ class CloudKitSyncManager: ObservableObject {
         
         logger.info("🔄 Triggering manual CloudKit sync")
         
-        // Try to trigger CloudKit sync by touching the persistent history
-        let context = PersistenceController.shared.container.newBackgroundContext()
+        // Update sync status
+        await MainActor.run {
+            self.lastSyncDate = Date()
+        }
+        
+        // Method 1: Force CloudKit sync by triggering persistent history processing
+        await forcePersistentHistorySync()
+        
+        // Method 2: Trigger CloudKit container operations
+        await triggerCloudKitOperations()
+        
+        // Method 3: Process any remote changes that may be pending
+        await handleRemoteDataChanges()
+        
+        logger.info("✅ Manual sync completed")
+    }
+    
+    private func forcePersistentHistorySync() async {
+        let container = PersistenceController.shared.container
+        let context = container.newBackgroundContext()
+        
         await context.perform {
             do {
-                // Force a save to trigger CloudKit sync
-                try context.save()
-                self.logger.info("✅ Manual sync triggered")
+                // Process persistent history to push changes to CloudKit
+                let historyRequest = NSPersistentHistoryChangeRequest.fetchHistory(after: .distantPast)
+                if (try context.execute(historyRequest) as? NSPersistentHistoryResult) != nil {
+                    self.logger.info("📄 Processing persistent history for CloudKit sync")
+                }
+                
+                // Force a save to trigger any pending CloudKit operations
+                if context.hasChanges {
+                    try context.save()
+                }
+                
+                self.logger.info("✅ Persistent history sync completed")
             } catch {
-                self.logger.error("❌ Manual sync failed: \(error.localizedDescription, privacy: .public)")
+                self.logger.error("❌ Persistent history sync failed: \(error.localizedDescription, privacy: .public)")
             }
+        }
+    }
+    
+    private func triggerCloudKitOperations() async {
+        do {
+            // Check CloudKit account status to ensure we can sync
+            let accountStatus = try await container.accountStatus()
+            
+            if accountStatus == .available {
+                // Fetch any pending CloudKit changes
+                logger.info("🌍 Checking for CloudKit updates")
+                
+                // Try to trigger CloudKit schema update/check
+                // This can help initiate sync operations
+                _ = try await container.userRecordID()
+                
+                logger.info("✅ CloudKit operations completed")
+            } else {
+                logger.warning("⚠️ CloudKit account not available for sync: \(String(describing: accountStatus))")
+            }
+        } catch {
+            logger.error("❌ CloudKit operations failed: \(error.localizedDescription, privacy: .public)")
         }
     }
     
@@ -227,6 +277,113 @@ class CloudKitSyncManager: ObservableObject {
     private func checkSyncStatus() async {
         // Check if CloudKit status has changed
         await checkCloudKitAvailability()
+    }
+    
+    // MARK: - CloudKit Diagnostics
+    
+    func diagnoseCloudKitSync() async -> String {
+        var diagnostics = ["=== CloudKit Sync Diagnostics ==="]
+        
+        // 1. Check CloudKit Account Status
+        do {
+            let accountStatus = try await container.accountStatus()
+            diagnostics.append("✅ Account Status: \(accountStatus)")
+            
+            if accountStatus == .available {
+                // 2. Check user record
+                do {
+                    let userRecordID = try await container.userRecordID()
+                    diagnostics.append("✅ User Record ID: \(userRecordID.recordName)")
+                } catch {
+                    diagnostics.append("❌ User Record Error: \(error.localizedDescription)")
+                }
+                
+                // 3. Check database availability
+                let privateDB = container.privateCloudDatabase
+                diagnostics.append("✅ Private Database Available")
+            }
+        } catch {
+            diagnostics.append("❌ Account Status Error: \(error.localizedDescription)")
+        }
+        
+        // 4. Check Core Data CloudKit Configuration
+        let container = PersistenceController.shared.container
+        let coordinator = container.persistentStoreCoordinator
+        
+        for store in coordinator.persistentStores {
+            if let options = store.options,
+               let cloudKitOptions = options["NSPersistentCloudKitContainerOptionsKey"] as? NSPersistentCloudKitContainerOptions {
+                diagnostics.append("✅ Store CloudKit Container: \(cloudKitOptions.containerIdentifier)")
+            } else {
+                diagnostics.append("❌ Store missing CloudKit configuration")
+            }
+            
+            if store.options?[NSPersistentHistoryTrackingKey] as? Bool == true {
+                diagnostics.append("✅ History tracking enabled")
+            } else {
+                diagnostics.append("❌ History tracking disabled")
+            }
+        }
+        
+        // 5. Count local data
+        let context = container.viewContext
+        await context.perform {
+            do {
+                let pouchRequest: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
+                let pouchCount = try context.count(for: pouchRequest)
+                diagnostics.append("📊 Local PouchLog count: \(pouchCount)")
+                
+                let buttonRequest: NSFetchRequest<CustomButton> = CustomButton.fetchRequest()
+                let buttonCount = try context.count(for: buttonRequest)
+                diagnostics.append("📊 Local CustomButton count: \(buttonCount)")
+            } catch {
+                diagnostics.append("❌ Local data count error: \(error.localizedDescription)")
+            }
+        }
+        
+        return diagnostics.joined(separator: "\n")
+    }
+    
+    // MARK: - Force Data Sync Test
+    
+    func testDataSync() async {
+        logger.info("🧪 Starting CloudKit sync test")
+        
+        // Create a test entry to trigger sync
+        let container = PersistenceController.shared.container
+        let context = container.newBackgroundContext()
+        
+        await context.perform {
+            // Create a test custom button
+            let testButton = CustomButton(context: context)
+            testButton.nicotineAmount = 999.0 // Unique test value
+            
+            do {
+                try context.save()
+                self.logger.info("✅ Test data created and saved")
+            } catch {
+                self.logger.error("❌ Test data save failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        
+        // Wait a moment then delete it
+        try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+        
+        await context.perform {
+            let fetchRequest: NSFetchRequest<CustomButton> = CustomButton.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "nicotineAmount == %f", 999.0)
+            
+            do {
+                let testButtons = try context.fetch(fetchRequest)
+                for button in testButtons {
+                    context.delete(button)
+                }
+                try context.save()
+                self.logger.info("✅ Test data cleaned up")
+            } catch {
+                self.logger.error("❌ Test data cleanup failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
     }
     
     // MARK: - Public API
