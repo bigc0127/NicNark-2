@@ -8,6 +8,7 @@
 
 import CoreData
 import CloudKit
+import ActivityKit
 import os.log
 
 struct PersistenceController {
@@ -83,17 +84,17 @@ struct PersistenceController {
             forName: .NSPersistentStoreRemoteChange,
             object: container.persistentStoreCoordinator,
             queue: .main
-        ) { _ in
+        ) { [weak container] _ in
             // Handle remote changes - trigger Live Activity sync
             Self.logger.info("📡 Remote CloudKit changes detected - syncing Live Activities")
             Task {
-                await self.handleRemoteChanges()
+                await Self.handleRemoteChanges(container: container)
             }
         }
         
         // Check CloudKit account status on init
         Task {
-            await checkCloudKitStatus()
+            await Self.checkCloudKitStatus()
         }
     }
 
@@ -111,7 +112,7 @@ struct PersistenceController {
     
     // MARK: - CloudKit Status Checking
     
-    private func checkCloudKitStatus() async {
+    private static func checkCloudKitStatus() async {
         let cloudKitContainer = CKContainer(identifier: "iCloud.ConnorNeedling.nicnark-2")
         
         do {
@@ -126,6 +127,8 @@ struct PersistenceController {
                     Self.logger.warning("⚠️ iCloud account restricted - sync disabled")
                 case .couldNotDetermine:
                     Self.logger.warning("⚠️ Could not determine iCloud status")
+                case .temporarilyUnavailable:
+                    Self.logger.warning("⚠️ CloudKit temporarily unavailable")
                 @unknown default:
                     Self.logger.warning("⚠️ Unknown iCloud account status")
                 }
@@ -137,12 +140,13 @@ struct PersistenceController {
     
     // MARK: - Remote Change Handling
     
-    private func handleRemoteChanges() async {
+    private static func handleRemoteChanges(container: NSPersistentCloudKitContainer?) async {
+        guard let container = container else { return }
         // When CloudKit syncs new data, check for active pouches that need Live Activities
-        await syncLiveActivitiesWithRemoteData()
+        await syncLiveActivitiesWithRemoteData(container: container)
     }
     
-    private func syncLiveActivitiesWithRemoteData() async {
+    private static func syncLiveActivitiesWithRemoteData(container: NSPersistentCloudKitContainer) async {
         await MainActor.run {
             let context = container.viewContext
             let fetchRequest: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()

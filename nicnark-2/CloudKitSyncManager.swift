@@ -46,6 +46,8 @@ class CloudKitSyncManager: ObservableObject {
                     logger.warning("⚠️ iCloud restricted - sync disabled")
                 case .couldNotDetermine:
                     logger.warning("⚠️ CloudKit status unknown")
+                case .temporarilyUnavailable:
+                    logger.warning("⚠️ CloudKit temporarily unavailable")
                 @unknown default:
                     logger.warning("⚠️ Unknown CloudKit status")
                 }
@@ -80,10 +82,19 @@ class CloudKitSyncManager: ObservableObject {
         }
     }
     
+    // MARK: - Sync Preferences
+    
+    private var isSyncEnabled: Bool {
+        UserDefaults.standard.object(forKey: "cloudKitSyncEnabled") as? Bool ?? true
+    }
+    
     // MARK: - Data Sync Handling
     
     func handleRemoteDataChanges() async {
-        guard isCloudKitAvailable else { return }
+        guard isCloudKitAvailable && isSyncEnabled else { 
+            logger.info("⚠️ Skipping remote data sync - CloudKit unavailable or sync disabled")
+            return 
+        }
         
         logger.info("📡 Processing remote CloudKit data changes")
         lastSyncDate = Date()

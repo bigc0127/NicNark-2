@@ -22,10 +22,12 @@ struct SettingsView: View {
     // MARK: - Properties
     @Environment(\.managedObjectContext) private var viewContext
     @StateObject private var tipStore = TipStore()
+    @StateObject private var syncManager = CloudKitSyncManager.shared
     @State private var showingDeleteAlert = false
     @State private var showingTipThankYou = false
     @State private var isDeleting = false
     @State private var showingFullDisclaimer = false
+    @State private var isCloudKitSyncEnabled = UserDefaults.standard.object(forKey: "cloudKitSyncEnabled") as? Bool ?? true
     
     private let logger = Logger(subsystem: "com.nicnark.nicnark-2", category: "Settings")
 
@@ -33,6 +35,7 @@ struct SettingsView: View {
         Form {
             disclaimerSection
             appInfoSection
+            cloudKitSyncSection
             supportSection
             dataManagementSection
             aboutSection
@@ -102,6 +105,95 @@ struct SettingsView: View {
         Section("App Information") {
             LabeledContent("Version", value: "1.0.0")
             LabeledContent("Developer", value: "Connor Needling")
+        }
+    }
+    
+    private var cloudKitSyncSection: some View {
+        Section {
+            // CloudKit Sync Toggle
+            Toggle(isOn: $isCloudKitSyncEnabled) {
+                HStack {
+                    Image(systemName: "icloud")
+                        .foregroundColor(syncManager.isCloudKitAvailable ? .blue : .gray)
+                    Text("iCloud Sync")
+                }
+            }
+            .onChange(of: isCloudKitSyncEnabled) { _, newValue in
+                UserDefaults.standard.set(newValue, forKey: "cloudKitSyncEnabled")
+                Task {
+                    if newValue {
+                        await syncManager.triggerManualSync()
+                    }
+                }
+                logger.info("CloudKit sync \(newValue ? "enabled" : "disabled", privacy: .public)")
+            }
+            .disabled(!syncManager.isCloudKitAvailable)
+            
+            // Sync Status
+            HStack {
+                Image(systemName: syncStatusIcon)
+                    .foregroundColor(syncStatusColor)
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Sync Status")
+                        .font(.subheadline)
+                    Text(syncStatusText)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+                
+                if isCloudKitSyncEnabled && syncManager.isCloudKitAvailable {
+                    Button("Sync Now") {
+                        Task {
+                            await syncManager.triggerManualSync()
+                        }
+                    }
+                    .font(.caption)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+            
+            // Cross-Device Features Info
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "iphone.and.ipad")
+                    .foregroundColor(.green)
+                    .font(.title3)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Multi-Device Features")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    
+                    if isCloudKitSyncEnabled && syncManager.isCloudKitAvailable {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("✅ Data syncs across all devices")
+                            Text("✅ Live Activities appear on all devices")
+                            Text("✅ Widget data stays in sync")
+                        }
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    } else {
+                        Text("Enable sync to use these features")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+            
+        } header: {
+            Text("iCloud Synchronization")
+        } footer: {
+            if !syncManager.isCloudKitAvailable {
+                Text("iCloud sync is unavailable. Make sure you're signed into iCloud and have iCloud Drive enabled.")
+            } else if isCloudKitSyncEnabled {
+                Text("Your pouch data, Live Activities, and usage statistics will sync automatically across all your devices signed into the same iCloud account.")
+            } else {
+                Text("Enable iCloud sync to keep your data synchronized across iPhone and iPad. Live Activities will appear on all your devices.")
+            }
         }
     }
 
@@ -189,6 +281,38 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - Computed Properties
+    
+    private var syncStatusIcon: String {
+        if !syncManager.isCloudKitAvailable {
+            return "icloud.slash"
+        } else if isCloudKitSyncEnabled {
+            return "checkmark.icloud"
+        } else {
+            return "icloud"
+        }
+    }
+    
+    private var syncStatusColor: Color {
+        if !syncManager.isCloudKitAvailable {
+            return .red
+        } else if isCloudKitSyncEnabled {
+            return .green
+        } else {
+            return .orange
+        }
+    }
+    
+    private var syncStatusText: String {
+        if !syncManager.isCloudKitAvailable {
+            return "iCloud unavailable"
+        } else if isCloudKitSyncEnabled {
+            return syncManager.getSyncStatusText()
+        } else {
+            return "Sync disabled"
+        }
+    }
+    
     // MARK: - Data Deletion
     
     private func deleteAllData() async {
