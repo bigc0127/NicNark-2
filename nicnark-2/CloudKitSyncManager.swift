@@ -309,19 +309,74 @@ class CloudKitSyncManager: ObservableObject {
             // Try to fetch user record to trigger schema initialization
             _ = try await container.userRecordID()
             
-            // Try to create the schema by accessing the database
+            // First, try to query the existing schema
             let query = CKQuery(recordType: "PouchLog", predicate: NSPredicate(format: "TRUEPREDICATE"))
             
             do {
                 _ = try await privateDB.records(matching: query)
-                logger.info("✅ CloudKit schema initialized successfully")
+                logger.info("✅ CloudKit schema already exists and is accessible")
             } catch {
-                // This is expected on first run - schema will be created automatically by Core Data
-                logger.info("📝 CloudKit schema will be created by Core Data on first sync: \(error.localizedDescription, privacy: .public)")
+                logger.info("📝 CloudKit schema not found - forcing Core Data to create it: \(error.localizedDescription, privacy: .public)")
+                
+                // Force Core Data to create the CloudKit schema by creating and saving a test record
+                await forceSchemaCreationWithTestData()
             }
             
         } catch {
             logger.error("❌ CloudKit schema initialization failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+    
+    private func forceSchemaCreationWithTestData() async {
+        logger.info("🔧 Forcing CloudKit schema creation with test data")
+        
+        let container = PersistenceController.shared.container
+        let context = container.newBackgroundContext()
+        
+        // Step 1: Create and save test record
+        await context.perform {
+            do {
+                // Create a temporary PouchLog to force schema creation
+                let testPouch = PouchLog(context: context)
+                testPouch.pouchId = UUID()
+                testPouch.insertionTime = Date()
+                testPouch.nicotineAmount = 0.01 // Tiny amount to identify as test data
+                testPouch.removalTime = Date() // Already "removed" so it won't interfere
+                
+                // Save to Core Data - this should trigger CloudKit schema creation
+                try context.save()
+                self.logger.info("✅ Test record created to force CloudKit schema")
+                
+            } catch {
+                self.logger.error("❌ Failed to create test record for CloudKit schema: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        
+        // Step 2: Wait for CloudKit to process (outside the context.perform)
+        do {
+            try await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+        } catch {
+            logger.warning("⚠️ Task sleep interrupted: \(error.localizedDescription, privacy: .public)")
+        }
+        
+        // Step 3: Clean up the test data
+        await context.perform {
+            do {
+                // Find and delete the test record
+                let fetchRequest: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
+                fetchRequest.predicate = NSPredicate(format: "nicotineAmount == %f", 0.01)
+                
+                let testRecords = try context.fetch(fetchRequest)
+                for testRecord in testRecords {
+                    context.delete(testRecord)
+                }
+                
+                try context.save()
+                self.logger.info("✅ Test record(s) cleaned up after schema creation")
+                
+            } catch {
+                self.logger.error("❌ Failed to clean up test records: \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
     
