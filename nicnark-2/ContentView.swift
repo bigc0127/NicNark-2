@@ -27,6 +27,7 @@ struct ContentView: View {
     // Track device orientation and size for better iPad support
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass  // Compact or regular width
     @Environment(\.verticalSizeClass) private var verticalSizeClass      // Compact or regular height
+    @Environment(\.scenePhase) private var scenePhase  // Track app lifecycle (active/background/inactive)
 
     // MARK: - Main View Body
     // The 'body' is a computed property that returns the view's content
@@ -146,6 +147,9 @@ struct ContentView: View {
         // MARK: - App Initialization
         // .task runs when the view appears (similar to viewDidLoad in UIKit)
         .task {
+            // Clear any stale notification badges when app opens
+            NotificationManager.clearBadge()
+            
             // Check if we need to show the first-run disclaimer
             if !UserDefaults.standard.hasShownFirstRunDisclaimer {
                 // Delay slightly to ensure UI is ready
@@ -168,6 +172,15 @@ struct ContentView: View {
             if #available(iOS 16.1, *) {
                 await BackgroundMaintainer.shared.registerIfNeeded()  // Register background task types
                 await BackgroundMaintainer.shared.scheduleRegular()   // Schedule recurring updates
+            }
+        }
+        
+        // MARK: - Scene Phase Changes
+        // Clear notification badge when app becomes active (user returns from background)
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                // Clear any notification badges when user opens the app
+                NotificationManager.clearBadge()
             }
         }
     }

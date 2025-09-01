@@ -178,6 +178,12 @@ struct PouchEditView: View {
             return
         }
         
+        // Store original values to check for changes
+        let originalStartTime = pouchLog.insertionTime
+        let originalRemovalTime = pouchLog.removalTime
+        let hasActivePouch = originalRemovalTime == nil
+        let startTimeChanged = originalStartTime != insertionTime
+        
         // Update pouch properties
         pouchLog.insertionTime = insertionTime
         pouchLog.removalTime = hasRemovalTime ? removalTime : nil
@@ -186,6 +192,18 @@ struct PouchEditView: View {
         // Save to Core Data
         do {
             try viewContext.save()
+            
+            // If this is an active pouch and the start time changed, update the Live Activity
+            if #available(iOS 16.1, *), hasActivePouch && startTimeChanged {
+                let pouchId = pouchLog.objectID.uriRepresentation().absoluteString
+                Task {
+                    await LiveActivityManager.updateLiveActivityStartTime(
+                        for: pouchId,
+                        newStartTime: insertionTime,
+                        nicotineAmount: amount
+                    )
+                }
+            }
             
             // Update widgets and Live Activities
             WidgetCenter.shared.reloadAllTimelines()

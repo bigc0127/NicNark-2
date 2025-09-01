@@ -287,9 +287,14 @@ struct LogView: View {
         )
 
         let pouchId = pouch.objectID.uriRepresentation().absoluteString
+        
+        // Update Live Activity with accurate timer interval based on current pouch data
+        let endTime = insertionTime.addingTimeInterval(DEFAULT_POUCH_DURATION)
+        let timerInterval = insertionTime...endTime
+        
         await LiveActivityManager.updateLiveActivity(
             for: pouchId,
-            timeRemaining: remaining,
+            timerInterval: timerInterval,
             absorptionProgress: progress,
             currentNicotineLevel: currentLevel
         )

@@ -139,4 +139,8 @@ public final class WidgetPersistenceHelper {
     public func backgroundContext() -> NSManagedObjectContext {
         return persistentContainer.newBackgroundContext()
     }
+    
+    public func getPersistentStoreCoordinator() -> NSPersistentStoreCoordinator {
+        return persistentContainer.persistentStoreCoordinator
+    }
 }

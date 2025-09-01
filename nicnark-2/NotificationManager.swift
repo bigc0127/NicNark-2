@@ -37,6 +37,16 @@ enum NotificationManager {
         let c = UNUserNotificationCenter.current()
         c.removePendingNotificationRequests(withIdentifiers: [id])
         c.removeDeliveredNotifications(withIdentifiers: [id])
+        
+        // Clear badge after removing notifications
+        Task {
+            // Check if there are any remaining delivered notifications
+            let deliveredNotifications = await c.deliveredNotifications()
+            if deliveredNotifications.isEmpty {
+                // If no more notifications, clear the badge
+                clearBadge()
+            }
+        }
     }
 
     static func scheduleCompletionAlert(id: String, title: String, body: String, fireDate: Date) {

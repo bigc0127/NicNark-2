@@ -141,6 +141,41 @@ class LiveActivityManager: ObservableObject {
         }
     }
     
+    // MARK: - Update Live Activity Start Time
+    
+    static func updateLiveActivityStartTime(for pouchId: String, newStartTime: Date, nicotineAmount: Double) async {
+        let log = Logger(subsystem: "com.nicnark.nicnark-2", category: "LiveActivity")
+        guard Activity<PouchActivityAttributes>.activities.first(where: { $0.attributes.pouchId == pouchId }) != nil else {
+            log.warning("No activity to update start time for pouch: \(pouchId, privacy: .public)")
+            return
+        }
+        
+        // Calculate new end time based on the new start time
+        let newEndTime = newStartTime.addingTimeInterval(FULL_RELEASE_TIME)
+        let now = Date()
+        
+        // Calculate elapsed time and progress based on the new start time
+        let elapsed = max(0, now.timeIntervalSince(newStartTime))
+        let progress = min(max(elapsed / FULL_RELEASE_TIME, 0), 1)
+        
+        // Calculate current nicotine level based on new elapsed time
+        let currentLevel = AbsorptionConstants.shared
+            .calculateCurrentNicotineLevel(nicotineContent: nicotineAmount, elapsedTime: elapsed)
+        
+        // Create new timer interval with updated times
+        let newTimerInterval = newStartTime...newEndTime
+        
+        // Update the Live Activity with the new timer interval and calculated values
+        await updateLiveActivity(
+            for: pouchId,
+            timerInterval: newTimerInterval,
+            absorptionProgress: progress,
+            currentNicotineLevel: currentLevel
+        )
+        
+        log.info("Live Activity start time updated for pouch: \(pouchId, privacy: .public) - new start: \(newStartTime, privacy: .public)")
+    }
+    
     // MARK: - Update
     
     static func updateLiveActivity(
@@ -390,19 +425,60 @@ actor BackgroundMaintainer {
         let now = Date()
         let items = snapshotTracked()
         guard !items.isEmpty else { return }
-        for t in items {
-            if shouldEnd(t, now: now) {
-                await LiveActivityManager.endLiveActivity(for: t.pouchId)
-            } else {
-                let (timer, progress, current) = computeState(for: t, now: now)
-                await LiveActivityManager.updateLiveActivity(
-                    for: t.pouchId,
-                    timerInterval: timer,
-                    absorptionProgress: progress,
-                    currentNicotineLevel: current
-                )
+        
+        // For each Live Activity, try to get the actual pouch data from Core Data
+        // to ensure we're using the most up-to-date start time if it was edited
+        await MainActor.run {
+            for t in items {
+                Task {
+                    let actualPouchData = await getActualPouchData(for: t.pouchId)
+                    let effectiveStartTime = actualPouchData?.startTime ?? t.startTime
+                    let effectiveNicotineAmount = actualPouchData?.nicotineAmount ?? t.totalNicotine
+                    
+                    let elapsed = max(0, now.timeIntervalSince(effectiveStartTime))
+                    let endTime = effectiveStartTime.addingTimeInterval(FULL_RELEASE_TIME)
+                    
+                    if now >= endTime {
+                        await LiveActivityManager.endLiveActivity(for: t.pouchId)
+                    } else {
+                        let progress = min(max(elapsed / FULL_RELEASE_TIME, 0), 1)
+                        let currentLevel = AbsorptionConstants.shared
+                            .calculateCurrentNicotineLevel(nicotineContent: effectiveNicotineAmount, elapsedTime: elapsed)
+                        let timer = effectiveStartTime...endTime
+                        
+                        await LiveActivityManager.updateLiveActivity(
+                            for: t.pouchId,
+                            timerInterval: timer,
+                            absorptionProgress: progress,
+                            currentNicotineLevel: currentLevel
+                        )
+                    }
+                }
             }
         }
+        
         log.info("🔄 Applied batched updates to \(items.count, privacy: .public) activities at \(DateFormatter.localizedString(from: now, dateStyle: .none, timeStyle: .medium), privacy: .public)")
+    }
+    
+    private func getActualPouchData(for pouchId: String) async -> (startTime: Date, nicotineAmount: Double)? {
+        return await MainActor.run {
+            guard let url = URL(string: pouchId) else {
+                return nil
+            }
+            
+            let helper = WidgetPersistenceHelper()
+            let coordinator = helper.getPersistentStoreCoordinator()
+            guard let objectID = coordinator.managedObjectID(forURIRepresentation: url) else {
+                return nil
+            }
+            
+            let context = helper.backgroundContext()
+            guard let pouchLog = try? context.existingObject(with: objectID) as? PouchLog,
+                  let startTime = pouchLog.insertionTime else {
+                return nil
+            }
+            
+            return (startTime: startTime, nicotineAmount: pouchLog.nicotineAmount)
+        }
     }
 }

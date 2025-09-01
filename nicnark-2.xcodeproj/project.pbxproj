@@ -7,10 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		C84223BD2E4FB52A003E73E3 /* NicNarkShortcutsIntents.appex in Embed ExtensionKit Extensions */ = {isa = PBXBuildFile; fileRef = C84223B42E4FB52A003E73E3 /* NicNarkShortcutsIntents.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		C80893482E65E21200E7423E /* AbsorptionTimerWidgetExtension.appex in Embed ExtensionKit Extensions */ = {isa = PBXBuildFile; fileRef = C8D96E402E40739E002AA8C9 /* AbsorptionTimerWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		C808934B2E65E2F000E7423E /* NicNarkShortcutsIntents.appex in CopyFiles */ = {isa = PBXBuildFile; fileRef = C84223B42E4FB52A003E73E3 /* NicNarkShortcutsIntents.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C84224212E4FCBE5003E73E3 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C8D96E442E40739E002AA8C9 /* SwiftUI.framework */; };
 		C84224242E4FCBE7003E73E3 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C8D96E422E40739E002AA8C9 /* WidgetKit.framework */; };
-		C8D96E562E40739F002AA8C9 /* AbsorptionTimerWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C8D96E402E40739E002AA8C9 /* AbsorptionTimerWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -45,12 +45,20 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		C808934A2E65E2DD00E7423E /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			dstPath = "$(EXTENSIONS_FOLDER_PATH)";
+			dstSubfolder = Product;
+			files = (
+				C808934B2E65E2F000E7423E /* NicNarkShortcutsIntents.appex in CopyFiles */,
+			);
+		};
 		C84223BE2E4FB52A003E73E3 /* Embed ExtensionKit Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			dstPath = "";
 			dstSubfolder = PlugIns;
 			files = (
-				C84223BD2E4FB52A003E73E3 /* NicNarkShortcutsIntents.appex in Embed ExtensionKit Extensions */,
+				C80893482E65E21200E7423E /* AbsorptionTimerWidgetExtension.appex in Embed ExtensionKit Extensions */,
 			);
 			name = "Embed ExtensionKit Extensions";
 		};
@@ -64,10 +72,9 @@
 		};
 		C8D96E572E40739F002AA8C9 /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
-			dstPath = "";
-			dstSubfolder = PlugIns;
+			dstPath = "$(EXTENSIONS_FOLDER_PATH)";
+			dstSubfolder = Product;
 			files = (
-				C8D96E562E40739F002AA8C9 /* AbsorptionTimerWidgetExtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 		};
@@ -290,6 +297,7 @@
 				C8D96E572E40739F002AA8C9 /* Embed Foundation Extensions */,
 				C86774F62E44347800651441 /* Embed Watch Content */,
 				C84223BE2E4FB52A003E73E3 /* Embed ExtensionKit Extensions */,
+				C808934A2E65E2DD00E7423E /* CopyFiles */,
 			);
 			buildRules = (
 			);
