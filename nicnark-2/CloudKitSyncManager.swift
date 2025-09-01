@@ -310,7 +310,7 @@ class CloudKitSyncManager: ObservableObject {
             _ = try await container.userRecordID()
             
             // Try to create the schema by accessing the database
-            let query = CKQuery(recordType: "PouchLog", predicate: NSPredicate(value: false))
+            let query = CKQuery(recordType: "PouchLog", predicate: NSPredicate(format: "TRUEPREDICATE"))
             
             do {
                 _ = try await privateDB.records(matching: query)
@@ -404,7 +404,7 @@ class CloudKitSyncManager: ObservableObject {
                 diagnostics.append("✅ Private Database accessible")
                 
                 // Try a simple query to test connectivity
-                let query = CKQuery(recordType: "PouchLog", predicate: NSPredicate(value: false))
+                let query = CKQuery(recordType: "PouchLog", predicate: NSPredicate(format: "TRUEPREDICATE"))
                 
                 do {
                     let (_, _) = try await privateDB.records(matching: query, resultsLimit: 1)
