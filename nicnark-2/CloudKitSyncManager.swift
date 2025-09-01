@@ -27,6 +27,7 @@ class CloudKitSyncManager: ObservableObject {
     private init() {
         Task {
             await checkCloudKitAvailability()
+            await migrateExistingPouchLogsWithMissingUUIDs()
             await setupSyncMonitoring()
             // Force an initial sync check
             await triggerInitialSync()
@@ -321,6 +322,41 @@ class CloudKitSyncManager: ObservableObject {
             
         } catch {
             logger.error("❌ CloudKit schema initialization failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+    
+    // MARK: - UUID Migration
+    
+    private func migrateExistingPouchLogsWithMissingUUIDs() async {
+        logger.info("🔄 Starting UUID migration for existing PouchLog entries")
+        
+        let container = PersistenceController.shared.container
+        let context = container.newBackgroundContext()
+        
+        await context.perform {
+            let fetchRequest: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "pouchId == nil")
+            
+            do {
+                let pouchesWithoutUUIDs = try context.fetch(fetchRequest)
+                
+                if pouchesWithoutUUIDs.isEmpty {
+                    self.logger.info("✅ All PouchLog entries already have UUIDs")
+                    return
+                }
+                
+                self.logger.info("🔧 Found \(pouchesWithoutUUIDs.count) PouchLog entries without UUIDs - migrating")
+                
+                for pouch in pouchesWithoutUUIDs {
+                    pouch.pouchId = UUID()
+                }
+                
+                try context.save()
+                self.logger.info("✅ Successfully migrated \(pouchesWithoutUUIDs.count) PouchLog entries with new UUIDs")
+                
+            } catch {
+                self.logger.error("❌ UUID migration failed: \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
     
