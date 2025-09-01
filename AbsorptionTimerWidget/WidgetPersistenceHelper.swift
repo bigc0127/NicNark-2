@@ -99,22 +99,21 @@ public final class WidgetPersistenceHelper {
     private func createPersistentContainer() -> NSPersistentContainer {
         let container = NSPersistentContainer(name: "nicnark_2")
         
-        // Use the App Group container URL for shared data
-        if let storeURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.ConnorNeedling.nicnark-2")?.appendingPathComponent("nicnark_2.sqlite") {
-            
-            let description = NSPersistentStoreDescription(url: storeURL)
-            description.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
-            description.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
-            
-            // Configure for read-only access in widget to avoid conflicts
-            description.setOption(true as NSNumber, forKey: NSReadOnlyPersistentStoreOption)
-            
-            container.persistentStoreDescriptions = [description]
-            
-            print("📱 Widget Core Data: Configuring with App Group URL: \(storeURL.path)")
-        } else {
-            print("⚠️ Widget Core Data: Using default container (App Group not available)")
-        }
+        // Use the main app's Documents directory (where CloudKit store is located)
+        // Widgets need to access the same store that syncs with CloudKit
+        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let storeURL = documentsURL.appendingPathComponent("nicnark_2.sqlite")
+        
+        let description = NSPersistentStoreDescription(url: storeURL)
+        description.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
+        description.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
+        
+        // Configure for read-only access in widget to avoid conflicts
+        description.setOption(true as NSNumber, forKey: NSReadOnlyPersistentStoreOption)
+        
+        container.persistentStoreDescriptions = [description]
+        
+        print("📱 Widget Core Data: Configuring with CloudKit store URL: \(storeURL.path)")
         
         container.loadPersistentStores { _, error in
             if let error = error as NSError? {

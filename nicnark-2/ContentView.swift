@@ -17,6 +17,7 @@ struct ContentView: View {
     // MARK: - State Properties
     // @StateObject creates and manages an observable object (like a view model)
     @StateObject private var liveActivityManager = LiveActivityManager()  // Manages Live Activities
+    @StateObject private var syncManager = CloudKitSyncManager.shared  // Manages CloudKit sync
     
     // @State creates local state that the view owns and can modify
     @State private var selectedTab: Int = 0        // Which tab is currently selected (0=Log, 1=Levels, 2=Usage)
