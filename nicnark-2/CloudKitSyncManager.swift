@@ -299,7 +299,6 @@ class CloudKitSyncManager: ObservableObject {
                 }
                 
                 // 3. Check database availability
-                let privateDB = container.privateCloudDatabase
                 diagnostics.append("✅ Private Database Available")
             }
         } catch {
