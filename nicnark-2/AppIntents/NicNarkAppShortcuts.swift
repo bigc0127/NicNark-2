@@ -1,9 +1,8 @@
 //
 // NicNarkAppShortcuts.swift
-// NicNarkShortcutsIntents
+// NicNark App
 //
-// Created by Connor W. Needling on 2025-08-15.
-// Defines shortcuts that appear in the Shortcuts app
+// Moved from the former NicNarkShortcutsIntents extension into the main app target.
 //
 
 import AppIntents
@@ -46,3 +45,4 @@ struct NicNarkAppShortcuts: AppShortcutsProvider {
         )
     }
 }
+

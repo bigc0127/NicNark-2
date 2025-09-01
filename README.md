@@ -70,7 +70,7 @@ A privacy-first iOS app for tracking personal nicotine consumption patterns. Bui
 4. **Update Bundle Identifiers**
    - Main app: `YourTeamID.nicnark-2`
    - Widget: `YourTeamID.nicnark-2.AbsorptionTimerWidget`
-   - Shortcuts: `YourTeamID.nicnark-2.NicNarkShortcutsIntents`
+-   Shortcuts: (none) — App Intents are built into the main app target (no separate extension)
 
 5. **Build and Run**
    - Select your development team in Xcode

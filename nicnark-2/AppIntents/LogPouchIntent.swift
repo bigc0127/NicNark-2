@@ -1,6 +1,8 @@
 //
 // LogPouchIntent.swift
-// NicNarkShortcutsIntents
+// NicNark App
+//
+// Moved from the former NicNarkShortcutsIntents extension into the main app target.
 //
 
 import AppIntents
@@ -15,20 +17,17 @@ struct LogPouchIntent: AppIntent {
     @Parameter(title: "Amount (mg)")
     var mg: Double
 
-    // Remove OpensIntent since we're not opening URLs
     func perform() async throws -> some IntentResult & ProvidesDialog {
         guard mg > 0 && mg <= 100 else {
             throw $mg.needsValueError("Enter amount between 0.1 and 100")
         }
 
-        // Directly perform the logging action instead of opening URL
         let success = await MainActor.run {
             let context = PersistenceController.shared.container.viewContext
             return LogService.logPouch(amount: mg, ctx: context)
         }
 
         if success {
-            // Update widgets after successful logging
             WidgetCenter.shared.reloadAllTimelines()
             return .result(dialog: "Logged \(String(format: "%.1f", mg))mg pouch")
         } else {
@@ -43,14 +42,12 @@ struct Log3mgPouchIntent: AppIntent {
     static var openAppWhenRun: Bool = true
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        // Directly perform the logging action
         let success = await MainActor.run {
             let context = PersistenceController.shared.container.viewContext
             return LogService.logPouch(amount: 3.0, ctx: context)
         }
 
         if success {
-            // Update widgets after successful logging
             WidgetCenter.shared.reloadAllTimelines()
             return .result(dialog: "Logged 3mg pouch")
         } else {
@@ -65,14 +62,12 @@ struct Log6mgPouchIntent: AppIntent {
     static var openAppWhenRun: Bool = true
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        // Directly perform the logging action
         let success = await MainActor.run {
             let context = PersistenceController.shared.container.viewContext
             return LogService.logPouch(amount: 6.0, ctx: context)
         }
 
         if success {
-            // Update widgets after successful logging
             WidgetCenter.shared.reloadAllTimelines()
             return .result(dialog: "Logged 6mg pouch")
         } else {
@@ -80,3 +75,4 @@ struct Log6mgPouchIntent: AppIntent {
         }
     }
 }
+

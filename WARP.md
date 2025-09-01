@@ -60,7 +60,7 @@ grep -r "LiveActivity" --include="*.swift" .
 
 ### Extensions & Targets
 - **AbsorptionTimerWidget**: WidgetKit extension for home screen widgets
-- **NicNarkShortcutsIntents**: App Intents for Shortcuts app integration
+- **App Intents**: Implemented directly in the main app target (no separate Shortcuts extension)
 - **URL Scheme**: `nicnark2://log?mg=X` for external app integration
 
 ### Key Constants
@@ -89,7 +89,7 @@ grep -r "LiveActivity" --include="*.swift" .
 ### Multi-Target Dependencies
 - **Shared Logic**: `LogService`, `PersistenceController` used across main app and extensions
 - **Widget Communication**: Core Data sharing via App Groups
-- **Intent Execution**: Direct Core Data access from Shortcuts extension
+- **Intent Execution**: App Intents run inside the main app target and write directly via Core Data
 
 ## Development Notes
 

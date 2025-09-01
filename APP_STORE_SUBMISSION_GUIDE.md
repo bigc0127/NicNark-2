@@ -8,7 +8,7 @@ This guide walks you through submitting NicNark to the App Store with maximum ap
 
 ### 🔧 **Technical Requirements**
 - [x] **iOS 17.0+ compatibility** - Your app targets modern iOS
-- [x] **All targets build successfully** - Main app, Widget, Shortcuts
+- [x] **All targets build successfully** - Main app and Widget
 - [x] **No third-party dependencies** - Pure Apple frameworks
 - [x] **Proper code signing** - Development team configured
 - [x] **App icons** - All sizes included in Assets catalog
@@ -53,7 +53,7 @@ This guide walks you through submitting NicNark to the App Store with maximum ap
 # Your current bundle IDs (update if needed):
 Main App: ConnorNeedling.nicnark-2
 Widget: ConnorNeedling.nicnark-2.AbsorptionTimerWidget
-Shortcuts: ConnorNeedling.nicnark-2.NicNarkShortcutsIntents
+Shortcuts: (none) — App Intents are included in the main app target
 ```
 
 1. **Select project** in Xcode Navigator

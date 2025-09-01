@@ -8,19 +8,11 @@
 
 /* Begin PBXBuildFile section */
 		C80893512E66271400E7423E /* AbsorptionTimerWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C8D96E402E40739E002AA8C9 /* AbsorptionTimerWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		C80893522E66272600E7423E /* NicNarkShortcutsIntents.appex in Embed ExtensionKit Extensions */ = {isa = PBXBuildFile; fileRef = C84223B42E4FB52A003E73E3 /* NicNarkShortcutsIntents.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C84224212E4FCBE5003E73E3 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C8D96E442E40739E002AA8C9 /* SwiftUI.framework */; };
 		C84224242E4FCBE7003E73E3 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C8D96E422E40739E002AA8C9 /* WidgetKit.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		C84223BB2E4FB52A003E73E3 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = C8E730542E405AC700F0C29D /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = C84223B32E4FB52A003E73E3;
-			remoteInfo = NicNarkShortcutsIntents;
-		};
 		C8D96E542E40739F002AA8C9 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = C8E730542E405AC700F0C29D /* Project object */;
@@ -45,15 +37,6 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		C84223BE2E4FB52A003E73E3 /* Embed ExtensionKit Extensions */ = {
-			isa = PBXCopyFilesBuildPhase;
-			dstPath = "$(EXTENSIONS_FOLDER_PATH)";
-			dstSubfolder = Product;
-			files = (
-				C80893522E66272600E7423E /* NicNarkShortcutsIntents.appex in Embed ExtensionKit Extensions */,
-			);
-			name = "Embed ExtensionKit Extensions";
-		};
 		C86774F62E44347800651441 /* Embed Watch Content */ = {
 			isa = PBXCopyFilesBuildPhase;
 			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
@@ -74,7 +57,6 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		C84223B42E4FB52A003E73E3 /* NicNarkShortcutsIntents.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.extensionkit-extension"; includeInIndex = 0; path = NicNarkShortcutsIntents.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		C8D96E402E40739E002AA8C9 /* AbsorptionTimerWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = AbsorptionTimerWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		C8D96E422E40739E002AA8C9 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		C8D96E442E40739E002AA8C9 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
@@ -85,23 +67,6 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		C84223C22E4FB52A003E73E3 /* Exceptions for "NicNarkShortcutsIntents" folder in "NicNarkShortcutsIntents" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-				LogPouchIntent.swift,
-				NicNarkAppShortcuts.swift,
-			);
-			target = C84223B32E4FB52A003E73E3 /* NicNarkShortcutsIntents */;
-		};
-		C842252A2E50222F003E73E3 /* Exceptions for "NicNarkShortcutsIntents" folder in "nicnark-2" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				LogPouchIntent.swift,
-				NicNarkAppShortcuts.swift,
-			);
-			target = C8E7305B2E405AC700F0C29D /* nicnark-2 */;
-		};
 		C8989EC52E470CF600C36700 /* Exceptions for "nicnark-2" folder in "nicnark-2" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -136,15 +101,6 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		C84223B52E4FB52A003E73E3 /* NicNarkShortcutsIntents */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				C842252A2E50222F003E73E3 /* Exceptions for "NicNarkShortcutsIntents" folder in "nicnark-2" target */,
-				C84223C22E4FB52A003E73E3 /* Exceptions for "NicNarkShortcutsIntents" folder in "NicNarkShortcutsIntents" target */,
-			);
-			path = NicNarkShortcutsIntents;
-			sourceTree = "<group>";
-		};
 		C8D96E462E40739E002AA8C9 /* AbsorptionTimerWidget */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -176,11 +132,6 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		C84223B12E4FB52A003E73E3 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			files = (
-			);
-		};
 		C8D96E3D2E40739E002AA8C9 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
@@ -223,7 +174,6 @@
 				C8E730732E405AC900F0C29D /* nicnark-2Tests */,
 				C8E7307D2E405AC900F0C29D /* nicnark-2UITests */,
 				C8D96E462E40739E002AA8C9 /* AbsorptionTimerWidget */,
-				C84223B52E4FB52A003E73E3 /* NicNarkShortcutsIntents */,
 				C8D96E412E40739E002AA8C9 /* Frameworks */,
 				C8E7305D2E405AC700F0C29D /* Products */,
 			);
@@ -236,7 +186,6 @@
 				C8E730702E405AC900F0C29D /* nicnark-2Tests.xctest */,
 				C8E7307A2E405AC900F0C29D /* nicnark-2UITests.xctest */,
 				C8D96E402E40739E002AA8C9 /* AbsorptionTimerWidgetExtension.appex */,
-				C84223B42E4FB52A003E73E3 /* NicNarkShortcutsIntents.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -244,24 +193,6 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		C84223B32E4FB52A003E73E3 /* NicNarkShortcutsIntents */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = C84223C12E4FB52A003E73E3 /* Build configuration list for PBXNativeTarget "NicNarkShortcutsIntents" */;
-			buildPhases = (
-				C84223B02E4FB52A003E73E3 /* Sources */,
-				C84223B12E4FB52A003E73E3 /* Frameworks */,
-				C84223B22E4FB52A003E73E3 /* Resources */,
-			);
-			buildRules = (
-			);
-			fileSystemSynchronizedGroups = (
-				C84223B52E4FB52A003E73E3 /* NicNarkShortcutsIntents */,
-			);
-			name = NicNarkShortcutsIntents;
-			productName = NicNarkShortcutsIntents;
-			productReference = C84223B42E4FB52A003E73E3 /* NicNarkShortcutsIntents.appex */;
-			productType = "com.apple.product-type.extensionkit-extension";
-		};
 		C8D96E3F2E40739E002AA8C9 /* AbsorptionTimerWidgetExtension */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = C8D96E5A2E40739F002AA8C9 /* Build configuration list for PBXNativeTarget "AbsorptionTimerWidgetExtension" */;
@@ -289,13 +220,11 @@
 				C8E7305A2E405AC700F0C29D /* Resources */,
 				C8D96E572E40739F002AA8C9 /* Embed Foundation Extensions */,
 				C86774F62E44347800651441 /* Embed Watch Content */,
-				C84223BE2E4FB52A003E73E3 /* Embed ExtensionKit Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				C8D96E552E40739F002AA8C9 /* PBXTargetDependency */,
-				C84223BC2E4FB52A003E73E3 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				C8E7305E2E405AC700F0C29D /* nicnark-2 */,
@@ -357,9 +286,6 @@
 				LastSwiftUpdateCheck = 2600;
 				LastUpgradeCheck = 2600;
 				TargetAttributes = {
-					C84223B32E4FB52A003E73E3 = {
-						CreatedOnToolsVersion = 26.0;
-					};
 					C8D96E3F2E40739E002AA8C9 = {
 						CreatedOnToolsVersion = 16.4;
 					};
@@ -394,17 +320,11 @@
 				C8E7306F2E405AC900F0C29D /* nicnark-2Tests */,
 				C8E730792E405AC900F0C29D /* nicnark-2UITests */,
 				C8D96E3F2E40739E002AA8C9 /* AbsorptionTimerWidgetExtension */,
-				C84223B32E4FB52A003E73E3 /* NicNarkShortcutsIntents */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		C84223B22E4FB52A003E73E3 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			files = (
-			);
-		};
 		C8D96E3E2E40739E002AA8C9 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			files = (
@@ -428,11 +348,6 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		C84223B02E4FB52A003E73E3 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			files = (
-			);
-		};
 		C8D96E3C2E40739E002AA8C9 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			files = (
@@ -456,11 +371,6 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		C84223BC2E4FB52A003E73E3 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = C84223B32E4FB52A003E73E3 /* NicNarkShortcutsIntents */;
-			targetProxy = C84223BB2E4FB52A003E73E3 /* PBXContainerItemProxy */;
-		};
 		C8D96E552E40739F002AA8C9 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = C8D96E3F2E40739E002AA8C9 /* AbsorptionTimerWidgetExtension */;
@@ -479,66 +389,6 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
-		C84223BF2E4FB52A003E73E3 /* Debug configuration for PBXNativeTarget "NicNarkShortcutsIntents" */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_IDENTITY = "Apple Development";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 69LLXLJW63;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = NicNarkShortcutsIntents/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = NicNarkShortcutsIntents;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "ConnorNeedling.nicnark-2.NicNarkShortcutsIntents";
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
-			};
-			name = Debug;
-		};
-		C84223C02E4FB52A003E73E3 /* Release configuration for PBXNativeTarget "NicNarkShortcutsIntents" */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_IDENTITY = "Apple Development";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 69LLXLJW63;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = NicNarkShortcutsIntents/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = NicNarkShortcutsIntents;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "ConnorNeedling.nicnark-2.NicNarkShortcutsIntents";
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
-			};
-			name = Release;
-		};
 		C8D96E582E40739F002AA8C9 /* Debug configuration for PBXNativeTarget "AbsorptionTimerWidgetExtension" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -873,14 +723,6 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		C84223C12E4FB52A003E73E3 /* Build configuration list for PBXNativeTarget "NicNarkShortcutsIntents" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				C84223BF2E4FB52A003E73E3 /* Debug configuration for PBXNativeTarget "NicNarkShortcutsIntents" */,
-				C84223C02E4FB52A003E73E3 /* Release configuration for PBXNativeTarget "NicNarkShortcutsIntents" */,
-			);
-			defaultConfigurationName = Release;
-		};
 		C8D96E5A2E40739F002AA8C9 /* Build configuration list for PBXNativeTarget "AbsorptionTimerWidgetExtension" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
