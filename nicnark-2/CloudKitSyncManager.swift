@@ -305,7 +305,7 @@ class CloudKitSyncManager: ObservableObject {
             let privateDB = container.privateCloudDatabase
             
             // Try to fetch user record to trigger schema initialization
-            let userRecordID = try await container.userRecordID()
+            _ = try await container.userRecordID()
             
             // Try to create the schema by accessing the database
             let query = CKQuery(recordType: "PouchLog", predicate: NSPredicate(value: false))
