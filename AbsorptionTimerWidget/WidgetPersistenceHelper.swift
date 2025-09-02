@@ -73,7 +73,14 @@ public final class WidgetPersistenceHelper {
         guard let ts = defaults?.double(forKey: Keys.lastUpdated), ts > 0 else { return nil }
         return Date(timeIntervalSince1970: ts)
     }
-
+    
+    // MARK: Capability checks
+    // By default, the widget should avoid opening its own Core Data store because
+    // the main app uses a CloudKit-backed store at the default documents location.
+    // The widget sandbox won't see that file; opening a new empty store would mask
+    // the real data. Return false so callers prefer App Group snapshot data.
+    public func isCoreDataReadable() -> Bool { return false }
+    
     // MARK: Fallback computations for widget (safe defaults)
     public func getCurrentNicotineLevel() -> Double {
         return getSnapshotCurrent()

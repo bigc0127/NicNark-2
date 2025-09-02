@@ -10,6 +10,7 @@ import CloudKit
 import CoreData
 import ActivityKit
 import UIKit
+import WidgetKit
 import os.log
 
 @available(iOS 16.1, *)
@@ -193,9 +194,15 @@ class CloudKitSyncManager: ObservableObject {
                     endTime: insertionTime.addingTimeInterval(FULL_RELEASE_TIME)
                 )
                 
+                // Nudge widgets
+                await MainActor.run {
+                    WidgetCenter.shared.reloadAllTimelines()
+                }
+                
                 logger.info("📱 Widget data updated after sync")
             } else {
                 helper.markActivityEnded()
+                await MainActor.run { WidgetCenter.shared.reloadAllTimelines() }
                 logger.info("📱 Widget marked as ended after sync")
             }
             

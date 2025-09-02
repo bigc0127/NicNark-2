@@ -74,33 +74,30 @@ struct NicotineGraphProvider: TimelineProvider {
         let persistenceHelper = WidgetPersistenceHelper()
         let now = Date()
         
-        // Try to get fresh data from Core Data first
-        let (coreDataSuccess, coreDataLevel, coreDataChartData, coreDataTimeSince, coreDataHasActive) = await fetchCoreDataForWidget(now: now)
+        // Default: App Group snapshot (reliable across app and widget)
+        var currentLevel = persistenceHelper.getCurrentNicotineLevel()
+        var hasActivePouches = persistenceHelper.isActivityRunning()
+        var chartData = generateFallbackChartData(currentLevel: currentLevel, now: now)
+        var timeSinceText = calculateTimeSinceLastPouchFallback(now: now)
         
-        if coreDataSuccess {
-            // Use Core Data if successful
-            return NicotineGraphEntry(
-                date: now,
-                chartData: coreDataChartData,
-                timeSinceLastPouch: coreDataTimeSince,
-                currentLevel: coreDataLevel,
-                hasActivePouches: coreDataHasActive
-            )
-        } else {
-            // Fall back to UserDefaults cache
-            let currentLevel = persistenceHelper.getCurrentNicotineLevel()
-            let hasActivePouches = persistenceHelper.isActivityRunning()
-            let chartData = generateFallbackChartData(currentLevel: currentLevel, now: now)
-            let timeSinceText = calculateTimeSinceLastPouchFallback(now: now)
-            
-            return NicotineGraphEntry(
-                date: now,
-                chartData: chartData,
-                timeSinceLastPouch: timeSinceText,
-                currentLevel: currentLevel,
-                hasActivePouches: hasActivePouches
-            )
+        // Only attempt Core Data if we explicitly know it's readable in this process
+        if persistenceHelper.isCoreDataReadable() {
+            let result = await fetchCoreDataForWidget(now: now)
+            if result.success {
+                currentLevel = result.currentLevel
+                chartData = result.chartData
+                timeSinceText = result.timeSince
+                hasActivePouches = result.hasActive
+            }
         }
+        
+        return NicotineGraphEntry(
+            date: now,
+            chartData: chartData,
+            timeSinceLastPouch: timeSinceText,
+            currentLevel: currentLevel,
+            hasActivePouches: hasActivePouches
+        )
     }
     
     private func generateChartData(from pouches: [PouchLog], now: Date, sixHoursAgo: Date) -> [NicotineChartPoint] {

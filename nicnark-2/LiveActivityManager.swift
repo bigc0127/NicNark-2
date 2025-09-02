@@ -6,6 +6,7 @@ import Foundation
 import SwiftUI
 import os.log
 import UIKit
+import WidgetKit
 
 @available(iOS 16.1, *)
 @MainActor
@@ -89,6 +90,17 @@ class LiveActivityManager: ObservableObject {
         do {
             _ = try Activity.request(attributes: attributes, content: content)
             log.info("Live Activity started for pouch: \(pouchId, privacy: .public)")
+            
+            // Seed widget snapshot immediately
+            let helper = WidgetPersistenceHelper()
+            helper.setFromLiveActivity(
+                level: 0,
+                peak: nicotineAmount * ABSORPTION_FRACTION,
+                pouchName: attributes.pouchName,
+                endTime: end
+            )
+            WidgetCenter.shared.reloadAllTimelines()
+            
             // Foreground ticker for smooth UI while app is active
             Task { await startForegroundMinuteTicker(pouchId: pouchId, nicotineAmount: nicotineAmount) }
             // Schedule an early background refresh in case the app soon goes inactive
@@ -207,6 +219,17 @@ class LiveActivityManager: ObservableObject {
         )
         
         await activity.update(content)
+        
+        // Update widget snapshot and reload timelines (throttled by system)
+        let helper = WidgetPersistenceHelper()
+        helper.setFromLiveActivity(
+            level: currentNicotineLevel,
+            peak: activity.attributes.totalNicotine * ABSORPTION_FRACTION,
+            pouchName: activity.attributes.pouchName,
+            endTime: activity.attributes.endTime
+        )
+        WidgetCenter.shared.reloadAllTimelines()
+        
         log.info("✅ Live Activity updated: pouch=\(pouchId, privacy: .public) level=\(String(format: "%.3f", currentNicotineLevel))mg progress=\(Int(absorptionProgress * 100))% status=\(status, privacy: .public)")
     }
     
@@ -253,6 +276,12 @@ class LiveActivityManager: ObservableObject {
         let finalContent = ActivityContent(state: finalState, staleDate: Date())
         let dismissAt = Calendar.current.date(byAdding: .minute, value: 2, to: Date()) ?? Date()
         await activity.end(finalContent, dismissalPolicy: .after(dismissAt))
+        
+        // Mark widget state as ended and reload
+        let helper = WidgetPersistenceHelper()
+        helper.markActivityEnded()
+        WidgetCenter.shared.reloadAllTimelines()
+        
         log.info("Live Activity ended")
     }
     
