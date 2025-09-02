@@ -4,6 +4,7 @@
 import ActivityKit
 import Foundation
 import SwiftUI
+import CoreData
 import os.log
 import UIKit
 import WidgetKit
@@ -521,39 +522,27 @@ actor BackgroundMaintainer {
     
     private func getActualPouchData(for pouchId: String) async -> (startTime: Date, nicotineAmount: Double)? {
         return await MainActor.run {
-            // Guard against invalid URL format
-            guard let url = URL(string: pouchId) else {
-                log.warning("Invalid pouchId URL format: \(pouchId, privacy: .public)")
-                return nil
-            }
-            
-            // Use PersistenceController from main app instead of WidgetPersistenceHelper
-            // This ensures we're using the same CloudKit-backed store
             let context = PersistenceController.shared.container.viewContext
             
-            // Try to get the managed object ID safely
-            guard let objectID = context.persistentStoreCoordinator?.managedObjectID(forURIRepresentation: url) else {
-                log.warning("Could not resolve objectID for URL: \(url.absoluteString, privacy: .public)")
-                return nil
+            // 1) Prefer stable UUID-based lookup to avoid Core Data URI pitfalls
+            if let uuid = UUID(uuidString: pouchId) {
+                let fetch: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
+                fetch.predicate = NSPredicate(format: "pouchId == %@", uuid as CVarArg)
+                fetch.fetchLimit = 1
+                do {
+                    if let pouchLog = try context.fetch(fetch).first, let startTime = pouchLog.insertionTime {
+                        return (startTime: startTime, nicotineAmount: pouchLog.nicotineAmount)
+                    } else {
+                        log.warning("UUID lookup failed or missing insertionTime for pouchId: \(uuid.uuidString, privacy: .public)")
+                    }
+                } catch {
+                    log.warning("UUID fetch error: \(error.localizedDescription, privacy: .public)")
+                }
             }
             
-            // Check if the object exists before trying to fetch it
-            // This prevents crashes when CloudKit schema changes
-            do {
-                let pouchLog = try context.existingObject(with: objectID) as? PouchLog
-                guard let pouchLog = pouchLog,
-                      let startTime = pouchLog.insertionTime else {
-                    log.warning("PouchLog not found or missing insertionTime for objectID")
-                    return nil
-                }
-                
-                return (startTime: startTime, nicotineAmount: pouchLog.nicotineAmount)
-                
-            } catch {
-                // Object doesn't exist or was deleted - this is expected when CloudKit syncs deletions
-                log.warning("Failed to fetch PouchLog: \(error.localizedDescription, privacy: .public)")
-                return nil
-            }
+            // 2) Legacy fallback: skip resolving Core Data URI to avoid iOS 18+ instability
+            // Returning nil simply uses the currently tracked activity times.
+            return nil
         }
     }
 }

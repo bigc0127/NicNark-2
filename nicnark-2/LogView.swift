@@ -239,7 +239,7 @@ struct LogView: View {
         try? ctx.save()
         endLiveActivityIfNeeded(for: pouch)
 
-        let pouchId = pouch.objectID.uriRepresentation().absoluteString
+        let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
         NotificationManager.cancelAlert(id: pouchId)
         
         // Update widget persistence helper to ensure widgets get fresh data
@@ -265,7 +265,7 @@ struct LogView: View {
         guard #available(iOS 16.1, *) else { return }
         liveTimer?.invalidate()
         liveTimer = nil
-        let pouchId = pouch.objectID.uriRepresentation().absoluteString
+        let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
         Task {
             await LiveActivityManager.endLiveActivity(for: pouchId)
             WidgetCenter.shared.reloadAllTimelines()
@@ -286,7 +286,7 @@ struct LogView: View {
             elapsedTime: elapsed
         )
 
-        let pouchId = pouch.objectID.uriRepresentation().absoluteString
+        let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
         
         // Update Live Activity with accurate timer interval based on current pouch data
         let endTime = insertionTime.addingTimeInterval(DEFAULT_POUCH_DURATION)
