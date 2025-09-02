@@ -65,11 +65,13 @@ struct PersistenceController {
             print("📱 CloudKit store configured at default location for sync")
         }
 
-        container.loadPersistentStores { storeDescription, error in
+        // Use a local reference to avoid capturing `self` in the escaping closure inside init
+        let persistentContainer = container
+        persistentContainer.loadPersistentStores { storeDescription, error in
             if let error = error as NSError? {
                 // Log detailed CloudKit error information
                 print("❌ Core Data CloudKit error: \(error), \(error.userInfo)")
-                print("📍 Store URL: \(storeDescription.url?.absoluteString ?? "Unknown")")
+print("📍 Store URL: \(storeDescription.url?.absoluteString ?? "Unknown")")
                 print("🔧 Store Type: \(storeDescription.type)")
                 if let cloudKitOptions = storeDescription.cloudKitContainerOptions {
                     print("☁️ CloudKit Container: \(cloudKitOptions.containerIdentifier)")
@@ -82,6 +84,16 @@ struct PersistenceController {
                 if let cloudKitOptions = storeDescription.cloudKitContainerOptions {
                     print("☁️ CloudKit sync enabled for container: \(cloudKitOptions.containerIdentifier)")
                 }
+                
+                // Ensure CloudKit schema exists in development env so sync can begin
+                #if DEBUG
+                do {
+                    try persistentContainer.initializeCloudKitSchema(options: [])
+                    print("🧱 CloudKit schema initialized (or already present)")
+                } catch {
+                    print("⚠️ CloudKit schema initialization skipped/failed: \(error.localizedDescription)")
+                }
+                #endif
             }
         }
 
@@ -197,7 +209,8 @@ struct PersistenceController {
                 if #available(iOS 16.1, *) {
                     // Check if we need to start Live Activities for synced active pouches
                     for pouch in activePouches {
-                        let pouchId = pouch.objectID.uriRepresentation().absoluteString
+                        // Use stable UUID for cross-device identity
+                        let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
                         
                         // Check if Live Activity already exists for this pouch
                         let existingActivity = Activity<PouchActivityAttributes>.activities
@@ -225,7 +238,7 @@ struct PersistenceController {
                     for activity in Activity<PouchActivityAttributes>.activities {
                         let pouchId = activity.attributes.pouchId
                         let stillActive = activePouches.contains { pouch in
-                            pouch.objectID.uriRepresentation().absoluteString == pouchId
+                            (pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString) == pouchId
                         }
                         
                         if !stillActive {
