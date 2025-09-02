@@ -125,6 +125,14 @@ struct nicnark_2App: App {
                     UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
                     // Initialize the notification system
                     NotificationManager.configure()
+                    
+                    // Schedule background tasks for Live Activity updates
+                    if #available(iOS 16.1, *) {
+                        Task {
+                            await BackgroundMaintainer.shared.registerIfNeeded()
+                            await BackgroundMaintainer.shared.scheduleRegular()
+                        }
+                    }
                 }
         }
     }

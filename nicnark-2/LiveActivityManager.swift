@@ -54,7 +54,7 @@ class LiveActivityManager: ObservableObject {
     
     // MARK: - Start
     
-    static func startLiveActivity(for pouchId: String, nicotineAmount: Double) async -> Bool {
+    static func startLiveActivity(for pouchId: String, nicotineAmount: Double, isFromSync: Bool = false) async -> Bool {
         let log = Logger(subsystem: "com.nicnark.nicnark-2", category: "LiveActivity")
         let auth = ActivityAuthorizationInfo()
         guard auth.areActivitiesEnabled else {
@@ -62,8 +62,21 @@ class LiveActivityManager: ObservableObject {
             return false
         }
         
-        // Ensure only one activity at a time
-        await endAllLiveActivities()
+        // Check if Live Activity already exists for this pouch
+        let existingActivity = Activity<PouchActivityAttributes>.activities
+            .first { $0.attributes.pouchId == pouchId }
+        
+        if existingActivity != nil {
+            log.info("Live Activity already exists for pouch: \(pouchId, privacy: .public)")
+            return true
+        }
+        
+        // Only end all activities if this is NOT from a sync (local creation)
+        if !isFromSync {
+            // For local creation, end all other activities (one pouch at a time)
+            await endAllLiveActivities()
+        }
+        
         let start = Date()
         let end = start.addingTimeInterval(FULL_RELEASE_TIME)
         let attributes = PouchActivityAttributes(
@@ -105,6 +118,17 @@ class LiveActivityManager: ObservableObject {
             Task { await startForegroundMinuteTicker(pouchId: pouchId, nicotineAmount: nicotineAmount) }
             // Schedule an early background refresh in case the app soon goes inactive
             Task { await BackgroundMaintainer.shared.scheduleSoon() }
+            
+            // Force an immediate update to ensure the Live Activity is showing
+            Task {
+                try? await Task.sleep(nanoseconds: 1 * NSEC_PER_SEC) // Wait 1 second for activity to register
+                await updateLiveActivity(
+                    for: pouchId,
+                    timerInterval: start...end,
+                    absorptionProgress: 0.0,
+                    currentNicotineLevel: 0.0
+                )
+            }
             return true
         } catch {
             log.error("Start Live Activity failed: \(error.localizedDescription, privacy: .public)")
@@ -116,6 +140,7 @@ class LiveActivityManager: ObservableObject {
     
     private static func startForegroundMinuteTicker(pouchId: String, nicotineAmount: Double) async {
         let log = Logger(subsystem: "com.nicnark.nicnark-2", category: "LiveActivity")
+        var updateCount = 0
         
         while true {
             guard let activity = Activity<PouchActivityAttributes>.activities.first(where: { $0.attributes.pouchId == pouchId }) else {
@@ -126,6 +151,8 @@ class LiveActivityManager: ObservableObject {
             // Stop foreground ticker when app goes to background
             if UIApplication.shared.applicationState != .active {
                 log.info("App backgrounded - stopping foreground ticker, relying on background tasks")
+                // Schedule immediate background update when going to background
+                await BackgroundMaintainer.shared.scheduleSoon()
                 break
             }
             
@@ -148,8 +175,11 @@ class LiveActivityManager: ObservableObject {
                 currentNicotineLevel: currentLevel
             )
             
-            // Update every 60 seconds in foreground - iOS throttles more frequent updates
-            try? await Task.sleep(nanoseconds: 60 * NSEC_PER_SEC)
+            updateCount += 1
+            log.info("🔄 Foreground update #\(updateCount) - level: \(String(format: "%.3f", currentLevel))mg, progress: \(Int(progress * 100))%")
+            
+            // Update every 30 seconds in foreground for better responsiveness
+            try? await Task.sleep(nanoseconds: 30 * NSEC_PER_SEC)
         }
     }
     

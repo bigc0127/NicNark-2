@@ -213,8 +213,9 @@ print("📍 Store URL: \(storeDescription.url?.absoluteString ?? "Unknown")")
                 let activePouches = try context.fetch(fetchRequest)
                 
                 if #available(iOS 16.1, *) {
-                    // Check if we need to start Live Activities for synced active pouches
-                    for pouch in activePouches {
+                    // Only sync Live Activities if we have exactly one active pouch
+                    // Multiple active pouches shouldn't happen, but if they do, don't create activities
+                    if activePouches.count == 1, let pouch = activePouches.first {
                         // Use stable UUID for cross-device identity
                         let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
                         
@@ -223,21 +224,32 @@ print("📍 Store URL: \(storeDescription.url?.absoluteString ?? "Unknown")")
                             .first { $0.attributes.pouchId == pouchId }
                         
                         if existingActivity == nil {
-                            // Start Live Activity for this synced active pouch
-                            Self.logger.info("🔄 Starting Live Activity for synced pouch: \(pouchId, privacy: .public)")
+                            // Check if this pouch was created recently (within last 5 seconds)
+                            // If so, it's likely created locally and we shouldn't sync a Live Activity
+                            let isRecentlyCreated = pouch.insertionTime.map { Date().timeIntervalSince($0) < 5 } ?? false
                             
-                            Task {
-                                let success = await LiveActivityManager.startLiveActivity(
-                                    for: pouchId,
-                                    nicotineAmount: pouch.nicotineAmount
-                                )
-                                if success {
-                                    Self.logger.info("✅ Live Activity started for synced pouch")
-                                } else {
-                                    Self.logger.error("❌ Failed to start Live Activity for synced pouch")
+                            if !isRecentlyCreated {
+                                // Start Live Activity for this synced active pouch
+                                Self.logger.info("🔄 Starting Live Activity for synced pouch: \(pouchId, privacy: .public)")
+                                
+                                Task {
+                                    let success = await LiveActivityManager.startLiveActivity(
+                                        for: pouchId,
+                                        nicotineAmount: pouch.nicotineAmount,
+                                        isFromSync: true
+                                    )
+                                    if success {
+                                        Self.logger.info("✅ Live Activity started for synced pouch")
+                                    } else {
+                                        Self.logger.error("❌ Failed to start Live Activity for synced pouch")
+                                    }
                                 }
+                            } else {
+                                Self.logger.info("⏭️ Skipping Live Activity for recently created pouch (likely local)")
                             }
                         }
+                    } else if activePouches.count > 1 {
+                        Self.logger.warning("⚠️ Multiple active pouches detected (\(activePouches.count, privacy: .public)) - skipping Live Activity sync")
                     }
                     
                     // End Live Activities for pouches that were completed on other devices
