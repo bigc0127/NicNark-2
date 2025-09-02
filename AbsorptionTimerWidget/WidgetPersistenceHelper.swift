@@ -75,11 +75,22 @@ public final class WidgetPersistenceHelper {
     }
     
     // MARK: Capability checks
-    // By default, the widget should avoid opening its own Core Data store because
-    // the main app uses a CloudKit-backed store at the default documents location.
-    // The widget sandbox won't see that file; opening a new empty store would mask
-    // the real data. Return false so callers prefer App Group snapshot data.
-    public func isCoreDataReadable() -> Bool { return false }
+    // Check if Core Data store is actually accessible with data
+    // Only return true if we can successfully read data from the store
+    public func isCoreDataReadable() -> Bool {
+        let context = backgroundContext()
+        let request = PouchLog.fetchRequest()
+        request.fetchLimit = 1
+        
+        do {
+            // Try to fetch at least one record to verify store is accessible
+            _ = try context.fetch(request)
+            return true
+        } catch {
+            print("📱 Widget Core Data not readable: \(error.localizedDescription)")
+            return false
+        }
+    }
     
     // MARK: Fallback computations for widget (safe defaults)
     public func getCurrentNicotineLevel() -> Double {
@@ -104,29 +115,41 @@ public final class WidgetPersistenceHelper {
     private var _persistentContainer: NSPersistentContainer?
     
     private func createPersistentContainer() -> NSPersistentContainer {
-        let container = NSPersistentContainer(name: "nicnark_2")
+        let container = NSPersistentCloudKitContainer(name: "nicnark_2")
         
-        // Use the main app's Documents directory (where CloudKit store is located)
-        // Widgets need to access the same store that syncs with CloudKit
-        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let storeURL = documentsURL.appendingPathComponent("nicnark_2.sqlite")
+        // Use App Group container for shared access between app and widgets
+        guard let groupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.ConnorNeedling.nicnark-2") else {
+            print("❌ Failed to get App Group container URL")
+            return container
+        }
+        
+        let storeURL = groupURL.appendingPathComponent("nicnark_2.sqlite")
         
         let description = NSPersistentStoreDescription(url: storeURL)
         description.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
         description.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
         
+        // CloudKit configuration for widgets
+        description.cloudKitContainerOptions = NSPersistentCloudKitContainerOptions(
+            containerIdentifier: "iCloud.ConnorNeedling.nicnark-2"
+        )
+        
         // Configure for read-only access in widget to avoid conflicts
         description.setOption(true as NSNumber, forKey: NSReadOnlyPersistentStoreOption)
         
+        // Set merge policy to handle CloudKit conflicts
+        container.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+        container.viewContext.automaticallyMergesChangesFromParent = true
+        
         container.persistentStoreDescriptions = [description]
         
-        print("📱 Widget Core Data: Configuring with CloudKit store URL: \(storeURL.path)")
+        print("📱 Widget Core Data: Configuring with App Group CloudKit store URL: \(storeURL.path)")
         
-        container.loadPersistentStores { _, error in
+        container.loadPersistentStores { storeDescription, error in
             if let error = error as NSError? {
                 print("❌ Widget Core Data error: \(error), \(error.userInfo)")
             } else {
-                print("✅ Widget Core Data loaded successfully")
+                print("✅ Widget Core Data loaded successfully from: \(storeDescription.url?.path ?? "unknown")")
             }
         }
         

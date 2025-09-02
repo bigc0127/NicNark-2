@@ -49,8 +49,14 @@ struct PersistenceController {
                 fatalError("Failed to get store description")
             }
             
-            // Use default Documents directory for CloudKit (CloudKit requires this)
-            // Don't use App Group location for CloudKit-enabled store
+            // Use App Group container for shared access between app and widgets
+            if let groupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.ConnorNeedling.nicnark-2") {
+                let storeURL = groupURL.appendingPathComponent("nicnark_2.sqlite")
+                storeDescription.url = storeURL
+                print("📱 Using App Group container for Core Data store: \(storeURL.path)")
+            } else {
+                print("⚠️ App Group container not available, using default location")
+            }
             
             // Enable CloudKit sync
             let cloudKitOptions = NSPersistentCloudKitContainerOptions(
@@ -62,7 +68,7 @@ struct PersistenceController {
             storeDescription.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
             storeDescription.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
             
-            print("📱 CloudKit store configured at default location for sync")
+            print("📱 CloudKit store configured with App Group for widget access")
         }
 
         // Use a local reference to avoid capturing `self` in the escaping closure inside init

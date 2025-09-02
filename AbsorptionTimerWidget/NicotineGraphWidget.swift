@@ -3,6 +3,7 @@ import SwiftUI
 import Charts
 import CoreData
 import os.log
+import AppIntents
 
 // MARK: - Widget Timeline Entry
 struct NicotineGraphEntry: TimelineEntry {
@@ -352,6 +353,22 @@ struct SmallWidgetView: View {
             }
             
             Spacer()
+            
+            // Add refresh button when no active pouches
+            if !entry.hasActivePouches {
+                if #available(iOS 17.0, *) {
+                    Button(intent: RefreshWidgetIntent()) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.caption2)
+                            Text("Sync")
+                                .font(.caption2)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.mini)
+                }
+            }
         }
         .padding()
         .containerBackground(.fill.tertiary, for: .widget)
@@ -398,6 +415,22 @@ struct MediumWidgetView: View {
                 }
                 
                 Spacer()
+                
+                // Add refresh button when no active pouches
+                if !entry.hasActivePouches {
+                    if #available(iOS 17.0, *) {
+                        Button(intent: RefreshWidgetIntent()) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.caption)
+                                Text("Sync Data")
+                                    .font(.caption)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    }
+                }
             }
             
             // Right side: Compact chart
@@ -512,9 +545,30 @@ struct LargeWidgetView: View {
                         .foregroundColor(.secondary)
                 }
                 Spacer()
-                Text("Last 6 Hours")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+                
+                // Add refresh button when no active pouches
+                if !entry.hasActivePouches {
+                    if #available(iOS 17.0, *) {
+                        Button(intent: RefreshWidgetIntent()) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.caption)
+                                Text("Sync")
+                                    .font(.caption)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    } else {
+                        Text("Last 6 Hours")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                } else {
+                    Text("Last 6 Hours")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
             }
         }
         .padding()
@@ -547,11 +601,26 @@ private func levelColor(for level: Double) -> Color {
     }
 }
 
+// MARK: - Widget Refresh Intent
+@available(iOS 17.0, *)
+struct RefreshWidgetIntent: AppIntent {
+    static var title: LocalizedStringResource = "Refresh Widget"
+    static var description = IntentDescription("Force refresh the widget data")
+    
+    func perform() async throws -> some IntentResult {
+        // Force Core Data to refresh and reload widget timelines
+        WidgetCenter.shared.reloadAllTimelines()
+        return .result()
+    }
+}
+
 // MARK: - Widget Configuration
 struct NicotineGraphWidget: Widget {
     let kind: String = "NicotineGraphWidget"
 
     var body: some WidgetConfiguration {
+        // Always use StaticConfiguration for this widget
+        // The refresh button uses Button(intent:) which works with StaticConfiguration
         StaticConfiguration(kind: kind, provider: NicotineGraphProvider()) { entry in
             NicotineGraphWidgetEntryView(entry: entry)
         }

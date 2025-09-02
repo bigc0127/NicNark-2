@@ -491,23 +491,39 @@ actor BackgroundMaintainer {
     
     private func getActualPouchData(for pouchId: String) async -> (startTime: Date, nicotineAmount: Double)? {
         return await MainActor.run {
+            // Guard against invalid URL format
             guard let url = URL(string: pouchId) else {
+                log.warning("Invalid pouchId URL format: \(pouchId, privacy: .public)")
                 return nil
             }
             
-            let helper = WidgetPersistenceHelper()
-            let coordinator = helper.getPersistentStoreCoordinator()
-            guard let objectID = coordinator.managedObjectID(forURIRepresentation: url) else {
+            // Use PersistenceController from main app instead of WidgetPersistenceHelper
+            // This ensures we're using the same CloudKit-backed store
+            let context = PersistenceController.shared.container.viewContext
+            
+            // Try to get the managed object ID safely
+            guard let objectID = context.persistentStoreCoordinator?.managedObjectID(forURIRepresentation: url) else {
+                log.warning("Could not resolve objectID for URL: \(url.absoluteString, privacy: .public)")
                 return nil
             }
             
-            let context = helper.backgroundContext()
-            guard let pouchLog = try? context.existingObject(with: objectID) as? PouchLog,
-                  let startTime = pouchLog.insertionTime else {
+            // Check if the object exists before trying to fetch it
+            // This prevents crashes when CloudKit schema changes
+            do {
+                let pouchLog = try context.existingObject(with: objectID) as? PouchLog
+                guard let pouchLog = pouchLog,
+                      let startTime = pouchLog.insertionTime else {
+                    log.warning("PouchLog not found or missing insertionTime for objectID")
+                    return nil
+                }
+                
+                return (startTime: startTime, nicotineAmount: pouchLog.nicotineAmount)
+                
+            } catch {
+                // Object doesn't exist or was deleted - this is expected when CloudKit syncs deletions
+                log.warning("Failed to fetch PouchLog: \(error.localizedDescription, privacy: .public)")
                 return nil
             }
-            
-            return (startTime: startTime, nicotineAmount: pouchLog.nicotineAmount)
         }
     }
 }
