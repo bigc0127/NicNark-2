@@ -11,6 +11,7 @@ struct NicotineGraphEntry: TimelineEntry {
     let timeSinceLastPouch: String
     let currentLevel: Double
     let hasActivePouches: Bool
+    let updatedText: String
     
     static let placeholder = NicotineGraphEntry(
         date: Date(),
@@ -21,7 +22,8 @@ struct NicotineGraphEntry: TimelineEntry {
         ],
         timeSinceLastPouch: "2 hours 15 mins since last pouch",
         currentLevel: 1.8,
-        hasActivePouches: false
+        hasActivePouches: false,
+        updatedText: "Updated: just now"
     )
 }
 
@@ -79,6 +81,8 @@ struct NicotineGraphProvider: TimelineProvider {
         var hasActivePouches = persistenceHelper.isActivityRunning()
         var chartData = generateFallbackChartData(currentLevel: currentLevel, now: now)
         var timeSinceText = calculateTimeSinceLastPouchFallback(now: now)
+        let lastUpdated = persistenceHelper.getSnapshotLastUpdated()
+        var updatedText = formatUpdatedText(since: lastUpdated, now: now)
         
         // Only attempt Core Data if we explicitly know it's readable in this process
         if persistenceHelper.isCoreDataReadable() {
@@ -88,6 +92,7 @@ struct NicotineGraphProvider: TimelineProvider {
                 chartData = result.chartData
                 timeSinceText = result.timeSince
                 hasActivePouches = result.hasActive
+                updatedText = "Updated: just now"
             }
         }
         
@@ -96,7 +101,8 @@ struct NicotineGraphProvider: TimelineProvider {
             chartData: chartData,
             timeSinceLastPouch: timeSinceText,
             currentLevel: currentLevel,
-            hasActivePouches: hasActivePouches
+            hasActivePouches: hasActivePouches,
+            updatedText: updatedText
         )
     }
     
@@ -340,6 +346,9 @@ struct SmallWidgetView: View {
                         .foregroundColor(levelColor(for: entry.currentLevel))
                         .fontWeight(.semibold)
                 }
+                Text(entry.updatedText)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
             }
             
             Spacer()
@@ -381,6 +390,9 @@ struct MediumWidgetView: View {
                     }
                     
                     Text("Last 6 Hours")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    Text(entry.updatedText)
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
@@ -490,10 +502,15 @@ struct LargeWidgetView: View {
             
             // Footer with time since last pouch
             HStack {
-                Text(entry.timeSinceLastPouch)
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(entry.timeSinceLastPouch)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.secondary)
+                    Text(entry.updatedText)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
                 Spacer()
                 Text("Last 6 Hours")
                     .font(.caption2)
@@ -506,6 +523,20 @@ struct LargeWidgetView: View {
 }
 
 // MARK: - Helper Functions
+private func formatUpdatedText(since lastUpdated: Date?, now: Date) -> String {
+    guard let last = lastUpdated else { return "Updated: just now" }
+    let seconds = max(0, Int(now.timeIntervalSince(last)))
+    let minutes = seconds / 60
+    let hours = minutes / 60
+    if hours > 0 {
+        return hours == 1 ? "Updated: 1h ago" : "Updated: \(hours)h ago"
+    } else if minutes > 0 {
+        return minutes == 1 ? "Updated: 1m ago" : "Updated: \(minutes)m ago"
+    } else {
+        return "Updated: just now"
+    }
+}
+
 private func levelColor(for level: Double) -> Color {
     switch level {
     case 0..<1: return .green
