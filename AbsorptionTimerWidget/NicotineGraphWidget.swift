@@ -3,6 +3,7 @@ import SwiftUI
 import Charts
 import CoreData
 import os.log
+import AppIntents
 
 // MARK: - Widget Timeline Entry
 struct NicotineGraphEntry: TimelineEntry {
@@ -11,6 +12,7 @@ struct NicotineGraphEntry: TimelineEntry {
     let timeSinceLastPouch: String
     let currentLevel: Double
     let hasActivePouches: Bool
+    let updatedText: String
     
     static let placeholder = NicotineGraphEntry(
         date: Date(),
@@ -21,7 +23,8 @@ struct NicotineGraphEntry: TimelineEntry {
         ],
         timeSinceLastPouch: "2 hours 15 mins since last pouch",
         currentLevel: 1.8,
-        hasActivePouches: false
+        hasActivePouches: false,
+        updatedText: "Updated: just now"
     )
 }
 
@@ -74,33 +77,34 @@ struct NicotineGraphProvider: TimelineProvider {
         let persistenceHelper = WidgetPersistenceHelper()
         let now = Date()
         
-        // Try to get fresh data from Core Data first
-        let (coreDataSuccess, coreDataLevel, coreDataChartData, coreDataTimeSince, coreDataHasActive) = await fetchCoreDataForWidget(now: now)
+        // Default: App Group snapshot (reliable across app and widget)
+        var currentLevel = persistenceHelper.getCurrentNicotineLevel()
+        var hasActivePouches = persistenceHelper.isActivityRunning()
+        var chartData = generateFallbackChartData(currentLevel: currentLevel, now: now)
+        var timeSinceText = calculateTimeSinceLastPouchFallback(now: now)
+        let lastUpdated = persistenceHelper.getSnapshotLastUpdated()
+        var updatedText = formatUpdatedText(since: lastUpdated, now: now)
         
-        if coreDataSuccess {
-            // Use Core Data if successful
-            return NicotineGraphEntry(
-                date: now,
-                chartData: coreDataChartData,
-                timeSinceLastPouch: coreDataTimeSince,
-                currentLevel: coreDataLevel,
-                hasActivePouches: coreDataHasActive
-            )
-        } else {
-            // Fall back to UserDefaults cache
-            let currentLevel = persistenceHelper.getCurrentNicotineLevel()
-            let hasActivePouches = persistenceHelper.isActivityRunning()
-            let chartData = generateFallbackChartData(currentLevel: currentLevel, now: now)
-            let timeSinceText = calculateTimeSinceLastPouchFallback(now: now)
-            
-            return NicotineGraphEntry(
-                date: now,
-                chartData: chartData,
-                timeSinceLastPouch: timeSinceText,
-                currentLevel: currentLevel,
-                hasActivePouches: hasActivePouches
-            )
+        // Only attempt Core Data if we explicitly know it's readable in this process
+        if persistenceHelper.isCoreDataReadable() {
+            let result = await fetchCoreDataForWidget(now: now)
+            if result.success {
+                currentLevel = result.currentLevel
+                chartData = result.chartData
+                timeSinceText = result.timeSince
+                hasActivePouches = result.hasActive
+                updatedText = "Updated: just now"
+            }
         }
+        
+        return NicotineGraphEntry(
+            date: now,
+            chartData: chartData,
+            timeSinceLastPouch: timeSinceText,
+            currentLevel: currentLevel,
+            hasActivePouches: hasActivePouches,
+            updatedText: updatedText
+        )
     }
     
     private func generateChartData(from pouches: [PouchLog], now: Date, sixHoursAgo: Date) -> [NicotineChartPoint] {
@@ -343,9 +347,28 @@ struct SmallWidgetView: View {
                         .foregroundColor(levelColor(for: entry.currentLevel))
                         .fontWeight(.semibold)
                 }
+                Text(entry.updatedText)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
             }
             
             Spacer()
+            
+            // Add refresh button when no active pouches
+            if !entry.hasActivePouches {
+                if #available(iOS 17.0, *) {
+                    Button(intent: RefreshWidgetIntent()) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.caption2)
+                            Text("Sync")
+                                .font(.caption2)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.mini)
+                }
+            }
         }
         .padding()
         .containerBackground(.fill.tertiary, for: .widget)
@@ -386,9 +409,28 @@ struct MediumWidgetView: View {
                     Text("Last 6 Hours")
                         .font(.caption2)
                         .foregroundColor(.secondary)
+                    Text(entry.updatedText)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
                 }
                 
                 Spacer()
+                
+                // Add refresh button when no active pouches
+                if !entry.hasActivePouches {
+                    if #available(iOS 17.0, *) {
+                        Button(intent: RefreshWidgetIntent()) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.caption)
+                                Text("Sync Data")
+                                    .font(.caption)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    }
+                }
             }
             
             // Right side: Compact chart
@@ -493,14 +535,40 @@ struct LargeWidgetView: View {
             
             // Footer with time since last pouch
             HStack {
-                Text(entry.timeSinceLastPouch)
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(entry.timeSinceLastPouch)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.secondary)
+                    Text(entry.updatedText)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
                 Spacer()
-                Text("Last 6 Hours")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+                
+                // Add refresh button when no active pouches
+                if !entry.hasActivePouches {
+                    if #available(iOS 17.0, *) {
+                        Button(intent: RefreshWidgetIntent()) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.caption)
+                                Text("Sync")
+                                    .font(.caption)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    } else {
+                        Text("Last 6 Hours")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                } else {
+                    Text("Last 6 Hours")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
             }
         }
         .padding()
@@ -509,6 +577,20 @@ struct LargeWidgetView: View {
 }
 
 // MARK: - Helper Functions
+private func formatUpdatedText(since lastUpdated: Date?, now: Date) -> String {
+    guard let last = lastUpdated else { return "Updated: just now" }
+    let seconds = max(0, Int(now.timeIntervalSince(last)))
+    let minutes = seconds / 60
+    let hours = minutes / 60
+    if hours > 0 {
+        return hours == 1 ? "Updated: 1h ago" : "Updated: \(hours)h ago"
+    } else if minutes > 0 {
+        return minutes == 1 ? "Updated: 1m ago" : "Updated: \(minutes)m ago"
+    } else {
+        return "Updated: just now"
+    }
+}
+
 private func levelColor(for level: Double) -> Color {
     switch level {
     case 0..<1: return .green
@@ -519,11 +601,26 @@ private func levelColor(for level: Double) -> Color {
     }
 }
 
+// MARK: - Widget Refresh Intent
+@available(iOS 17.0, *)
+struct RefreshWidgetIntent: AppIntent {
+    static var title: LocalizedStringResource = "Refresh Widget"
+    static var description = IntentDescription("Force refresh the widget data")
+    
+    func perform() async throws -> some IntentResult {
+        // Force Core Data to refresh and reload widget timelines
+        WidgetCenter.shared.reloadAllTimelines()
+        return .result()
+    }
+}
+
 // MARK: - Widget Configuration
 struct NicotineGraphWidget: Widget {
     let kind: String = "NicotineGraphWidget"
 
     var body: some WidgetConfiguration {
+        // Always use StaticConfiguration for this widget
+        // The refresh button uses Button(intent:) which works with StaticConfiguration
         StaticConfiguration(kind: kind, provider: NicotineGraphProvider()) { entry in
             NicotineGraphWidgetEntryView(entry: entry)
         }

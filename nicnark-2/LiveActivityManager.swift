@@ -4,8 +4,10 @@
 import ActivityKit
 import Foundation
 import SwiftUI
+import CoreData
 import os.log
 import UIKit
+import WidgetKit
 
 @available(iOS 16.1, *)
 @MainActor
@@ -53,7 +55,7 @@ class LiveActivityManager: ObservableObject {
     
     // MARK: - Start
     
-    static func startLiveActivity(for pouchId: String, nicotineAmount: Double) async -> Bool {
+    static func startLiveActivity(for pouchId: String, nicotineAmount: Double, isFromSync: Bool = false) async -> Bool {
         let log = Logger(subsystem: "com.nicnark.nicnark-2", category: "LiveActivity")
         let auth = ActivityAuthorizationInfo()
         guard auth.areActivitiesEnabled else {
@@ -61,8 +63,21 @@ class LiveActivityManager: ObservableObject {
             return false
         }
         
-        // Ensure only one activity at a time
-        await endAllLiveActivities()
+        // Check if Live Activity already exists for this pouch
+        let existingActivity = Activity<PouchActivityAttributes>.activities
+            .first { $0.attributes.pouchId == pouchId }
+        
+        if existingActivity != nil {
+            log.info("Live Activity already exists for pouch: \(pouchId, privacy: .public)")
+            return true
+        }
+        
+        // Only end all activities if this is NOT from a sync (local creation)
+        if !isFromSync {
+            // For local creation, end all other activities (one pouch at a time)
+            await endAllLiveActivities()
+        }
+        
         let start = Date()
         let end = start.addingTimeInterval(FULL_RELEASE_TIME)
         let attributes = PouchActivityAttributes(
@@ -89,10 +104,32 @@ class LiveActivityManager: ObservableObject {
         do {
             _ = try Activity.request(attributes: attributes, content: content)
             log.info("Live Activity started for pouch: \(pouchId, privacy: .public)")
+            
+            // Seed widget snapshot immediately
+            let helper = WidgetPersistenceHelper()
+            helper.setFromLiveActivity(
+                level: 0,
+                peak: nicotineAmount * ABSORPTION_FRACTION,
+                pouchName: attributes.pouchName,
+                endTime: end
+            )
+            WidgetCenter.shared.reloadAllTimelines()
+            
             // Foreground ticker for smooth UI while app is active
             Task { await startForegroundMinuteTicker(pouchId: pouchId, nicotineAmount: nicotineAmount) }
             // Schedule an early background refresh in case the app soon goes inactive
             Task { await BackgroundMaintainer.shared.scheduleSoon() }
+            
+            // Force an immediate update to ensure the Live Activity is showing
+            Task {
+                try? await Task.sleep(nanoseconds: 1 * NSEC_PER_SEC) // Wait 1 second for activity to register
+                await updateLiveActivity(
+                    for: pouchId,
+                    timerInterval: start...end,
+                    absorptionProgress: 0.0,
+                    currentNicotineLevel: 0.0
+                )
+            }
             return true
         } catch {
             log.error("Start Live Activity failed: \(error.localizedDescription, privacy: .public)")
@@ -104,6 +141,7 @@ class LiveActivityManager: ObservableObject {
     
     private static func startForegroundMinuteTicker(pouchId: String, nicotineAmount: Double) async {
         let log = Logger(subsystem: "com.nicnark.nicnark-2", category: "LiveActivity")
+        var updateCount = 0
         
         while true {
             guard let activity = Activity<PouchActivityAttributes>.activities.first(where: { $0.attributes.pouchId == pouchId }) else {
@@ -114,6 +152,8 @@ class LiveActivityManager: ObservableObject {
             // Stop foreground ticker when app goes to background
             if UIApplication.shared.applicationState != .active {
                 log.info("App backgrounded - stopping foreground ticker, relying on background tasks")
+                // Schedule immediate background update when going to background
+                await BackgroundMaintainer.shared.scheduleSoon()
                 break
             }
             
@@ -136,8 +176,11 @@ class LiveActivityManager: ObservableObject {
                 currentNicotineLevel: currentLevel
             )
             
-            // Update every 60 seconds in foreground - iOS throttles more frequent updates
-            try? await Task.sleep(nanoseconds: 60 * NSEC_PER_SEC)
+            updateCount += 1
+            log.info("🔄 Foreground update #\(updateCount) - level: \(String(format: "%.3f", currentLevel))mg, progress: \(Int(progress * 100))%")
+            
+            // Update every 30 seconds in foreground for better responsiveness
+            try? await Task.sleep(nanoseconds: 30 * NSEC_PER_SEC)
         }
     }
     
@@ -207,6 +250,17 @@ class LiveActivityManager: ObservableObject {
         )
         
         await activity.update(content)
+        
+        // Update widget snapshot and reload timelines (throttled by system)
+        let helper = WidgetPersistenceHelper()
+        helper.setFromLiveActivity(
+            level: currentNicotineLevel,
+            peak: activity.attributes.totalNicotine * ABSORPTION_FRACTION,
+            pouchName: activity.attributes.pouchName,
+            endTime: activity.attributes.endTime
+        )
+        WidgetCenter.shared.reloadAllTimelines()
+        
         log.info("✅ Live Activity updated: pouch=\(pouchId, privacy: .public) level=\(String(format: "%.3f", currentNicotineLevel))mg progress=\(Int(absorptionProgress * 100))% status=\(status, privacy: .public)")
     }
     
@@ -253,6 +307,12 @@ class LiveActivityManager: ObservableObject {
         let finalContent = ActivityContent(state: finalState, staleDate: Date())
         let dismissAt = Calendar.current.date(byAdding: .minute, value: 2, to: Date()) ?? Date()
         await activity.end(finalContent, dismissalPolicy: .after(dismissAt))
+        
+        // Mark widget state as ended and reload
+        let helper = WidgetPersistenceHelper()
+        helper.markActivityEnded()
+        WidgetCenter.shared.reloadAllTimelines()
+        
         log.info("Live Activity ended")
     }
     
@@ -462,23 +522,27 @@ actor BackgroundMaintainer {
     
     private func getActualPouchData(for pouchId: String) async -> (startTime: Date, nicotineAmount: Double)? {
         return await MainActor.run {
-            guard let url = URL(string: pouchId) else {
-                return nil
+            let context = PersistenceController.shared.container.viewContext
+            
+            // 1) Prefer stable UUID-based lookup to avoid Core Data URI pitfalls
+            if let uuid = UUID(uuidString: pouchId) {
+                let fetch: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
+                fetch.predicate = NSPredicate(format: "pouchId == %@", uuid as CVarArg)
+                fetch.fetchLimit = 1
+                do {
+                    if let pouchLog = try context.fetch(fetch).first, let startTime = pouchLog.insertionTime {
+                        return (startTime: startTime, nicotineAmount: pouchLog.nicotineAmount)
+                    } else {
+                        log.warning("UUID lookup failed or missing insertionTime for pouchId: \(uuid.uuidString, privacy: .public)")
+                    }
+                } catch {
+                    log.warning("UUID fetch error: \(error.localizedDescription, privacy: .public)")
+                }
             }
             
-            let helper = WidgetPersistenceHelper()
-            let coordinator = helper.getPersistentStoreCoordinator()
-            guard let objectID = coordinator.managedObjectID(forURIRepresentation: url) else {
-                return nil
-            }
-            
-            let context = helper.backgroundContext()
-            guard let pouchLog = try? context.existingObject(with: objectID) as? PouchLog,
-                  let startTime = pouchLog.insertionTime else {
-                return nil
-            }
-            
-            return (startTime: startTime, nicotineAmount: pouchLog.nicotineAmount)
+            // 2) Legacy fallback: skip resolving Core Data URI to avoid iOS 18+ instability
+            // Returning nil simply uses the currently tracked activity times.
+            return nil
         }
     }
 }

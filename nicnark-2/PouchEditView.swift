@@ -195,7 +195,7 @@ struct PouchEditView: View {
             
             // If this is an active pouch and the start time changed, update the Live Activity
             if #available(iOS 16.1, *), hasActivePouch && startTimeChanged {
-                let pouchId = pouchLog.objectID.uriRepresentation().absoluteString
+                let pouchId = pouchLog.pouchId?.uuidString ?? pouchLog.objectID.uriRepresentation().absoluteString
                 Task {
                     await LiveActivityManager.updateLiveActivityStartTime(
                         for: pouchId,

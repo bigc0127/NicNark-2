@@ -9,6 +9,10 @@ import SwiftUI
 import CoreData
 import StoreKit
 import os.log
+import CloudKit
+#if canImport(UIKit)
+import UIKit
+#endif
 
 #if canImport(ActivityKit)
 import ActivityKit
@@ -34,6 +38,14 @@ struct SettingsView: View {
     @State private var isTestingSyncData = false
     @State private var showingSyncProgress = false
     
+    #if DEBUG
+    @State private var debugToolsVisible = false
+    @State private var secretTapCount = 0
+    @State private var isCheckingSchema = false
+    @State private var schemaCheckResult: String? = nil
+    @State private var showingDeploymentChecklist = false
+    #endif
+    
     private let logger = Logger(subsystem: "com.nicnark.nicnark-2", category: "Settings")
 
     var body: some View {
@@ -41,6 +53,9 @@ struct SettingsView: View {
             disclaimerSection
             appInfoSection
             cloudKitSyncSection
+            #if DEBUG
+            if debugToolsVisible { developerSchemaSection }
+            #endif
             supportSection
             dataManagementSection
             aboutSection
@@ -80,7 +95,12 @@ struct SettingsView: View {
                 .navigationTitle("CloudKit Diagnostics")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
+                    ToolbarItemGroup(placement: .navigationBarTrailing) {
+                        Button("Copy Container ID") {
+                            #if canImport(UIKit)
+                            UIPasteboard.general.string = "iCloud.ConnorNeedling.nicnark-2"
+                            #endif
+                        }
                         Button("Done") {
                             showingDiagnostics = false
                         }
@@ -88,6 +108,25 @@ struct SettingsView: View {
                 }
             }
         }
+        #if DEBUG
+        .sheet(isPresented: $showingDeploymentChecklist) {
+            NavigationView {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(deploymentChecklistText)
+                            .font(.system(.caption, design: .monospaced))
+                            .padding()
+                            .background(Color(.secondarySystemBackground))
+                            .cornerRadius(8)
+                    }
+                    .padding()
+                }
+                .navigationTitle("Production Deployment Checklist")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Done") { showingDeploymentChecklist = false } } }
+            }
+        }
+        #endif
         .alert("Test Sync Complete", isPresented: .constant(isTestingSyncData && !isTestingSyncData)) {
             Button("OK") { }
         } message: {
@@ -135,9 +174,32 @@ struct SettingsView: View {
     }
 
     private var appInfoSection: some View {
-        Section("App Information") {
-            LabeledContent("Version", value: "1.0.0")
-            LabeledContent("Developer", value: "Connor Needling")
+        Section {
+            HStack {
+                Text("Version")
+                Spacer()
+                Text("1.0.0")
+                    .foregroundColor(.secondary)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                #if DEBUG
+                secretTapCount += 1
+                if secretTapCount >= 5 {
+                    debugToolsVisible.toggle()
+                    secretTapCount = 0
+                }
+                #endif
+            }
+            
+            HStack {
+                Text("Developer")
+                Spacer()
+                Text("Connor Needling")
+                    .foregroundColor(.secondary)
+            }
+        } header: {
+            Text("App Information")
         }
     }
     
@@ -329,8 +391,60 @@ struct SettingsView: View {
         }
     }
 
+    #if DEBUG
+    private var developerSchemaSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Container: iCloud.ConnorNeedling.nicnark-2")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Text("Record Types expected: CD_PouchLog, CD_CustomButton")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                HStack(spacing: 12) {
+                    Button(isCheckingSchema ? "Checking…" : "Run Checklist") {
+                        Task { await runSchemaChecklist() }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isCheckingSchema)
+                    
+                    Button("Open CloudKit Dashboard") {
+                        if let url = URL(string: "https://icloud.developer.apple.com/dashboard") {
+                            UIApplication.shared.open(url)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    
+                    Button("Copy Container ID") { UIPasteboard.general.string = "iCloud.ConnorNeedling.nicnark-2" }
+                        .buttonStyle(.bordered)
+                    Button("Deployment Checklist") { showingDeploymentChecklist = true }
+                        .buttonStyle(.bordered)
+                }
+                
+                if let result = schemaCheckResult {
+                    ScrollView {
+                        Text(result)
+                            .font(.system(.caption, design: .monospaced))
+                            .padding(8)
+                            .background(Color(.secondarySystemBackground))
+                            .cornerRadius(8)
+                    }
+                    .frame(maxHeight: 220)
+                }
+            }
+        } header: {
+            Text("Developer • Schema Checklist")
+        } footer: {
+            Text("Hidden debug tools — tap the Version row 5× to toggle. Use this checklist before shipping to ensure the Production schema is deployed.")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+    }
+    #endif
+    
     private var aboutSection: some View {
-        Section("About") {
+        Section {
             HStack {
                 Image(systemName: "info.circle")
                     .foregroundColor(.blue)
@@ -347,6 +461,8 @@ struct SettingsView: View {
                 }
             }
             .padding(.vertical, 4)
+        } header: {
+            Text("About")
         }
     }
 
@@ -383,6 +499,74 @@ struct SettingsView: View {
     }
     
     // MARK: - Data Deletion
+    
+    #if DEBUG
+    private func runSchemaChecklist() async {
+        isCheckingSchema = true
+        defer { isCheckingSchema = false }
+        var lines: [String] = []
+        
+        #if DEBUG
+        let buildEnv = "Development"
+        #else
+        let buildEnv = "Production"
+        #endif
+        lines.append("=== CloudKit Schema Checklist ===")
+        lines.append("Build: \(buildEnv)")
+        lines.append("Container: iCloud.ConnorNeedling.nicnark-2")
+        
+        // 1) Account status
+        do {
+            let status = try await CKContainer(identifier: "iCloud.ConnorNeedling.nicnark-2").accountStatus()
+            lines.append("Account Status: \(status)")
+        } catch {
+            lines.append("Account Status: ERROR — \(error.localizedDescription)")
+        }
+        
+        // 2) Probe record types in current environment
+        let ck = CKContainer(identifier: "iCloud.ConnorNeedling.nicnark-2").privateCloudDatabase
+        let candidates = ["CD_PouchLog", "CD_CustomButton"]
+        for type in candidates {
+            do {
+                let q = CKQuery(recordType: type, predicate: NSPredicate(value: true))
+                let _ = try await ck.records(matching: q, resultsLimit: 1)
+                lines.append("✅ Record type available: \(type)")
+            } catch {
+                lines.append("ℹ️ Could not query \(type): \(error.localizedDescription)")
+            }
+        }
+        
+        // 3) Local Core Data check
+        let ctx = PersistenceController.shared.container.viewContext
+        let count = (try? ctx.count(for: PouchLog.fetchRequest())) ?? 0
+        lines.append("Local PouchLogs: \(count)")
+        
+        // 4) Next steps for Production
+        lines.append("")
+        lines.append("If building for Production/TestFlight and queries fail, deploy schema:")
+        lines.append("1. Open CloudKit Dashboard → Container: iCloud.ConnorNeedling.nicnark-2")
+        lines.append("2. Schema → Deploy to Production")
+        lines.append("3. Reinstall a Release/TestFlight build and verify")
+        lines.append("=== END CHECKLIST ===")
+        
+        await MainActor.run { schemaCheckResult = lines.joined(separator: "\n") }
+    }
+    #endif
+    
+    private var deploymentChecklistText: String {
+        """
+        === PRODUCTION DEPLOYMENT CHECKLIST ===
+        1) Build: Use a Release configuration (or Archive for TestFlight/App Store).
+        2) CloudKit Dashboard → Container: iCloud.ConnorNeedling.nicnark-2
+           - Schema tab: verify record types CD_PouchLog and CD_CustomButton.
+           - If not deployed, click "Deploy to Production".
+        3) Reinstall the app from TestFlight/App Store on a clean device.
+        4) Log a pouch → confirm sync works across devices.
+        5) Settings → Diagnose: Build shows "Production" and Sync Status is healthy.
+        6) If a device used a prior build before schema was deployed, delete/reinstall once.
+        === END CHECKLIST ===
+        """
+    }
     
     private func deleteAllData() async {
         isDeleting = true

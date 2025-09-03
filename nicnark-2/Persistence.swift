@@ -49,8 +49,14 @@ struct PersistenceController {
                 fatalError("Failed to get store description")
             }
             
-            // Use default Documents directory for CloudKit (CloudKit requires this)
-            // Don't use App Group location for CloudKit-enabled store
+            // Use App Group container for shared access between app and widgets
+            if let groupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.ConnorNeedling.nicnark-2") {
+                let storeURL = groupURL.appendingPathComponent("nicnark_2.sqlite")
+                storeDescription.url = storeURL
+                print("📱 Using App Group container for Core Data store: \(storeURL.path)")
+            } else {
+                print("⚠️ App Group container not available, using default location")
+            }
             
             // Enable CloudKit sync
             let cloudKitOptions = NSPersistentCloudKitContainerOptions(
@@ -62,14 +68,16 @@ struct PersistenceController {
             storeDescription.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
             storeDescription.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
             
-            print("📱 CloudKit store configured at default location for sync")
+            print("📱 CloudKit store configured with App Group for widget access")
         }
 
-        container.loadPersistentStores { storeDescription, error in
+        // Use a local reference to avoid capturing `self` in the escaping closure inside init
+        let persistentContainer = container
+        persistentContainer.loadPersistentStores { storeDescription, error in
             if let error = error as NSError? {
                 // Log detailed CloudKit error information
                 print("❌ Core Data CloudKit error: \(error), \(error.userInfo)")
-                print("📍 Store URL: \(storeDescription.url?.absoluteString ?? "Unknown")")
+print("📍 Store URL: \(storeDescription.url?.absoluteString ?? "Unknown")")
                 print("🔧 Store Type: \(storeDescription.type)")
                 if let cloudKitOptions = storeDescription.cloudKitContainerOptions {
                     print("☁️ CloudKit Container: \(cloudKitOptions.containerIdentifier)")
@@ -82,6 +90,16 @@ struct PersistenceController {
                 if let cloudKitOptions = storeDescription.cloudKitContainerOptions {
                     print("☁️ CloudKit sync enabled for container: \(cloudKitOptions.containerIdentifier)")
                 }
+                
+                // Ensure CloudKit schema exists in development env so sync can begin
+                #if DEBUG
+                do {
+                    try persistentContainer.initializeCloudKitSchema(options: [])
+                    print("🧱 CloudKit schema initialized (or already present)")
+                } catch {
+                    print("⚠️ CloudKit schema initialization skipped/failed: \(error.localizedDescription)")
+                }
+                #endif
             }
         }
 
@@ -195,37 +213,50 @@ struct PersistenceController {
                 let activePouches = try context.fetch(fetchRequest)
                 
                 if #available(iOS 16.1, *) {
-                    // Check if we need to start Live Activities for synced active pouches
-                    for pouch in activePouches {
-                        let pouchId = pouch.objectID.uriRepresentation().absoluteString
+                    // Only sync Live Activities if we have exactly one active pouch
+                    // Multiple active pouches shouldn't happen, but if they do, don't create activities
+                    if activePouches.count == 1, let pouch = activePouches.first {
+                        // Use stable UUID for cross-device identity
+                        let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
                         
                         // Check if Live Activity already exists for this pouch
                         let existingActivity = Activity<PouchActivityAttributes>.activities
                             .first { $0.attributes.pouchId == pouchId }
                         
                         if existingActivity == nil {
-                            // Start Live Activity for this synced active pouch
-                            Self.logger.info("🔄 Starting Live Activity for synced pouch: \(pouchId, privacy: .public)")
+                            // Check if this pouch was created recently (within last 5 seconds)
+                            // If so, it's likely created locally and we shouldn't sync a Live Activity
+                            let isRecentlyCreated = pouch.insertionTime.map { Date().timeIntervalSince($0) < 5 } ?? false
                             
-                            Task {
-                                let success = await LiveActivityManager.startLiveActivity(
-                                    for: pouchId,
-                                    nicotineAmount: pouch.nicotineAmount
-                                )
-                                if success {
-                                    Self.logger.info("✅ Live Activity started for synced pouch")
-                                } else {
-                                    Self.logger.error("❌ Failed to start Live Activity for synced pouch")
+                            if !isRecentlyCreated {
+                                // Start Live Activity for this synced active pouch
+                                Self.logger.info("🔄 Starting Live Activity for synced pouch: \(pouchId, privacy: .public)")
+                                
+                                Task {
+                                    let success = await LiveActivityManager.startLiveActivity(
+                                        for: pouchId,
+                                        nicotineAmount: pouch.nicotineAmount,
+                                        isFromSync: true
+                                    )
+                                    if success {
+                                        Self.logger.info("✅ Live Activity started for synced pouch")
+                                    } else {
+                                        Self.logger.error("❌ Failed to start Live Activity for synced pouch")
+                                    }
                                 }
+                            } else {
+                                Self.logger.info("⏭️ Skipping Live Activity for recently created pouch (likely local)")
                             }
                         }
+                    } else if activePouches.count > 1 {
+                        Self.logger.warning("⚠️ Multiple active pouches detected (\(activePouches.count, privacy: .public)) - skipping Live Activity sync")
                     }
                     
                     // End Live Activities for pouches that were completed on other devices
                     for activity in Activity<PouchActivityAttributes>.activities {
                         let pouchId = activity.attributes.pouchId
                         let stillActive = activePouches.contains { pouch in
-                            pouch.objectID.uriRepresentation().absoluteString == pouchId
+                            (pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString) == pouchId
                         }
                         
                         if !stillActive {

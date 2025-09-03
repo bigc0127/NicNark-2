@@ -76,13 +76,15 @@ enum LogService {
         }
         
         if #available(iOS 16.1, *) {
-            let pouchId = pouch.objectID.uriRepresentation().absoluteString
+            // Prefer stable UUID for cross-process/device identity; fall back to Core Data URI only if needed
+            let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
             Task {
                 _ = await LiveActivityManager.startLiveActivity(for: pouchId, nicotineAmount: mg)
             }
         }
         
-        let pouchId = pouch.objectID.uriRepresentation().absoluteString
+        // Use stable UUID for notification identifier when available
+        let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
         let fireDate = Date().addingTimeInterval(FULL_RELEASE_TIME)
         NotificationManager.scheduleCompletionAlert(
             id: pouchId,
