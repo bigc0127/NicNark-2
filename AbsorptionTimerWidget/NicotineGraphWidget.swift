@@ -180,35 +180,61 @@ struct NicotineGraphProvider: TimelineProvider {
     }
     
     private func calculateTimeSinceLastPouch(pouches: [PouchLog], now: Date) -> String {
-        // Get all pouches (not just recent ones) to find the actual last pouch
+        // Get all pouches to find the most recent activity (either insertion or removal)
         let persistenceHelper = WidgetPersistenceHelper()
         let context = persistenceHelper.backgroundContext()
         
-        let allPouchesRequest = PouchLog.fetchRequest()
-        allPouchesRequest.sortDescriptors = [NSSortDescriptor(keyPath: \PouchLog.insertionTime, ascending: false)]
-        allPouchesRequest.fetchLimit = 1
+        // First check if there are any active pouches (not removed yet)
+        let activePouchRequest = PouchLog.fetchRequest()
+        activePouchRequest.predicate = NSPredicate(format: "removalTime == nil")
+        activePouchRequest.sortDescriptors = [NSSortDescriptor(keyPath: \PouchLog.insertionTime, ascending: false)]
+        activePouchRequest.fetchLimit = 1
         
-        guard let lastPouch = try? context.fetch(allPouchesRequest).first,
-              let lastPouchTime = lastPouch.insertionTime else {
-            return "No pouches logged yet"
+        if let activePouch = try? context.fetch(activePouchRequest).first,
+           let insertionTime = activePouch.insertionTime {
+            // If there's an active pouch, use its insertion time
+            let timeDiff = now.timeIntervalSince(insertionTime)
+            let totalMinutes = Int(ceil(timeDiff / 60.0))
+            let hours = totalMinutes / 60
+            let minutes = totalMinutes % 60
+            
+            if hours == 0 {
+                return minutes == 1 ? "1 min since last pouch" : "\(minutes) mins since last pouch"
+            } else if minutes == 0 {
+                return hours == 1 ? "1 hour since last pouch" : "\(hours) hours since last pouch"
+            } else {
+                let hourText = hours == 1 ? "hour" : "hours"
+                let minText = minutes == 1 ? "min" : "mins"
+                return "\(hours) \(hourText) \(minutes) \(minText) since last pouch"
+            }
         }
         
-        let timeDiff = now.timeIntervalSince(lastPouchTime)
+        // No active pouches, find the most recently removed pouch
+        let removedPouchRequest = PouchLog.fetchRequest()
+        removedPouchRequest.predicate = NSPredicate(format: "removalTime != nil")
+        removedPouchRequest.sortDescriptors = [NSSortDescriptor(keyPath: \PouchLog.removalTime, ascending: false)]
+        removedPouchRequest.fetchLimit = 1
         
-        // Round seconds up to next minute
-        let totalMinutes = Int(ceil(timeDiff / 60.0))
-        let hours = totalMinutes / 60
-        let minutes = totalMinutes % 60
-        
-        if hours == 0 {
-            return minutes == 1 ? "1 min since last pouch" : "\(minutes) mins since last pouch"
-        } else if minutes == 0 {
-            return hours == 1 ? "1 hour since last pouch" : "\(hours) hours since last pouch"
-        } else {
-            let hourText = hours == 1 ? "hour" : "hours"
-            let minText = minutes == 1 ? "min" : "mins"
-            return "\(hours) \(hourText) \(minutes) \(minText) since last pouch"
+        if let lastRemovedPouch = try? context.fetch(removedPouchRequest).first,
+           let removalTime = lastRemovedPouch.removalTime {
+            // Use the removal time of the most recently removed pouch
+            let timeDiff = now.timeIntervalSince(removalTime)
+            let totalMinutes = Int(ceil(timeDiff / 60.0))
+            let hours = totalMinutes / 60
+            let minutes = totalMinutes % 60
+            
+            if hours == 0 {
+                return minutes == 1 ? "1 min since last pouch" : "\(minutes) mins since last pouch"
+            } else if minutes == 0 {
+                return hours == 1 ? "1 hour since last pouch" : "\(hours) hours since last pouch"
+            } else {
+                let hourText = hours == 1 ? "hour" : "hours"
+                let minText = minutes == 1 ? "min" : "mins"
+                return "\(hours) \(hourText) \(minutes) \(minText) since last pouch"
+            }
         }
+        
+        return "No pouches logged yet"
     }
     
     // MARK: - Fallback Methods for Widget
