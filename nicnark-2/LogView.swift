@@ -235,15 +235,16 @@ struct LogView: View {
     }
 
     func removePouch(_ pouch: PouchLog) {
-        pouch.removalTime = .now
+        let removalTime = Date.now
+        pouch.removalTime = removalTime
         try? ctx.save()
         endLiveActivityIfNeeded(for: pouch)
 
         let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
         NotificationManager.cancelAlert(id: pouchId)
         
-        // Update widget persistence helper to ensure widgets get fresh data
-        updateWidgetPersistenceHelper()
+        // Update widget persistence helper with the actual removal time
+        updateWidgetPersistenceHelperForRemoval(pouch: pouch, removalTime: removalTime)
         
         WidgetCenter.shared.reloadAllTimelines()
         NotificationCenter.default.post(name: NSNotification.Name("PouchRemoved"), object: nil)
@@ -434,6 +435,39 @@ struct LogView: View {
         }
         
         return totalLevel
+    }
+    
+    // MARK: - Special handling for removal to sync with widget
+    private func updateWidgetPersistenceHelperForRemoval(pouch: PouchLog, removalTime: Date) {
+        let helper = WidgetPersistenceHelper()
+        
+        guard let insertionTime = pouch.insertionTime else {
+            helper.markActivityEnded()
+            return
+        }
+        
+        // Calculate the actual absorbed amount based on actual time in mouth
+        let actualTimeInMouth = removalTime.timeIntervalSince(insertionTime)
+        let actualAbsorbed = AbsorptionConstants.shared.calculateAbsorbedNicotine(
+            nicotineContent: pouch.nicotineAmount,
+            useTime: actualTimeInMouth
+        )
+        
+        // Update widget with the actual absorbed amount and removal time
+        // This ensures widget shows the same level as main app
+        helper.setFromLiveActivity(
+            level: actualAbsorbed,
+            peak: actualAbsorbed,
+            pouchName: "Pouch removed",
+            endTime: removalTime  // Use actual removal time, not theoretical end time
+        )
+        
+        // After a brief delay, mark as ended since pouch is removed
+        Task {
+            try? await Task.sleep(nanoseconds: 1 * NSEC_PER_SEC)
+            helper.markActivityEnded()
+            WidgetCenter.shared.reloadAllTimelines()
+        }
     }
 }
 

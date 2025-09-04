@@ -289,10 +289,15 @@ class LiveActivityManager: ObservableObject {
             return
         }
         
+        // Calculate actual time in mouth (might be less than FULL_RELEASE_TIME if removed early)
+        let now = Date()
+        let actualTimeInMouth = min(now.timeIntervalSince(activity.attributes.startTime), FULL_RELEASE_TIME)
+        
+        // Calculate the actual absorbed amount based on actual time in mouth
         let finalLevel = AbsorptionConstants.shared
             .calculateAbsorbedNicotine(
                 nicotineContent: activity.attributes.totalNicotine,
-                useTime: FULL_RELEASE_TIME
+                useTime: actualTimeInMouth  // Use actual time, not theoretical max time
             )
         
         let timer = activity.attributes.startTime...activity.attributes.endTime
@@ -300,7 +305,7 @@ class LiveActivityManager: ObservableObject {
             timerInterval: timer,
             currentNicotineLevel: finalLevel,
             status: "Complete",
-            absorptionRate: 1.0,
+            absorptionRate: min(actualTimeInMouth / FULL_RELEASE_TIME, 1.0),  // Actual absorption rate
             lastUpdated: Date()
         )
         
@@ -308,12 +313,23 @@ class LiveActivityManager: ObservableObject {
         let dismissAt = Calendar.current.date(byAdding: .minute, value: 2, to: Date()) ?? Date()
         await activity.end(finalContent, dismissalPolicy: .after(dismissAt))
         
-        // Mark widget state as ended and reload
+        // Update widget with the actual final level before marking as ended
         let helper = WidgetPersistenceHelper()
-        helper.markActivityEnded()
-        WidgetCenter.shared.reloadAllTimelines()
+        helper.setFromLiveActivity(
+            level: finalLevel,
+            peak: finalLevel,
+            pouchName: "Pouch removed",
+            endTime: now  // Use actual removal time
+        )
         
-        log.info("Live Activity ended")
+        // Then mark as ended after a brief delay
+        Task {
+            try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5 second delay
+            helper.markActivityEnded()
+            WidgetCenter.shared.reloadAllTimelines()
+        }
+        
+        log.info("Live Activity ended - actual absorption: \(String(format: "%.3f", finalLevel))mg")
     }
     
     static func endAllLiveActivities() async {
