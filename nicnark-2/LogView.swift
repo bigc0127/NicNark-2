@@ -21,6 +21,19 @@ import Combine      // For handling data streams and notifications
  * - Managing Live Activities for Lock Screen/Dynamic Island display
  * - Real-time timer updates and nicotine calculation
  */
+// Dummy sync state for older iOS versions
+class DummySyncState: ObservableObject {
+    @Published var isSyncing = false
+    @Published var syncCompleted = true
+    @Published var syncProgress: Double = 1.0
+    @Published var syncMessage = "Ready"
+    var isCloudKitEnabled = false
+    
+    func startInitialSync() async {
+        // No-op for older iOS versions
+    }
+}
+
 struct LogView: View {
     // MARK: - Core Data Properties
     // @Environment gets the database context from the SwiftUI environment
@@ -40,6 +53,9 @@ struct LogView: View {
         sortDescriptors: [NSSortDescriptor(keyPath: \PouchLog.insertionTime, ascending: false)],
         predicate: NSPredicate(format: "removalTime == nil")  // Only pouches still in mouth
     ) private var activePouches: FetchedResults<PouchLog>
+    
+    // MARK: - CloudKit Sync State
+    // We don't use @StateObject here as we're using the singleton directly
 
     // MARK: - UI State Properties
     // @State creates local state that the view owns and can modify
@@ -61,17 +77,26 @@ struct LogView: View {
     private let TIMER_INTERVAL: TimeInterval = 1.0              // Update UI every second
 
     var body: some View {
-        VStack(spacing: 20) {
-            Text("Log a Pouch").font(.headline)
+        ZStack {
+            VStack(spacing: 20) {
+                Text("Log a Pouch").font(.headline)
 
-            if activePouches.isEmpty {
-                quickButtonsView
-                if showInput { customRowView }
+                if activePouches.isEmpty {
+                    quickButtonsView
+                    if showInput { customRowView }
+                }
+
+                if let pouch = activePouches.first { countdownPane(for: pouch) }
             }
-
-            if let pouch = activePouches.first { countdownPane(for: pouch) }
+            .padding()
+            
+            // Sync overlay - only shows when syncing and iCloud is enabled
+            if #available(iOS 16.1, *) {
+                if CloudKitSyncState.shared.isCloudKitEnabled && CloudKitSyncState.shared.isSyncing {
+                    syncOverlay
+                }
+            }
         }
-        .padding()
         .navigationTitle("NicNark")
         .navigationBarTitleDisplayMode(.large)
         .onAppear {
@@ -79,6 +104,13 @@ struct LogView: View {
             if #available(iOS 16.1, *) {
                 let authInfo = ActivityAuthorizationInfo()
                 print("📱 Live Activities enabled: \(authInfo.areActivitiesEnabled)")
+                
+                // Start initial sync if needed
+                Task {
+                    if #available(iOS 16.1, *) {
+                        await CloudKitSyncState.shared.startInitialSync()
+                    }
+                }
             }
             WidgetCenter.shared.reloadAllTimelines()
         }
@@ -196,7 +228,12 @@ struct LogView: View {
         let absorptionProgress = maxPossibleAbsorption > 0 ? currentAbsorption / maxPossibleAbsorption : 0
 
         VStack(spacing: 12) {
-            Button("Remove Pouch") { removePouch(pouch) }.buttonStyle(.borderedProminent)
+            Button("Remove Pouch") { 
+                removePouch(pouch) 
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(shouldDisableRemoveButton)
+            .opacity(shouldDisableRemoveButton ? 0.6 : 1.0)
 
             Text(isCompleted ? "Timer Complete" : "Live Timer").font(.headline)
 
@@ -435,6 +472,74 @@ struct LogView: View {
         }
         
         return totalLevel
+    }
+    
+    // MARK: - Sync Overlay
+    
+    @available(iOS 16.1, *)
+    private var syncOverlay: some View {
+        let syncState = CloudKitSyncState.shared
+        return ZStack {
+            // Background blur
+            Color.black.opacity(0.4)
+                .ignoresSafeArea()
+                .transition(.opacity)
+            
+            // Sync status card
+            VStack(spacing: 20) {
+                // Icon or progress indicator
+                if syncState.syncCompleted {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 60))
+                        .foregroundColor(.green)
+                        .transition(.scale.combined(with: .opacity))
+                } else {
+                    ProgressView()
+                        .scaleEffect(1.5)
+                        .progressViewStyle(CircularProgressViewStyle(tint: .blue))
+                }
+                
+                // Status text
+                Text(syncState.syncCompleted ? "Sync Complete" : syncState.syncMessage)
+                    .font(.headline)
+                    .foregroundColor(.primary)
+                
+                // Progress bar
+                if !syncState.syncCompleted {
+                    ProgressView(value: syncState.syncProgress)
+                        .frame(width: 200)
+                        .progressViewStyle(.linear)
+                        .tint(.blue)
+                }
+                
+                // Additional info text
+                if !syncState.syncCompleted {
+                    Text("Please wait while we sync with your other devices")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 250)
+                }
+            }
+            .padding(30)
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(.regularMaterial)
+                    .shadow(radius: 10)
+            )
+            .scaleEffect(syncState.syncCompleted ? 1.05 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: syncState.syncCompleted)
+        }
+    }
+    
+    // MARK: - Computed Properties
+    
+    private var shouldDisableRemoveButton: Bool {
+        if #available(iOS 16.1, *) {
+            // Disable button if CloudKit is enabled and we haven't completed initial sync
+            return CloudKitSyncState.shared.isCloudKitEnabled && !CloudKitSyncState.shared.syncCompleted
+        }
+        return false
     }
     
     // MARK: - Special handling for removal to sync with widget
