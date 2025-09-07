@@ -84,7 +84,7 @@ enum NotificationManager {
 
         Task { @MainActor in
             NotificationCenter.default.post(
-                name: Notification.Name("RemovePouchFromNotification"),
+                name: Notification.Name("PouchRemoved"),
                 object: nil,
                 userInfo: ["pouchId": pouchId]
             )

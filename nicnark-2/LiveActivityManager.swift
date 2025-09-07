@@ -15,6 +15,9 @@ class LiveActivityManager: ObservableObject {
     @Published var hasActiveNotification: Bool = false
     private let logger = Logger(subsystem: "com.nicnark.nicnark-2", category: "LiveActivity")
     
+    // Track active activities by pouch ID to prevent duplicates
+    private static var activeActivitiesByPouchId: [String: String] = [:] // pouchId -> activityId
+    
     // Minimal snapshot type for background computations
     struct TrackedActivity: Hashable {
         let id: String
@@ -63,12 +66,20 @@ class LiveActivityManager: ObservableObject {
             return false
         }
         
-        // Check if Live Activity already exists for this pouch
+        // First check our tracking dictionary to prevent duplicates at the call level
+        if activeActivitiesByPouchId[pouchId] != nil {
+            log.info("Live Activity already tracked for pouch: \(pouchId, privacy: .public)")
+            return true
+        }
+        
+        // Also check if Live Activity already exists in the system
         let existingActivity = Activity<PouchActivityAttributes>.activities
             .first { $0.attributes.pouchId == pouchId }
         
-        if existingActivity != nil {
+        if let existing = existingActivity {
             log.info("Live Activity already exists for pouch: \(pouchId, privacy: .public)")
+            // Update our tracking dictionary to stay in sync
+            activeActivitiesByPouchId[pouchId] = existing.id
             return true
         }
         
@@ -76,6 +87,29 @@ class LiveActivityManager: ObservableObject {
         if !isFromSync {
             // For local creation, end all other activities (one pouch at a time)
             await endAllLiveActivities()
+        } else {
+            // For sync operations, check if the pouch is actually active
+            let pouchData = await MainActor.run { () -> (startTime: Date, nicotineAmount: Double, isActive: Bool)? in
+                let context = PersistenceController.shared.container.viewContext
+                if let uuid = UUID(uuidString: pouchId) {
+                    let fetch: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
+                    fetch.predicate = NSPredicate(format: "pouchId == %@", uuid as CVarArg)
+                    fetch.fetchLimit = 1
+                    do {
+                        if let pouchLog = try context.fetch(fetch).first, let startTime = pouchLog.insertionTime {
+                            let isActive = pouchLog.removalTime == nil
+                            return (startTime: startTime, nicotineAmount: pouchLog.nicotineAmount, isActive: isActive)
+                        }
+                    } catch {
+                        log.warning("Sync fetch error: \(error.localizedDescription, privacy: .public)")
+                    }
+                }
+                return nil
+            }
+            guard let data = pouchData, data.isActive else {
+                log.info("Sync: Skipping Live Activity for inactive/removed pouch: \(pouchId, privacy: .public)")
+                return false
+            }
         }
         
         let start = Date()
@@ -102,7 +136,9 @@ class LiveActivityManager: ObservableObject {
         )
         
         do {
-            _ = try Activity.request(attributes: attributes, content: content)
+            let newActivity = try Activity.request(attributes: attributes, content: content)
+            // Track this new activity to prevent duplicates
+            activeActivitiesByPouchId[pouchId] = newActivity.id
             log.info("Live Activity started for pouch: \(pouchId, privacy: .public)")
             
             // Seed widget snapshot immediately
@@ -284,6 +320,10 @@ class LiveActivityManager: ObservableObject {
     
     static func endLiveActivity(for pouchId: String) async {
         let log = Logger(subsystem: "com.nicnark.nicnark-2", category: "LiveActivity")
+        
+        // Remove from tracking dictionary first to prevent race conditions
+        activeActivitiesByPouchId.removeValue(forKey: pouchId)
+        
         guard let activity = Activity<PouchActivityAttributes>.activities.first(where: { $0.attributes.pouchId == pouchId }) else {
             log.warning("No activity to end for pouch: \(pouchId, privacy: .public)")
             return
@@ -333,6 +373,9 @@ class LiveActivityManager: ObservableObject {
     }
     
     static func endAllLiveActivities() async {
+        // Clear all tracking first
+        activeActivitiesByPouchId.removeAll()
+        
         for activity in Activity<PouchActivityAttributes>.activities {
             await activity.end(nil, dismissalPolicy: .immediate)
         }
@@ -507,9 +550,16 @@ actor BackgroundMaintainer {
         await MainActor.run {
             for t in items {
                 Task {
-                    let actualPouchData = await getActualPouchData(for: t.pouchId)
-                    let effectiveStartTime = actualPouchData?.startTime ?? t.startTime
-                    let effectiveNicotineAmount = actualPouchData?.nicotineAmount ?? t.totalNicotine
+                    // Check if pouch still exists and is active (not removed)
+                    guard let actualPouchData = await getActualPouchData(for: t.pouchId),
+                          actualPouchData.isActive else {
+                        // Pouch was removed or doesn't exist, end the live activity
+                        await LiveActivityManager.endLiveActivity(for: t.pouchId)
+                        return
+                    }
+                    
+                    let effectiveStartTime = actualPouchData.startTime
+                    let effectiveNicotineAmount = actualPouchData.nicotineAmount
                     
                     let elapsed = max(0, now.timeIntervalSince(effectiveStartTime))
                     let endTime = effectiveStartTime.addingTimeInterval(FULL_RELEASE_TIME)
@@ -536,7 +586,27 @@ actor BackgroundMaintainer {
         log.info("🔄 Applied batched updates to \(items.count, privacy: .public) activities at \(DateFormatter.localizedString(from: now, dateStyle: .none, timeStyle: .medium), privacy: .public)")
     }
     
-    private func getActualPouchData(for pouchId: String) async -> (startTime: Date, nicotineAmount: Double)? {
+    // Synchronous helper for immediate checks (used in startLiveActivity)
+    func getActualPouchDataSync(for pouchId: String) -> (startTime: Date, nicotineAmount: Double, isActive: Bool)? {
+        let context = PersistenceController.shared.container.viewContext
+        
+        if let uuid = UUID(uuidString: pouchId) {
+            let fetch: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
+            fetch.predicate = NSPredicate(format: "pouchId == %@", uuid as CVarArg)
+            fetch.fetchLimit = 1
+            do {
+                if let pouchLog = try context.fetch(fetch).first, let startTime = pouchLog.insertionTime {
+                    let isActive = pouchLog.removalTime == nil
+                    return (startTime: startTime, nicotineAmount: pouchLog.nicotineAmount, isActive: isActive)
+                }
+            } catch {
+                log.warning("Sync fetch error: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        return nil
+    }
+    
+    private func getActualPouchData(for pouchId: String) async -> (startTime: Date, nicotineAmount: Double, isActive: Bool)? {
         return await MainActor.run {
             let context = PersistenceController.shared.container.viewContext
             
@@ -547,7 +617,8 @@ actor BackgroundMaintainer {
                 fetch.fetchLimit = 1
                 do {
                     if let pouchLog = try context.fetch(fetch).first, let startTime = pouchLog.insertionTime {
-                        return (startTime: startTime, nicotineAmount: pouchLog.nicotineAmount)
+                        let isActive = pouchLog.removalTime == nil // Only active if not removed
+                        return (startTime: startTime, nicotineAmount: pouchLog.nicotineAmount, isActive: isActive)
                     } else {
                         log.warning("UUID lookup failed or missing insertionTime for pouchId: \(uuid.uuidString, privacy: .public)")
                     }
@@ -558,7 +629,7 @@ actor BackgroundMaintainer {
             
             // 2) Legacy fallback: skip resolving Core Data URI to avoid iOS 18+ instability
             // Returning nil simply uses the currently tracked activity times.
-            return nil
-        }
+        return nil
     }
+}
 }

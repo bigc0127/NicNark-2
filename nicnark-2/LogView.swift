@@ -38,6 +38,9 @@ struct LogView: View {
     // MARK: - Core Data Properties
     // @Environment gets the database context from the SwiftUI environment
     @Environment(\.managedObjectContext) private var ctx
+    
+    // Track pouches currently being removed to prevent duplicate operations
+    @State private static var pouchesBeingRemoved: Set<String> = []
 
     // @FetchRequest automatically fetches data from Core Data and updates the view when data changes
     // This fetches all custom nicotine amount buttons, sorted by amount (3mg, 6mg, 9mg, etc.)
@@ -129,10 +132,18 @@ struct LogView: View {
         .onDisappear {
             stopOptimizedTimer()
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RemovePouchFromNotification"))) { _ in
-            if let activePouch = activePouches.first {
-                removePouch(activePouch)
-                WidgetCenter.shared.reloadAllTimelines()
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchRemoved"))) { notification in
+            // Only handle notifications that come from external sources (like notification actions)
+            // and contain a specific pouchId to avoid duplicate processing
+            if let userInfo = notification.userInfo,
+               let notificationPouchId = userInfo["pouchId"] as? String,
+               let activePouch = activePouches.first {
+                let activePouchId = activePouch.pouchId?.uuidString ?? activePouch.objectID.uriRepresentation().absoluteString
+                // Only remove if the notification is for the current active pouch
+                if notificationPouchId == activePouchId {
+                    removePouch(activePouch)
+                    WidgetCenter.shared.reloadAllTimelines()
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchLogged"))) { _ in
@@ -272,19 +283,32 @@ struct LogView: View {
     }
 
     func removePouch(_ pouch: PouchLog) {
+        let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
+        
+        // Idempotent guard: prevent duplicate removal operations
+        guard !LogView.pouchesBeingRemoved.contains(pouchId) else {
+            print("⚠️ Pouch removal already in progress for: \(pouchId)")
+            return
+        }
+        
+        // Mark as being removed
+        LogView.pouchesBeingRemoved.insert(pouchId)
+        defer {
+            LogView.pouchesBeingRemoved.remove(pouchId)
+        }
+        
         let removalTime = Date.now
         pouch.removalTime = removalTime
         try? ctx.save()
         endLiveActivityIfNeeded(for: pouch)
 
-        let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
         NotificationManager.cancelAlert(id: pouchId)
         
         // Update widget persistence helper with the actual removal time
         updateWidgetPersistenceHelperForRemoval(pouch: pouch, removalTime: removalTime)
         
         WidgetCenter.shared.reloadAllTimelines()
-        NotificationCenter.default.post(name: NSNotification.Name("PouchRemoved"), object: nil)
+        // Note: PouchRemoved notification is only posted by NotificationManager for external removals
     }
 
     // MARK: – Live Activity tick (UI refresh loop)
