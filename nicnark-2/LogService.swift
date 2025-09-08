@@ -36,7 +36,7 @@ enum LogService {
     }
     
     @discardableResult
-    static func logPouch(amount mg: Double, ctx: NSManagedObjectContext, can: Can? = nil) -> Bool {
+    static func logPouch(amount mg: Double, ctx: NSManagedObjectContext, can: Can? = nil, customDuration: TimeInterval? = nil) -> Bool {
         // Check if there's already an active pouch (no removal time)
         let activePouchFetch: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
         activePouchFetch.predicate = NSPredicate(format: "removalTime == nil")
@@ -53,6 +53,11 @@ enum LogService {
         pouch.pouchId = UUID() // Ensure UUID is set for CloudKit
         pouch.insertionTime = .now
         pouch.nicotineAmount = mg
+        
+        // Store duration in minutes (converting from seconds if needed)
+        let canDuration = can?.duration ?? 0
+        let durationMinutes = Int32((customDuration ?? (canDuration > 0 ? TimeInterval(canDuration * 60) : FULL_RELEASE_TIME)) / 60)
+        pouch.timerDuration = durationMinutes
         
         // Associate with can if provided and decrement count
         if let can = can {
@@ -82,17 +87,24 @@ enum LogService {
             return false
         }
         
+        // Determine the duration to use: can's custom duration, passed duration, or default
+        let duration = customDuration ?? (canDuration > 0 ? TimeInterval(canDuration * 60) : FULL_RELEASE_TIME)
+        
         if #available(iOS 16.1, *) {
             // Prefer stable UUID for cross-process/device identity; fall back to Core Data URI only if needed
             let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
             Task {
-                _ = await LiveActivityManager.startLiveActivity(for: pouchId, nicotineAmount: mg)
+                _ = await LiveActivityManager.startLiveActivity(
+                    for: pouchId, 
+                    nicotineAmount: mg,
+                    duration: duration
+                )
             }
         }
         
         // Use stable UUID for notification identifier when available
         let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
-        let fireDate = Date().addingTimeInterval(FULL_RELEASE_TIME)
+        let fireDate = Date().addingTimeInterval(duration)
         NotificationManager.scheduleCompletionAlert(
             id: pouchId,
             title: "Absorption complete",

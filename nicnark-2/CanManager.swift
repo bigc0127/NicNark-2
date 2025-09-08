@@ -27,6 +27,7 @@ class CanManager: ObservableObject {
         strength: Double,
         pouchCount: Int,
         barcode: String? = nil,
+        duration: Int = 0,
         context: NSManagedObjectContext
     ) -> Can {
         let can = Can(context: context)
@@ -38,6 +39,7 @@ class CanManager: ObservableObject {
         can.initialCount = Int32(pouchCount)
         can.barcode = barcode
         can.dateAdded = Date()
+        can.duration = Int32(duration)
         
         // Also create or update CanTemplate if barcode is provided
         if let barcode = barcode, !barcode.isEmpty {
@@ -46,6 +48,7 @@ class CanManager: ObservableObject {
                 brand: brand,
                 flavor: flavor,
                 strength: strength,
+                duration: duration,
                 context: context
             )
         }
@@ -103,6 +106,7 @@ class CanManager: ObservableObject {
                 brand: can.brand ?? "",
                 flavor: can.flavor,
                 strength: can.strength,
+                duration: Int(can.duration),
                 context: context
             )
         }
@@ -168,6 +172,7 @@ class CanManager: ObservableObject {
         brand: String,
         flavor: String?,
         strength: Double,
+        duration: Int = 0,
         context: NSManagedObjectContext
     ) {
         let template = findCanTemplateByBarcode(barcode, context: context) ?? CanTemplate(context: context)
@@ -181,6 +186,7 @@ class CanManager: ObservableObject {
         template.brand = brand
         template.flavor = flavor
         template.strength = strength
+        template.duration = Int32(duration)
         template.lastUpdated = Date()
         
         do {

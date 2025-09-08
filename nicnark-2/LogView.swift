@@ -417,15 +417,17 @@ struct LogView: View {
     func countdownPane(for pouch: PouchLog) -> some View {
         let insertionTime = pouch.insertionTime ?? tick
         let elapsed = max(0, tick.timeIntervalSince(insertionTime))
-        // Ensure remaining time never shows more than the user's selected duration
-        let remaining = max(min(pouchDuration - elapsed, pouchDuration), 0)
-        let progress = min(max(elapsed / pouchDuration, 0), 1)
+        // Use the pouch's specific duration (stored in minutes, convert to seconds)
+        let actualDuration = TimeInterval(pouch.timerDuration * 60)
+        // Ensure remaining time never shows more than the pouch's duration
+        let remaining = max(min(actualDuration - elapsed, actualDuration), 0)
+        let progress = min(max(elapsed / actualDuration, 0), 1)
         let isCompleted = remaining == 0
 
         let currentAbsorption = AbsorptionConstants.shared
             .calculateCurrentNicotineLevel(nicotineContent: pouch.nicotineAmount, elapsedTime: elapsed)
         let maxPossibleAbsorption = AbsorptionConstants.shared
-            .calculateAbsorbedNicotine(nicotineContent: pouch.nicotineAmount, useTime: pouchDuration)
+            .calculateAbsorbedNicotine(nicotineContent: pouch.nicotineAmount, useTime: actualDuration)
         let absorptionProgress = maxPossibleAbsorption > 0 ? currentAbsorption / maxPossibleAbsorption : 0
 
         VStack(spacing: 12) {
@@ -584,9 +586,11 @@ struct LogView: View {
         guard let pouch = activePouches.first,
               let insertionTime = pouch.insertionTime else { return }
 
+        // Use the pouch's specific duration (stored in minutes, convert to seconds)
+        let actualDuration = TimeInterval(pouch.timerDuration * 60)
         let elapsed = Date().timeIntervalSince(insertionTime)
-        let remaining = max(pouchDuration - elapsed, 0)
-        let progress = min(max(elapsed / pouchDuration, 0), 1)
+        let remaining = max(actualDuration - elapsed, 0)
+        let progress = min(max(elapsed / actualDuration, 0), 1)
 
         let currentLevel = AbsorptionConstants.shared.calculateCurrentNicotineLevel(
             nicotineContent: pouch.nicotineAmount,
@@ -596,7 +600,7 @@ struct LogView: View {
         let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
         
         // Update Live Activity with accurate timer interval based on current pouch data
-        let endTime = insertionTime.addingTimeInterval(pouchDuration)
+        let endTime = insertionTime.addingTimeInterval(actualDuration)
         let timerInterval = insertionTime...endTime
         
         await LiveActivityManager.updateLiveActivity(

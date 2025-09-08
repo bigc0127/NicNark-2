@@ -98,7 +98,7 @@ class LiveActivityManager: ObservableObject {
     
     // MARK: - Start
     
-    static func startLiveActivity(for pouchId: String, nicotineAmount: Double, isFromSync: Bool = false) async -> Bool {
+    static func startLiveActivity(for pouchId: String, nicotineAmount: Double, duration: TimeInterval? = nil, isFromSync: Bool = false) async -> Bool {
         let log = Logger(subsystem: "com.nicnark.nicnark-2", category: "LiveActivity")
         let auth = ActivityAuthorizationInfo()
         guard auth.areActivitiesEnabled else {
@@ -133,12 +133,13 @@ class LiveActivityManager: ObservableObject {
         }
         
         let start = Date()
-        let end = start.addingTimeInterval(FULL_RELEASE_TIME)
+        let actualDuration = duration ?? FULL_RELEASE_TIME
+        let end = start.addingTimeInterval(actualDuration)
         let attributes = PouchActivityAttributes(
             pouchName: "\(Int(nicotineAmount))mg Pouch",
             totalNicotine: nicotineAmount,
             startTime: start,
-            expectedDuration: FULL_RELEASE_TIME,
+            expectedDuration: actualDuration,
             pouchId: pouchId
         )
         
@@ -172,7 +173,7 @@ class LiveActivityManager: ObservableObject {
             WidgetCenter.shared.reloadAllTimelines()
             
             // Foreground ticker for smooth UI while app is active
-            Task { await startForegroundMinuteTicker(pouchId: pouchId, nicotineAmount: nicotineAmount) }
+            Task { await startForegroundMinuteTicker(pouchId: pouchId, nicotineAmount: nicotineAmount, duration: actualDuration) }
             // Schedule an early background refresh in case the app soon goes inactive
             Task { await BackgroundMaintainer.shared.scheduleSoon() }
             
@@ -195,7 +196,7 @@ class LiveActivityManager: ObservableObject {
     
     // MARK: - Foreground ticker
     
-    private static func startForegroundMinuteTicker(pouchId: String, nicotineAmount: Double) async {
+    private static func startForegroundMinuteTicker(pouchId: String, nicotineAmount: Double, duration: TimeInterval) async {
         let log = Logger(subsystem: "com.nicnark.nicnark-2", category: "LiveActivity")
         var updateCount = 0
         
@@ -214,7 +215,7 @@ class LiveActivityManager: ObservableObject {
             }
             
             let elapsed = Date().timeIntervalSince(activity.attributes.startTime)
-            let remaining = max(0, FULL_RELEASE_TIME - elapsed)
+            let remaining = max(0, duration - elapsed)
             if remaining <= 0 {
                 await endLiveActivity(for: pouchId)
                 break
@@ -222,7 +223,7 @@ class LiveActivityManager: ObservableObject {
             
             let currentLevel = AbsorptionConstants.shared
                 .calculateCurrentNicotineLevel(nicotineContent: nicotineAmount, elapsedTime: elapsed)
-            let progress = min(max(elapsed / FULL_RELEASE_TIME, 0), 1)
+            let progress = min(max(elapsed / duration, 0), 1)
             let timer = activity.attributes.startTime...activity.attributes.endTime
             
             await updateLiveActivity(

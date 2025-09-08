@@ -22,6 +22,8 @@ struct CanDetailView: View {
     @State private var pouchCount: Int = 20
     @State private var barcode = ""
     @State private var showingBarcodeScanner = false
+    @State private var hasCustomDuration = false
+    @State private var duration: Int = 30  // Default 30 minutes
     
     init(editingCan: Can? = nil, barcode: String? = nil) {
         self.editingCan = editingCan
@@ -58,6 +60,34 @@ struct CanDetailView: View {
                             Text("\(pouchCount)")
                                 .fontWeight(.semibold)
                         }
+                    }
+                }
+                
+                Section(header: Text("Timer Duration (Optional)")) {
+                    Toggle("Custom Timer Duration", isOn: $hasCustomDuration)
+                    
+                    if hasCustomDuration {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Duration:")
+                                Spacer()
+                                Text("\(duration) minutes")
+                                    .fontWeight(.semibold)
+                            }
+                            
+                            Slider(value: Binding(
+                                get: { Double(duration) },
+                                set: { duration = Int($0) }
+                            ), in: 5...120, step: 5)
+                            
+                            Text("This brand's recommended pouch duration")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    } else {
+                        Text("Will use your default timer settings")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
                 }
                 
@@ -116,6 +146,11 @@ struct CanDetailView: View {
                 strength = can.strength
                 pouchCount = Int(can.pouchCount)
                 barcode = can.barcode ?? ""
+                // Load duration if set
+                if can.duration > 0 {
+                    hasCustomDuration = true
+                    duration = Int(can.duration)
+                }
             } else if let initialBarcode = initialBarcode {
                 // Pre-fill barcode if provided
                 barcode = initialBarcode
@@ -124,12 +159,21 @@ struct CanDetailView: View {
                     brand = template.brand ?? ""
                     flavor = template.flavor ?? ""
                     strength = template.strength
+                    // Load duration from template if set
+                    if template.duration > 0 {
+                        hasCustomDuration = true
+                        duration = Int(template.duration)
+                    }
                     // Keep default pouch count for new can
                 } else if let existingCan = canManager.findCanByBarcode(initialBarcode, context: viewContext) {
                     // Fall back to existing can data if no template
                     brand = existingCan.brand ?? ""
                     flavor = existingCan.flavor ?? ""
                     strength = existingCan.strength
+                    if existingCan.duration > 0 {
+                        hasCustomDuration = true
+                        duration = Int(existingCan.duration)
+                    }
                     // Keep default pouch count for new can
                 }
             }
@@ -145,12 +189,20 @@ struct CanDetailView: View {
                     brand = template.brand ?? ""
                     flavor = template.flavor ?? ""
                     strength = template.strength
+                    if template.duration > 0 {
+                        hasCustomDuration = true
+                        duration = Int(template.duration)
+                    }
                     // Keep the new pouch count
                 } else if let existingCan = canManager.findCanByBarcode(scannedBarcode, context: viewContext) {
                     // Fall back to existing can data if no template
                     brand = existingCan.brand ?? ""
                     flavor = existingCan.flavor ?? ""
                     strength = existingCan.strength
+                    if existingCan.duration > 0 {
+                        hasCustomDuration = true
+                        duration = Int(existingCan.duration)
+                    }
                     // Keep the new pouch count
                 }
             }
@@ -163,11 +215,19 @@ struct CanDetailView: View {
             brand = template.brand ?? ""
             flavor = template.flavor ?? ""
             strength = template.strength
+            if template.duration > 0 {
+                hasCustomDuration = true
+                duration = Int(template.duration)
+            }
         } else if let existingCan = canManager.findCanByBarcode(barcode, context: viewContext) {
             // Fall back to existing can data if no template
             brand = existingCan.brand ?? ""
             flavor = existingCan.flavor ?? ""
             strength = existingCan.strength
+            if existingCan.duration > 0 {
+                hasCustomDuration = true
+                duration = Int(existingCan.duration)
+            }
         }
     }
     
@@ -179,6 +239,7 @@ struct CanDetailView: View {
             can.strength = strength
             can.pouchCount = Int32(pouchCount)
             can.barcode = barcode.isEmpty ? nil : barcode
+            can.duration = hasCustomDuration ? Int32(duration) : 0
             
             // Also update CanTemplate if barcode is provided
             if let barcode = can.barcode, !barcode.isEmpty {
@@ -187,6 +248,7 @@ struct CanDetailView: View {
                     brand: brand,
                     flavor: flavor.isEmpty ? nil : flavor,
                     strength: strength,
+                    duration: hasCustomDuration ? duration : 0,
                     context: viewContext
                 )
             }
@@ -204,6 +266,7 @@ struct CanDetailView: View {
                 strength: strength,
                 pouchCount: pouchCount,
                 barcode: barcode.isEmpty ? nil : barcode,
+                duration: hasCustomDuration ? duration : 0,
                 context: viewContext
             )
         }
