@@ -22,14 +22,47 @@ struct LogPouchIntent: AppIntent {
             throw $mg.needsValueError("Enter amount between 0.1 and 100")
         }
 
-        let success = await MainActor.run {
+        let (success, pouchId) = await MainActor.run {
             let context = PersistenceController.shared.container.viewContext
-            return LogService.logPouch(amount: mg, ctx: context)
+            
+            // Check for active pouches first
+            let fetchRequest = PouchLog.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "removalTime == nil")
+            fetchRequest.fetchLimit = 1
+            
+            if let existingPouches = try? context.fetch(fetchRequest), !existingPouches.isEmpty {
+                return (false, nil as UUID?)
+            }
+            
+            // Create the pouch
+            let pouch = PouchLog(context: context)
+            pouch.pouchId = UUID()
+            pouch.insertionTime = .now
+            pouch.nicotineAmount = mg
+            
+            do {
+                try context.save()
+                
+                // Post notification that will trigger can selection in the app
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("PouchLogged"),
+                    object: nil,
+                    userInfo: [
+                        "mg": mg,
+                        "isFromShortcut": true,
+                        "pouchId": pouch.pouchId?.uuidString ?? ""
+                    ]
+                )
+                
+                return (true, pouch.pouchId)
+            } catch {
+                return (false, nil as UUID?)
+            }
         }
 
         if success {
             WidgetCenter.shared.reloadAllTimelines()
-            return .result(dialog: "Logged \(String(format: "%.1f", mg))mg pouch")
+            return .result(dialog: "Logged \(String(format: "%.1f", mg))mg pouch. Open app to select can.")
         } else {
             return .result(dialog: "Cannot log pouch: You already have an active pouch running. Remove it first.")
         }
@@ -42,17 +75,9 @@ struct Log3mgPouchIntent: AppIntent {
     static var openAppWhenRun: Bool = true
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let success = await MainActor.run {
-            let context = PersistenceController.shared.container.viewContext
-            return LogService.logPouch(amount: 3.0, ctx: context)
-        }
-
-        if success {
-            WidgetCenter.shared.reloadAllTimelines()
-            return .result(dialog: "Logged 3mg pouch")
-        } else {
-            return .result(dialog: "Cannot log pouch: You already have an active pouch running. Remove it first.")
-        }
+        let intent = LogPouchIntent()
+        intent.mg = 3.0
+        return try await intent.perform()
     }
 }
 
@@ -62,17 +87,9 @@ struct Log6mgPouchIntent: AppIntent {
     static var openAppWhenRun: Bool = true
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let success = await MainActor.run {
-            let context = PersistenceController.shared.container.viewContext
-            return LogService.logPouch(amount: 6.0, ctx: context)
-        }
-
-        if success {
-            WidgetCenter.shared.reloadAllTimelines()
-            return .result(dialog: "Logged 6mg pouch")
-        } else {
-            return .result(dialog: "Cannot log pouch: You already have an active pouch running. Remove it first.")
-        }
+        let intent = LogPouchIntent()
+        intent.mg = 6.0
+        return try await intent.perform()
     }
 }
 

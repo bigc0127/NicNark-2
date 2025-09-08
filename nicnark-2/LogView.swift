@@ -41,6 +41,23 @@ struct LogView: View {
     
     // Track pouches currently being removed to prevent duplicate operations
     @State private static var pouchesBeingRemoved: Set<String> = []
+    
+    // MARK: - Can Inventory Properties
+    @StateObject private var canManager = CanManager.shared
+    @State private var showingAddCan = false
+    @State private var showingCanSelection = false
+    @State private var pendingPouchFromShortcut: PouchLog?
+    @State private var selectedCan: Can?
+    
+    // Fetch active cans for display
+    @FetchRequest(
+        entity: Can.entity(),
+        sortDescriptors: [
+            NSSortDescriptor(keyPath: \Can.pouchCount, ascending: false),
+            NSSortDescriptor(keyPath: \Can.dateAdded, ascending: false)
+        ],
+        predicate: NSPredicate(format: "pouchCount > 0")
+    ) private var activeCans: FetchedResults<Can>
 
     // @FetchRequest automatically fetches data from Core Data and updates the view when data changes
     // This fetches all custom nicotine amount buttons, sorted by amount (3mg, 6mg, 9mg, etc.)
@@ -146,54 +163,132 @@ struct LogView: View {
                 }
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchLogged"))) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchLogged"))) { notification in
             // When a pouch is logged from anywhere (shortcuts, URL schemes, etc.), start the Live Activity timer
             startLiveTimerIfNeeded()
             // Also start the optimized timer for in-app updates
             if !activePouches.isEmpty {
                 startOptimizedTimer()
             }
+            
+            // Check if this was from a shortcut and needs can association
+            if let userInfo = notification.userInfo,
+               let isFromShortcut = userInfo["isFromShortcut"] as? Bool,
+               isFromShortcut,
+               let pouchId = userInfo["pouchId"] as? String {
+                // Find the pouch and show can selection
+                if let pouch = activePouches.first(where: { $0.pouchId?.uuidString == pouchId }) {
+                    pendingPouchFromShortcut = pouch
+                    showingCanSelection = true
+                }
+            }
+        }
+        .sheet(isPresented: $showingAddCan) {
+            CanDetailView()
+                .environment(\.managedObjectContext, ctx)
+        }
+        .sheet(isPresented: $showingCanSelection) {
+            CanSelectionSheet(pendingPouch: pendingPouchFromShortcut) { selectedCan in
+                if let pouch = pendingPouchFromShortcut {
+                    canManager.associatePouchWithCan(pouch, can: selectedCan, context: ctx)
+                }
+                pendingPouchFromShortcut = nil
+                showingCanSelection = false
+            }
+            .environment(\.managedObjectContext, ctx)
+        }
+        .onAppear {
+            canManager.fetchActiveCans(context: ctx)
         }
     }
 
     // MARK: - UI Components
 
     var quickButtonsView: some View {
-        VStack(spacing: 12) {
-            // Centered layout using HStack with Spacers for proper centering
-            HStack(spacing: 8) {
-                Spacer() // Push buttons to center
-                
-                Button("3 mg") { logPouch(3) }
-                    .buttonStyle(.bordered)
-                    .frame(height: 44)
-                
-                Button("6 mg") { logPouch(6) }
-                    .buttonStyle(.bordered)
-                    .frame(height: 44)
-
-                ForEach(customButtons, id: \.self) { button in
-                    Button("\(button.nicotineAmount, specifier: "%.0f") mg") {
-                        logPouch(button.nicotineAmount)
+        VStack(spacing: 16) {
+            // Can inventory scroll view
+            if !activeCans.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(activeCans, id: \.self) { can in
+                            CanCardView(can: can) {
+                                // Log pouch from this can
+                                logPouchFromCan(can)
+                            }
+                        }
                     }
-                    .buttonStyle(.bordered)
-                    .frame(height: 44)
+                    .padding(.horizontal)
                 }
-                
-                Spacer() // Push buttons to center
+                .frame(height: 200)
+            } else {
+                // Empty state - no cans
+                VStack(spacing: 12) {
+                    Image(systemName: "tray")
+                        .font(.system(size: 48))
+                        .foregroundColor(.gray)
+                    
+                    Text("No cans in inventory")
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+                    
+                    Text("Add a can to start tracking")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .frame(height: 180)
+                .frame(maxWidth: .infinity)
+                .background(Color(.secondarySystemBackground))
+                .cornerRadius(12)
+                .padding(.horizontal)
             }
             
-            // Separate "Custom" button that's wider and centered
-            HStack {
-                Spacer()
-                Button("Custom") { showInput.toggle() }
-                    .buttonStyle(.borderedProminent)
-                    .frame(height: 44)
-                    .frame(minWidth: 120) // Ensure "Custom" text is fully visible
-                Spacer()
+            // Add can and manual log buttons
+            HStack(spacing: 12) {
+                Button(action: {
+                    showingAddCan = true
+                }) {
+                    HStack {
+                        Image(systemName: "plus.circle.fill")
+                        Text("Add Can")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .frame(height: 44)
+                
+                Button(action: {
+                    showInput.toggle()
+                }) {
+                    HStack {
+                        Image(systemName: "number")
+                        Text("Manual Log")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .frame(height: 44)
+            }
+            .padding(.horizontal)
+            
+            // Legacy custom buttons for backward compatibility
+            if !customButtons.isEmpty {
+                Divider()
+                    .padding(.horizontal)
+                
+                Text("Quick Add (Legacy)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                HStack(spacing: 8) {
+                    ForEach(customButtons, id: \.self) { button in
+                        Button("\(button.nicotineAmount, specifier: "%.0f") mg") {
+                            logPouch(button.nicotineAmount)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+                .padding(.horizontal)
             }
         }
-        .padding(.horizontal)
     }
 
     var customRowView: some View {
@@ -280,6 +375,25 @@ struct LogView: View {
         
         // Update widget persistence helper immediately after logging
         updateWidgetPersistenceHelper()
+    }
+    
+    func logPouchFromCan(_ can: Can) {
+        guard can.pouchCount > 0 else { return }
+        
+        // Log the pouch with can association
+        let success = canManager.logPouchFromCan(
+            can: can,
+            amount: can.strength,
+            context: ctx
+        )
+        
+        if success {
+            startLiveTimerIfNeeded()
+            updateWidgetPersistenceHelper()
+            
+            // Refresh can list to update counts
+            canManager.fetchActiveCans(context: ctx)
+        }
     }
 
     func removePouch(_ pouch: PouchLog) {
