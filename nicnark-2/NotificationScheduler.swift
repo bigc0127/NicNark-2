@@ -15,6 +15,7 @@ class NotificationScheduler: ObservableObject {
     static let shared = NotificationScheduler()
     private let logger = Logger(subsystem: "com.nicnark.nicnark-2", category: "NotificationScheduler")
     private let settings = NotificationSettings.shared
+    private let alertTracker = InventoryAlertTracker.self
     
     // Notification identifiers
     private let canInventoryPrefix = "can.inventory."
@@ -59,6 +60,14 @@ class NotificationScheduler: ObservableObject {
         do {
             let lowInventoryCans = try context.fetch(request)
             
+            // Collect all valid can IDs for cleanup
+            let allCansRequest: NSFetchRequest<Can> = Can.fetchRequest()
+            let allCans = try context.fetch(allCansRequest)
+            let validCanIds = Set(allCans.map { $0.objectID.uriRepresentation().absoluteString })
+            
+            // Clean up stale alert records
+            alertTracker.purge(matching: validCanIds)
+            
             for can in lowInventoryCans {
                 let canId = can.objectID.uriRepresentation().absoluteString
                 let notificationId = "\(canInventoryPrefix)\(canId)"
@@ -67,7 +76,10 @@ class NotificationScheduler: ObservableObject {
                 let pending = await UNUserNotificationCenter.current().pendingNotificationRequests()
                 let alreadyScheduled = pending.contains { $0.identifier == notificationId }
                 
-                if !alreadyScheduled {
+                // Check 24-hour cooldown period
+                let canShowAlert = alertTracker.canShowAlert(for: canId)
+                
+                if !alreadyScheduled && canShowAlert {
                     let content = UNMutableNotificationContent()
                     content.title = "Low Inventory Alert"
                     content.body = "\(can.brand ?? "Can") \(can.flavor ?? "") has only \(can.pouchCount) pouches remaining"
@@ -84,7 +96,15 @@ class NotificationScheduler: ObservableObject {
                     let request = UNNotificationRequest(identifier: notificationId, content: content, trigger: trigger)
                     
                     try? await UNUserNotificationCenter.current().add(request)
-                    logger.info("Scheduled low inventory alert for \(can.brand ?? "unknown")")
+                    
+                    // Record that we sent an alert for this can
+                    alertTracker.recordAlert(for: canId)
+                    
+                    logger.info("Scheduled low inventory alert for \(can.brand ?? "unknown") (ID: \(canId))")
+                } else if alreadyScheduled {
+                    logger.debug("Skipped inventory alert for \(can.brand ?? "unknown") - already scheduled")
+                } else {
+                    logger.debug("Skipped inventory alert for \(can.brand ?? "unknown") - within 24h cooldown")
                 }
             }
         } catch {

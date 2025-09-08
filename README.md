@@ -161,6 +161,13 @@ This project is licensed under the **Creative Commons Attribution-NonCommercial 
 
 [View License](LICENSE.md) | [Human-Readable Summary](https://creativecommons.org/licenses/by-nc/4.0/)
 
+## 🆕 Recent Updates
+
+### Version 2.0.1
+- **🔔 Smart Inventory Alerts** - Low inventory alerts now respect a 24-hour cooldown per can to prevent repetitive notifications
+- **🧪 Enhanced Testing** - Added comprehensive unit tests for notification cooldown functionality
+- **🔧 Improved Reliability** - Better notification management and cleanup of stale alert records
+
 ## 🎯 Roadmap
 
 ### Planned Features
