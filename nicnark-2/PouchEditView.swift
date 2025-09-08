@@ -219,6 +219,12 @@ struct PouchEditView: View {
     }
     
     private func deletePouch() {
+        // If this pouch was from a can, restore the pouch count
+        if let can = pouchLog.can {
+            can.pouchCount += 1  // Restore one pouch to the can
+            print("📦 Restored pouch to can \(can.brand ?? "Unknown") after deletion - new count: \(can.pouchCount)")
+        }
+        
         // Delete from Core Data
         viewContext.delete(pouchLog)
         
@@ -230,6 +236,9 @@ struct PouchEditView: View {
             
             // Post notification for other views to update
             NotificationCenter.default.post(name: NSNotification.Name("PouchDeleted"), object: nil)
+            
+            // Update can manager to refresh inventory
+            CanManager.shared.fetchActiveCans(context: viewContext)
             
             onDelete()
             dismiss()

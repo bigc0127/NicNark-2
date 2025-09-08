@@ -54,9 +54,11 @@ enum LogService {
         pouch.insertionTime = .now
         pouch.nicotineAmount = mg
         
-        // Associate with can if provided
+        // Associate with can if provided and decrement count
         if let can = can {
             can.addToPouchLogs(pouch)
+            can.usePouch()  // Decrement the pouch count
+            print("📦 Used pouch from can \(can.brand ?? "Unknown") - remaining: \(can.pouchCount)")
         }
         
         // Save with proper error handling and CloudKit sync trigger

@@ -39,6 +39,17 @@ class CanManager: ObservableObject {
         can.barcode = barcode
         can.dateAdded = Date()
         
+        // Also create or update CanTemplate if barcode is provided
+        if let barcode = barcode, !barcode.isEmpty {
+            createOrUpdateCanTemplate(
+                barcode: barcode,
+                brand: brand,
+                flavor: flavor,
+                strength: strength,
+                context: context
+            )
+        }
+        
         do {
             try context.save()
         } catch {
@@ -69,13 +80,11 @@ class CanManager: ObservableObject {
     ) -> Bool {
         guard can.pouchCount > 0 else { return false }
         
-        // Create the pouch log
+        // Create the pouch log (LogService now handles decrementing the count)
         let success = LogService.logPouch(amount: amount, ctx: context, can: can)
         
         if success {
-            // Decrement can count
-            can.usePouch()
-            
+            // Save context to persist the count change
             do {
                 try context.save()
             } catch {
@@ -87,6 +96,17 @@ class CanManager: ObservableObject {
     }
     
     func deleteCan(_ can: Can, context: NSManagedObjectContext) {
+        // Ensure CanTemplate is preserved before deleting can
+        if let barcode = can.barcode, !barcode.isEmpty {
+            createOrUpdateCanTemplate(
+                barcode: barcode,
+                brand: can.brand ?? "",
+                flavor: can.flavor,
+                strength: can.strength,
+                context: context
+            )
+        }
+        
         context.delete(can)
         
         do {
@@ -111,6 +131,63 @@ class CanManager: ObservableObject {
         }
         
         return nil
+    }
+    
+    func findActiveCanByBarcode(_ barcode: String, context: NSManagedObjectContext) -> Can? {
+        let request: NSFetchRequest<Can> = Can.fetchRequest()
+        request.predicate = NSPredicate(format: "barcode == %@ AND pouchCount > 0", barcode)
+        request.fetchLimit = 1
+        
+        do {
+            return try context.fetch(request).first
+        } catch {
+            print("Failed to find active can by barcode: \(error)")
+        }
+        
+        return nil
+    }
+    
+    // MARK: - CanTemplate Operations
+    
+    func findCanTemplateByBarcode(_ barcode: String, context: NSManagedObjectContext) -> CanTemplate? {
+        let request: NSFetchRequest<CanTemplate> = CanTemplate.fetchRequest()
+        request.predicate = NSPredicate(format: "barcode == %@", barcode)
+        request.fetchLimit = 1
+        
+        do {
+            return try context.fetch(request).first
+        } catch {
+            print("Failed to find can template by barcode: \(error)")
+        }
+        
+        return nil
+    }
+    
+    func createOrUpdateCanTemplate(
+        barcode: String,
+        brand: String,
+        flavor: String?,
+        strength: Double,
+        context: NSManagedObjectContext
+    ) {
+        let template = findCanTemplateByBarcode(barcode, context: context) ?? CanTemplate(context: context)
+        
+        if template.id == nil {
+            template.id = UUID()
+            template.barcode = barcode
+            template.dateCreated = Date()
+        }
+        
+        template.brand = brand
+        template.flavor = flavor
+        template.strength = strength
+        template.lastUpdated = Date()
+        
+        do {
+            try context.save()
+        } catch {
+            print("Failed to save can template: \(error)")
+        }
     }
     
     // MARK: - Can Selection for Shortcuts

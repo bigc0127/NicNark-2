@@ -56,6 +56,8 @@ struct LogView: View {
     @State private var selectedCan: Can?
     @State private var showingEditCan = false
     @State private var canToEdit: Can?
+    @State private var showingDuplicateCanAlert = false
+    @State private var duplicateCanForAlert: Can?
     
     // Fetch active cans for display
     @FetchRequest(
@@ -205,10 +207,18 @@ struct LogView: View {
             if let can = canToEdit {
                 CanDetailView(editingCan: can)
                     .environment(\.managedObjectContext, ctx)
-                    .onDisappear {
-                        canToEdit = nil
-                        canManager.fetchActiveCans(context: ctx)
+            } else {
+                // Fallback if can is nil (shouldn't happen)
+                Text("Error: No can selected")
+                    .onAppear {
+                        showingEditCan = false
                     }
+            }
+        }
+        .onChange(of: showingEditCan) { _, isShowing in
+            if !isShowing {
+                canToEdit = nil
+                canManager.fetchActiveCans(context: ctx)
             }
         }
         .sheet(isPresented: $showingBarcodeScanner) {
@@ -230,6 +240,36 @@ struct LogView: View {
         .onAppear {
             canManager.fetchActiveCans(context: ctx)
         }
+        .alert("Can Already in Inventory", isPresented: $showingDuplicateCanAlert) {
+            Button("Add Pouches to Existing Can") {
+                if let can = duplicateCanForAlert {
+                    // Add the full pouch count to the existing can
+                    can.pouchCount += can.initialCount
+                    do {
+                        try ctx.save()
+                        canManager.fetchActiveCans(context: ctx)
+                    } catch {
+                        print("Failed to update can count: \(error)")
+                    }
+                }
+                duplicateCanForAlert = nil
+            }
+            Button("Add as Separate Can") {
+                // Show add can screen to create a new can with the same barcode
+                if let can = duplicateCanForAlert {
+                    scannedBarcode = can.barcode
+                    showingAddCan = true
+                }
+                duplicateCanForAlert = nil
+            }
+            Button("Cancel", role: .cancel) {
+                duplicateCanForAlert = nil
+            }
+        } message: {
+            if let can = duplicateCanForAlert {
+                Text("\(can.brand ?? "Unknown") \(can.flavor ?? "") (\(Int(can.strength))mg) is already in your inventory with \(can.pouchCount) pouches. Would you like to add more pouches to this can or track it as a separate can?")
+            }
+        }
     }
 
     // MARK: - UI Components
@@ -250,7 +290,10 @@ struct LogView: View {
                                 onEdit: {
                                     // Edit this can
                                     canToEdit = can
-                                    showingEditCan = true
+                                    // Small delay to ensure canToEdit is set before sheet presents
+                                    DispatchQueue.main.async {
+                                        showingEditCan = true
+                                    }
                                 }
                             )
                         }
@@ -422,18 +465,14 @@ struct LogView: View {
     // MARK: – CRUD Operations
     
     func handleScannedBarcode(_ barcode: String) {
-        // Check if can with this barcode exists
-        if let existingCan = canManager.findCanByBarcode(barcode, context: ctx) {
-            // Can exists, log a pouch from it if it has pouches left
-            if existingCan.pouchCount > 0 {
-                logPouchFromCan(existingCan)
-            } else {
-                // Can is empty, show add can screen with barcode pre-filled
-                scannedBarcode = barcode
-                showingAddCan = true
-            }
+        // Check if there's an active can with this barcode in inventory
+        if let activeCan = canManager.findActiveCanByBarcode(barcode, context: ctx) {
+            // Can exists with pouches, show dialog to ask user what to do
+            duplicateCanForAlert = activeCan
+            showingDuplicateCanAlert = true
         } else {
-            // Can doesn't exist, show add can screen with barcode pre-filled
+            // Either no can exists or can is empty
+            // Show add can screen with barcode and any template data pre-filled
             scannedBarcode = barcode
             showingAddCan = true
         }
@@ -498,11 +537,8 @@ struct LogView: View {
             let removalTime = Date.now
             pouch.removalTime = removalTime
             
-            // If this pouch was from a can, restore the can count
-            if let can = pouch.can {
-                can.pouchCount += 1  // Restore one pouch to the can
-                print("📦 Restored pouch to can \(can.brand ?? "Unknown") - new count: \(can.pouchCount)")
-            }
+            // NOTE: We do NOT restore the pouch to the can here.
+            // Pouches are only restored when deleted from usage log, not when marked as complete.
             
             try? ctx.save()
             

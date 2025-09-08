@@ -29,7 +29,7 @@ struct CanDetailView: View {
     }
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             Form {
                 Section(header: Text("Brand Information")) {
                     TextField("Brand Name", text: $brand)
@@ -119,8 +119,14 @@ struct CanDetailView: View {
             } else if let initialBarcode = initialBarcode {
                 // Pre-fill barcode if provided
                 barcode = initialBarcode
-                // Check if this barcode already exists and pre-fill other fields
-                if let existingCan = canManager.findCanByBarcode(initialBarcode, context: viewContext) {
+                // First check for CanTemplate data
+                if let template = canManager.findCanTemplateByBarcode(initialBarcode, context: viewContext) {
+                    brand = template.brand ?? ""
+                    flavor = template.flavor ?? ""
+                    strength = template.strength
+                    // Keep default pouch count for new can
+                } else if let existingCan = canManager.findCanByBarcode(initialBarcode, context: viewContext) {
+                    // Fall back to existing can data if no template
                     brand = existingCan.brand ?? ""
                     flavor = existingCan.flavor ?? ""
                     strength = existingCan.strength
@@ -134,8 +140,14 @@ struct CanDetailView: View {
                 showingBarcodeScanner = false
                 
                 // Check if this barcode already exists
-                if let existingCan = canManager.findCanByBarcode(scannedBarcode, context: viewContext) {
-                    // Pre-fill with existing can data
+                if let template = canManager.findCanTemplateByBarcode(scannedBarcode, context: viewContext) {
+                    // Pre-fill with template data
+                    brand = template.brand ?? ""
+                    flavor = template.flavor ?? ""
+                    strength = template.strength
+                    // Keep the new pouch count
+                } else if let existingCan = canManager.findCanByBarcode(scannedBarcode, context: viewContext) {
+                    // Fall back to existing can data if no template
                     brand = existingCan.brand ?? ""
                     flavor = existingCan.flavor ?? ""
                     strength = existingCan.strength
@@ -146,8 +158,13 @@ struct CanDetailView: View {
     }
     
     private func checkForExistingBarcode() {
-        if let existingCan = canManager.findCanByBarcode(barcode, context: viewContext) {
-            // Pre-fill with existing can data
+        if let template = canManager.findCanTemplateByBarcode(barcode, context: viewContext) {
+            // Pre-fill with template data
+            brand = template.brand ?? ""
+            flavor = template.flavor ?? ""
+            strength = template.strength
+        } else if let existingCan = canManager.findCanByBarcode(barcode, context: viewContext) {
+            // Fall back to existing can data if no template
             brand = existingCan.brand ?? ""
             flavor = existingCan.flavor ?? ""
             strength = existingCan.strength
@@ -163,13 +180,24 @@ struct CanDetailView: View {
             can.pouchCount = Int32(pouchCount)
             can.barcode = barcode.isEmpty ? nil : barcode
             
+            // Also update CanTemplate if barcode is provided
+            if let barcode = can.barcode, !barcode.isEmpty {
+                canManager.createOrUpdateCanTemplate(
+                    barcode: barcode,
+                    brand: brand,
+                    flavor: flavor.isEmpty ? nil : flavor,
+                    strength: strength,
+                    context: viewContext
+                )
+            }
+            
             do {
                 try viewContext.save()
             } catch {
                 print("Failed to update can: \(error)")
             }
         } else {
-            // Create new can
+            // Create new can (createCan already handles CanTemplate creation)
             _ = canManager.createCan(
                 brand: brand,
                 flavor: flavor.isEmpty ? nil : flavor,

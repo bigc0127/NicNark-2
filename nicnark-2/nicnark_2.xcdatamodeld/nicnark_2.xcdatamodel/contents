@@ -17,6 +17,15 @@
         <attribute name="strength" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
         <relationship name="pouchLogs" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="PouchLog" inverseName="can" inverseEntity="PouchLog"/>
     </entity>
+    <entity name="CanTemplate" representedClassName="CanTemplate" syncable="YES" codeGenerationType="class">
+        <attribute name="barcode" optional="YES" attributeType="String"/>
+        <attribute name="brand" optional="YES" attributeType="String"/>
+        <attribute name="dateCreated" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="flavor" optional="YES" attributeType="String"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="lastUpdated" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="strength" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+    </entity>
     <entity name="PouchLog" representedClassName="PouchLog" syncable="YES" codeGenerationType="class">
         <attribute name="insertionTime" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="nicotineAmount" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
