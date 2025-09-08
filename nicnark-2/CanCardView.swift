@@ -24,16 +24,23 @@ struct CanCardView: View {
     var body: some View {
         Button(action: onSelect) {
             VStack(spacing: 8) {
-                // Brand and flavor
+                // Flavor and brand
                 VStack(spacing: 2) {
-                    Text(can.brand ?? "Unknown")
-                        .font(.headline)
-                        .lineLimit(1)
-                    
+                    // Show flavor prominently, or brand if no flavor
                     if let flavor = can.flavor, !flavor.isEmpty {
                         Text(flavor)
+                            .font(.headline)
+                            .lineLimit(1)
+                        
+                        // Brand shown below in smaller text
+                        Text(can.brand ?? "Unknown")
                             .font(.caption)
                             .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    } else {
+                        // If no flavor, just show brand as before
+                        Text(can.brand ?? "Unknown")
+                            .font(.headline)
                             .lineLimit(1)
                     }
                 }
