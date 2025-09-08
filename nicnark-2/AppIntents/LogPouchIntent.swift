@@ -22,7 +22,7 @@ struct LogPouchIntent: AppIntent {
             throw $mg.needsValueError("Enter amount between 0.1 and 100")
         }
 
-        let (success, pouchId) = await MainActor.run {
+        let (success, _) = await MainActor.run {
             let context = PersistenceController.shared.container.viewContext
             
             // Check for active pouches first
