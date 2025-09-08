@@ -11,11 +11,24 @@ import CloudKit
 import ActivityKit
 import os.log
 
+/**
+ A thin wrapper around NSPersistentCloudKitContainer that configures:
+ - Core Data with CloudKit sync (automatic history tracking + remote change notifications)
+ - App Group storage so the main app and widgets share the same SQLite store
+ - Basic CloudKit account/status checks and logging for easier debugging
+ - Live Activity syncing (iOS 16.1+) in response to remote CloudKit changes
+
+ This controller exposes a shared singleton for app-wide access and a preview instance for SwiftUI previews.
+ */
 struct PersistenceController {
+    /// Shared singleton instance used by the running app.
     static let shared = PersistenceController()
+    /// Logger for CloudKit-related messages.
     private static let logger = Logger(subsystem: "com.nicnark.nicnark-2", category: "CloudKit")
 
-    @MainActor
+@MainActor
+    /// An in-memory PersistenceController for SwiftUI previews and tests.
+    /// Populated with a single sample PouchLog so UI has realistic data.
     static let preview: PersistenceController = {
         let result = PersistenceController(inMemory: true)
         let viewContext = result.container.viewContext
@@ -36,8 +49,12 @@ struct PersistenceController {
         return result
     }()
 
+/// The Core Data container backed by CloudKit (via NSPersistentCloudKitContainer).
+    /// This is configured to store data in the app group so widgets can access the same database.
     let container: NSPersistentCloudKitContainer
 
+/// Initializes the Core Data + CloudKit stack.
+    /// - Parameter inMemory: When true, uses an in-memory store (useful for previews/tests).
     init(inMemory: Bool = false) {
         container = NSPersistentCloudKitContainer(name: "nicnark_2")
 
@@ -126,6 +143,8 @@ print("📍 Store URL: \(storeDescription.url?.absoluteString ?? "Unknown")")
         }
     }
 
+/// Saves pending changes on the main view context, if any.
+    /// Errors are logged in DEBUG builds instead of crashing the app.
     func save() {
         let context = container.viewContext
         if context.hasChanges {
@@ -142,6 +161,8 @@ print("📍 Store URL: \(storeDescription.url?.absoluteString ?? "Unknown")")
     
     // MARK: - CloudKit Sync
     
+/// Attempts to nudge CloudKit to sync by saving a background context and processing history.
+    /// This is safe to call when you want to ensure remote devices see recent changes.
     func triggerCloudKitSync() async {
         // Force a background context save to trigger CloudKit sync
         let backgroundContext = container.newBackgroundContext()
@@ -168,6 +189,7 @@ print("📍 Store URL: \(storeDescription.url?.absoluteString ?? "Unknown")")
     
     // MARK: - CloudKit Status Checking
     
+/// Checks the user's iCloud account status and logs human-readable messages for debugging.
     private static func checkCloudKitStatus() async {
         let cloudKitContainer = CKContainer(identifier: "iCloud.ConnorNeedling.nicnark-2")
         
@@ -196,12 +218,17 @@ print("📍 Store URL: \(storeDescription.url?.absoluteString ?? "Unknown")")
     
     // MARK: - Remote Change Handling
     
+/// Handles remote CloudKit changes by syncing Live Activities with the latest Core Data state.
+    /// - Parameter container: The persistent container used to read current state.
     private static func handleRemoteChanges(container: NSPersistentCloudKitContainer?) async {
         guard let container = container else { return }
         // When CloudKit syncs new data, check for active pouches that need Live Activities
         await syncLiveActivitiesWithRemoteData(container: container)
     }
     
+/// Reconciles the Live Activities on-device with the canonical Core Data state after a sync.
+    /// - Important: Only attempts to start a Live Activity when exactly one pouch is active.
+    ///   If multiple are active (unexpected), it skips creation to avoid inconsistent UI.
     private static func syncLiveActivitiesWithRemoteData(container: NSPersistentCloudKitContainer) async {
         await MainActor.run {
             let context = container.viewContext

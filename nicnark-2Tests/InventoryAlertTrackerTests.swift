@@ -2,22 +2,58 @@
 //  InventoryAlertTrackerTests.swift
 //  nicnark-2Tests
 //
-//  Tests for inventory alert 24-hour cooldown functionality
+//  Unit Tests for Inventory Alert 24-Hour Cooldown System
+//
+//  This test suite validates the InventoryAlertTracker utility that prevents
+//  inventory low stock notifications from spamming users. The tests ensure:
+//
+//  Testing Strategy:
+//  • Boundary Testing - Tests the exact 24-hour cooldown threshold
+//  • State Management - Verifies proper setup/teardown between tests
+//  • Edge Cases - Handles non-existent records and empty states
+//  • Data Persistence - Confirms UserDefaults storage/retrieval
+//  • Cleanup Logic - Tests purging of stale/invalid records
+//
+//  Test Isolation:
+//  Each test is completely isolated using setUp()/tearDown() to reset
+//  the tracker state, preventing test interdependencies and flaky results.
+//
+//  Time-based Testing:
+//  Uses Date manipulation to simulate the passage of time without
+//  actually waiting, allowing fast and reliable time-dependent tests.
 //
 
-import XCTest
-@testable import nicnark_2
+import XCTest              // Apple's unit testing framework
+@testable import nicnark_2  // Imports internal app classes for testing
 
+/**
+ * InventoryAlertTrackerTests: Unit test suite for the 24-hour cooldown system.
+ * 
+ * This class inherits from XCTestCase, Apple's standard unit testing base class.
+ * Each test method (starting with "test") is automatically discovered and run by Xcode.
+ */
 class InventoryAlertTrackerTests: XCTestCase {
     
+    /**
+     * setUp: Called before each individual test method runs.
+     * 
+     * This ensures each test starts with a clean slate by clearing any
+     * leftover data from previous tests. Critical for test isolation.
+     */
     override func setUp() {
         super.setUp()
-        // Reset tracker state before each test
+        // Reset tracker state before each test to ensure test isolation
         InventoryAlertTracker.reset()
     }
     
+    /**
+     * tearDown: Called after each individual test method completes.
+     * 
+     * Cleans up any test data to prevent side effects on subsequent tests
+     * or other test suites that might run after this one.
+     */
     override func tearDown() {
-        // Clean up after each test
+        // Clean up after each test to prevent side effects
         InventoryAlertTracker.reset()
         super.tearDown()
     }

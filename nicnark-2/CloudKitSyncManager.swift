@@ -2,7 +2,31 @@
 // CloudKitSyncManager.swift
 // nicnark-2
 //
-// Manages CloudKit synchronization and cross-device Live Activity coordination
+// Advanced CloudKit Synchronization & Cross-Device Coordination Manager
+//
+// This manager handles the complex orchestration of data synchronization across multiple devices.
+// Key responsibilities include:
+//
+// Data Synchronization:
+// • Monitoring CloudKit account status and availability
+// • Detecting when data changes arrive from other devices
+// • Triggering manual sync operations when needed
+// • Handling sync conflicts and error recovery
+//
+// Cross-Device Live Activity Management:
+// • Starting Live Activities for pouches logged on other devices
+// • Ending Live Activities for pouches removed on other devices
+// • Preventing duplicate activities across multiple devices
+// • Ensuring consistent activity state across iPhone, iPad, etc.
+//
+// Widget & UI Coordination:
+// • Updating widgets after sync events
+// • Maintaining widget persistence data consistency
+// • Publishing sync status for UI indicators
+// • Managing background sync preferences
+//
+// This system ensures users have a seamless experience when using the app across
+// multiple Apple devices signed into the same iCloud account.
 //
 
 import Foundation
@@ -13,16 +37,37 @@ import UIKit
 import WidgetKit
 import os.log
 
+/**
+ * CloudKitSyncManager: Orchestrates advanced CloudKit synchronization for multi-device scenarios.
+ * 
+ * This singleton manages the sophisticated coordination required when users have the app
+ * installed on multiple devices (iPhone, iPad) signed into the same iCloud account.
+ * 
+ * Key challenges this solves:
+ * - Preventing duplicate Live Activities across devices
+ * - Synchronizing pouch state changes in real-time
+ * - Maintaining consistent UI state across all devices
+ * - Handling network failures and sync conflicts gracefully
+ * 
+ * @available(iOS 16.1, *) because Live Activity coordination requires this iOS version
+ * @MainActor ensures all UI updates happen on the main thread
+ */
 @available(iOS 16.1, *)
 @MainActor
 class CloudKitSyncManager: ObservableObject {
+    /// Shared singleton instance used throughout the app
     static let shared = CloudKitSyncManager()
     
+    /// Logger for debugging complex sync scenarios
     private let logger = Logger(subsystem: "com.nicnark.nicnark-2", category: "CloudKitSync")
+    /// CloudKit container for accessing iCloud data
     private let container = CKContainer(identifier: "iCloud.ConnorNeedling.nicnark-2")
     
+    /// Published property indicating if CloudKit sync is available (UI can observe this)
     @Published var isCloudKitAvailable = false
+    /// When the last sync operation completed (for UI display)
     @Published var lastSyncDate: Date?
+    /// Current sync status message (for debugging and UI feedback)
     @Published var syncStatus: String = "Initializing..."
     
     private init() {

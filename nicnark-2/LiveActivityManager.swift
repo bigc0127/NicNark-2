@@ -1,67 +1,137 @@
 // LiveActivityManager.swift
+//
+// Live Activities Management for iOS 16.1+
+//
+// Live Activities appear on the Lock Screen and Dynamic Island showing real-time pouch countdown.
+// This manager handles the complete lifecycle:
+// • Creating new Live Activities when pouches are logged
+// • Updating activities with current nicotine levels and progress
+// • Preventing duplicate activities (one active pouch at a time)
+// • Synchronizing activities across devices via CloudKit
+// • Background updates to keep activities fresh when app is backgrounded
+// • Cleanup when pouches are removed or timers complete
+//
+// Key iOS integration points:
+// • ActivityKit framework for Live Activity creation and updates
+// • Background Tasks framework for keeping activities updated
+// • Core Data for verifying pouch status and preventing stale activities
+// • WidgetKit for coordinated widget updates
+//
 
-@preconcurrency import BackgroundTasks
-import ActivityKit
+@preconcurrency import BackgroundTasks  // Background processing for activity updates
+import ActivityKit      // iOS 16.1+ Live Activities framework
 import Foundation
 import SwiftUI
-import CoreData
-import os.log
-import UIKit
-import WidgetKit
+import CoreData        // Database access for pouch verification
+import os.log          // System logging
+import UIKit          // App lifecycle notifications
+import WidgetKit      // Widget timeline management
 
+/**
+ * LiveActivityManager: Manages Live Activities for pouch countdown timers.
+ * 
+ * Live Activities are iOS 16.1+ features that show dynamic content on the Lock Screen
+ * and Dynamic Island. For nicotine pouches, this displays:
+ * - Real-time countdown timer
+ * - Current absorption progress
+ * - Nicotine level calculations
+ * - "Remove Pouch" action button
+ * 
+ * The manager is thread-safe and prevents duplicate activities while handling
+ * complex scenarios like device syncing, app backgrounding, and activity restoration.
+ * 
+ * @available(iOS 16.1, *) ensures this only compiles and runs on supported iOS versions
+ * @MainActor ensures all UI updates happen on the main thread
+ */
 @available(iOS 16.1, *)
 @MainActor
 class LiveActivityManager: ObservableObject {
+    /// Published property that UI can observe to show/hide activity-related elements
     @Published var hasActiveNotification: Bool = false
+    /// Logger for debugging activity lifecycle issues
     private let logger = Logger(subsystem: "com.nicnark.nicnark-2", category: "LiveActivity")
     
-    // Track active activities by pouch ID to prevent duplicates
-    private static var activeActivitiesByPouchId: [String: String] = [:] // pouchId -> activityId
+    /// Maps pouch UUIDs to activity IDs to prevent duplicate activities for the same pouch
+    /// Dictionary: pouchId (String) -> activityId (String)
+    private static var activeActivitiesByPouchId: [String: String] = [:]
     
-    // Serial queue to prevent race conditions in activity management
+    /// Serial queue to prevent race conditions when multiple parts of the app try to manage activities
+    /// Uses userInitiated QoS for responsive Live Activity updates
     private static let activityQueue = DispatchQueue(label: "com.nicnark.liveactivity.queue", qos: .userInitiated)
     
-    // Minimal snapshot type for background computations
+    /**
+     * TrackedActivity: Lightweight representation of a Live Activity for background processing.
+     * 
+     * This struct contains just the essential data needed for background tasks to update
+     * Live Activities without loading the full ActivityKit framework or UI components.
+     * Used by background tasks to efficiently track and update multiple activities.
+     */
     struct TrackedActivity: Hashable {
-        let id: String
-        let pouchId: String
-        let startTime: Date
-        let endTime: Date
-        let totalNicotine: Double
+        let id: String              // ActivityKit activity identifier
+        let pouchId: String         // Our app's pouch UUID
+        let startTime: Date         // When the pouch was inserted
+        let endTime: Date           // When absorption completes
+        let totalNicotine: Double   // Original nicotine amount
     }
     
+    /**
+     * Initializes the LiveActivityManager and sets up app lifecycle monitoring.
+     * 
+     * This constructor:
+     * 1. Checks for existing activities from previous app launches
+     * 2. Sets up observers for app state changes to manage background updates
+     * 3. Schedules background tasks to keep activities fresh
+     */
     init() {
+        // Check if we have any existing Live Activities from previous app sessions
         Task { await checkForActiveActivities() }
-        // When leaving foreground, ensure background maintenance is scheduled
+        
+        // When app goes to background, schedule background tasks to keep activities updated
         NotificationCenter.default.addObserver(
-            forName: UIApplication.willResignActiveNotification,
+            forName: UIApplication.willResignActiveNotification,  // App losing focus
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                self?.scheduleBackgroundMaintainers()
+                self?.scheduleBackgroundMaintainers()  // Set up background refresh
             }
         }
         
-        // When returning to foreground, refresh activity count
+        // When app returns to foreground, refresh our activity count
         NotificationCenter.default.addObserver(
-            forName: UIApplication.didBecomeActiveNotification,
+            forName: UIApplication.didBecomeActiveNotification,  // App gaining focus
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { await self?.checkForActiveActivities() }
+            Task { await self?.checkForActiveActivities() }  // Sync with iOS activity state
         }
     }
     
+    /**
+     * Counts current Live Activities and updates the UI state accordingly.
+     * 
+     * This method queries iOS for the current number of active Live Activities
+     * and updates the @Published hasActiveNotification property so UI components
+     * can show/hide activity-related elements (like toolbar badges).
+     */
     private func checkForActiveActivities() async {
         let count = Activity<PouchActivityAttributes>.activities.count
-        hasActiveNotification = count > 0
+        hasActiveNotification = count > 0  // Update UI state
         logger.info("Active activities: \(count)")
     }
     
-    // MARK: - Core Data Guards
+    // MARK: - Core Data Integration
+    // These methods ensure Live Activities stay synchronized with the app's database
     
-    /// Check if a pouch is still active (not removed) in Core Data
+    /**
+     * Verifies that a pouch is still active in the database before creating/updating its Live Activity.
+     * 
+     * This prevents stale Live Activities from being created for pouches that were already removed
+     * on other devices or through other app entry points. Essential for CloudKit sync scenarios.
+     * 
+     * - Parameter pouchId: UUID string of the pouch to check
+     * - Returns: true if pouch exists and removalTime is nil, false otherwise
+     */
     static func isPouchActive(_ pouchId: String) async -> Bool {
         await MainActor.run {
             let context = PersistenceController.shared.container.viewContext

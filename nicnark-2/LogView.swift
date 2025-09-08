@@ -2,8 +2,18 @@
 // LogView.swift
 // nicnark-2
 //
-// The main view where users log nicotine pouches and see countdown timers
-// Uses LogService so UI/Shortcuts/URL share the same flow.
+// The Primary Pouch Logging Interface
+//
+// This is the main tab users see when opening the app. It handles:
+// • Displaying can inventory as horizontal scrollable cards
+// • Quick pouch logging from tracked cans (one tap to log and decrement inventory)
+// • Manual dosage entry for custom amounts
+// • Live countdown display with absorption progress and nicotine level calculations
+// • Real-time timer updates that sync across widgets, Live Activities, and in-app UI
+// • CloudKit sync status indicators
+// • Barcode scanning for adding new cans to inventory
+//
+// All logging operations use LogService for consistency across UI, Shortcuts, and URL schemes.
 //
 
 // Import necessary frameworks
@@ -14,101 +24,131 @@ import ActivityKit  // For Live Activities (Dynamic Island & Lock Screen)
 import Combine      // For handling data streams and notifications
 
 /**
- * LogView: The primary interface for logging nicotine pouches
- * This view handles:
- * - Displaying quick buttons for common nicotine amounts (3mg, 6mg, custom amounts)
- * - Showing active pouch countdown with absorption progress
- * - Managing Live Activities for Lock Screen/Dynamic Island display
- * - Real-time timer updates and nicotine calculation
+ * LogView: The main pouch logging interface that users see when they open the app.
+ * 
+ * This SwiftUI view is designed around the core user workflow:
+ * 1. User has cans in their inventory (shown as horizontal scrollable cards)
+ * 2. User taps a can to log a pouch from it (automatically decrements inventory)
+ * 3. A live countdown begins showing absorption progress and current nicotine level
+ * 4. Timer updates propagate to widgets, Live Activities, and other devices via CloudKit
+ * 
+ * The view handles multiple input methods:
+ * • Can inventory cards (primary method) - one tap logging with automatic inventory tracking
+ * • Manual entry - custom dosage amounts for users who don't track cans
+ * • Barcode scanning - quick way to add new cans to inventory
+ * • Legacy custom buttons - backward compatibility for existing users
+ * 
+ * Real-time features:
+ * • In-app countdown timer (updates every second for smooth progress bars)
+ * • Live Activity updates (every minute to preserve battery)
+ * • Widget timeline updates (triggered on pouch events)
+ * • CloudKit sync status overlay (shows when syncing across devices)
  */
-// Dummy sync state for older iOS versions
+/**
+ * DummySyncState: Fallback sync state for iOS versions that don't support CloudKit sync features.
+ * 
+ * On iOS 16.1+, the app uses CloudKitSyncState for real sync monitoring.
+ * On older iOS versions, this dummy class provides the same interface but with no-op implementations.
+ * This allows the UI code to work consistently across iOS versions without #available checks everywhere.
+ */
 class DummySyncState: ObservableObject {
-    @Published var isSyncing = false
-    @Published var syncCompleted = true
-    @Published var syncProgress: Double = 1.0
-    @Published var syncMessage = "Ready"
-    var isCloudKitEnabled = false
+    @Published var isSyncing = false        // Always false - no real syncing on older iOS
+    @Published var syncCompleted = true     // Always true - simulates completed state
+    @Published var syncProgress: Double = 1.0  // Always 100% complete
+    @Published var syncMessage = "Ready"    // Static ready message
+    var isCloudKitEnabled = false           // CloudKit features not available
     
     func startInitialSync() async {
-        // No-op for older iOS versions
+        // No-op for older iOS versions - no actual sync performed
     }
 }
 
 struct LogView: View {
     // MARK: - Core Data Properties
-    // @Environment gets the database context from the SwiftUI environment
-    @Environment(\.managedObjectContext) private var ctx
+    // @Environment gets values from the SwiftUI environment that are shared across views
+    @Environment(\.managedObjectContext) private var ctx  // Database context for all Core Data operations
     
-    // Track pouches currently being removed to prevent duplicate operations
+    // Static set to track pouches being removed across all view instances to prevent race conditions
+    // When multiple parts of the app try to remove the same pouch simultaneously (notifications, UI, etc.)
     @State private static var pouchesBeingRemoved: Set<String> = []
     
-    // MARK: - Timer Settings
-    @StateObject private var timerSettings = TimerSettings.shared
-    @AppStorage("autoRemovePouches") private var autoRemovePouches = false
-    @AppStorage("hideLegacyButtons") private var hideLegacyButtons = false
+    // MARK: - User Settings & Preferences
+    @StateObject private var timerSettings = TimerSettings.shared  // Global timer settings (30min default, custom durations)
+    @AppStorage("autoRemovePouches") private var autoRemovePouches = false    // Auto-remove pouches when timer ends
+    @AppStorage("hideLegacyButtons") private var hideLegacyButtons = false    // Hide old-style quick buttons
     
-    // MARK: - Can Inventory Properties
-    @StateObject private var canManager = CanManager.shared
-    @State private var showingAddCan = false
-    @State private var showingCanSelection = false
-    @State private var pendingPouchFromShortcut: PouchLog?
-    @State private var showingBarcodeScanner = false
-    @State private var scannedBarcode: String? = nil
-    @State private var selectedCan: Can?
-    @State private var showingEditCan = false
-    @State private var canToEdit: Can?
-    @State private var showingDuplicateCanAlert = false
-    @State private var duplicateCanForAlert: Can?
+    // MARK: - Can Inventory Management
+    @StateObject private var canManager = CanManager.shared           // Singleton for managing can inventory
+    @State private var showingAddCan = false                          // Controls "Add Can" sheet presentation
+    @State private var showingCanSelection = false                    // Sheet for associating pouches with cans
+    @State private var pendingPouchFromShortcut: PouchLog?           // Pouch awaiting can association (from shortcuts)
+    @State private var showingBarcodeScanner = false                  // Barcode scanner sheet presentation
+    @State private var scannedBarcode: String? = nil                  // Temporarily holds scanned barcode data
+    @State private var selectedCan: Can?                              // Currently selected can for operations
+    @State private var showingEditCan = false                         // Edit can details sheet
+    @State private var canToEdit: Can?                                // Can being edited
+    @State private var showingDuplicateCanAlert = false               // Alert when scanning duplicate barcodes
+    @State private var duplicateCanForAlert: Can?                     // The duplicate can found
     
-    // Fetch active cans for display
+    // MARK: - Core Data Fetch Requests
+    // @FetchRequest automatically fetches data and updates the UI when the data changes
+    
+    /// Fetches all cans that still have pouches (pouchCount > 0) for the inventory display.
+    /// Sorted by pouch count (fullest first), then by date added (newest first).
+    /// This creates the horizontal scrollable can cards at the top of the screen.
     @FetchRequest(
         entity: Can.entity(),
         sortDescriptors: [
-            NSSortDescriptor(keyPath: \Can.pouchCount, ascending: false),
-            NSSortDescriptor(keyPath: \Can.dateAdded, ascending: false)
+            NSSortDescriptor(keyPath: \Can.pouchCount, ascending: false),  // Fullest cans first
+            NSSortDescriptor(keyPath: \Can.dateAdded, ascending: false)    // Then newest first
         ],
-        predicate: NSPredicate(format: "pouchCount > 0")
+        predicate: NSPredicate(format: "pouchCount > 0")  // Only cans with pouches remaining
     ) private var activeCans: FetchedResults<Can>
 
-    // @FetchRequest automatically fetches data from Core Data and updates the view when data changes
-    // This fetches all custom nicotine amount buttons, sorted by amount (3mg, 6mg, 9mg, etc.)
+    /// Fetches user-created custom dosage buttons (e.g., 4mg, 8mg, 12mg).
+    /// These are created automatically when users log non-standard amounts.
+    /// Sorted by nicotine amount (3mg, 4mg, 6mg, 8mg, etc.)
+    /// Used for the "Legacy Quick Add" section for backward compatibility.
     @FetchRequest(
         entity: CustomButton.entity(),
-        sortDescriptors: [NSSortDescriptor(keyPath: \CustomButton.nicotineAmount, ascending: true)]
+        sortDescriptors: [NSSortDescriptor(keyPath: \CustomButton.nicotineAmount, ascending: true)]  // Lowest to highest
     ) private var customButtons: FetchedResults<CustomButton>
 
-    // This fetches active pouches (ones that haven't been removed yet)
-    // Sorted by insertion time (newest first), filtered to only show active pouches
+    /// Fetches pouches currently being used (removalTime == nil).
+    /// The app only allows one active pouch at a time, so this should contain 0 or 1 items.
+    /// When a pouch exists here, the countdown timer UI is displayed.
+    /// Sorted by insertion time (newest first, though only one should exist).
     @FetchRequest(
         entity: PouchLog.entity(),
         sortDescriptors: [NSSortDescriptor(keyPath: \PouchLog.insertionTime, ascending: false)],
-        predicate: NSPredicate(format: "removalTime == nil")  // Only pouches still in mouth
+        predicate: NSPredicate(format: "removalTime == nil")  // Only active pouches (still in use)
     ) private var activePouches: FetchedResults<PouchLog>
     
-    // MARK: - CloudKit Sync State
-    // We don't use @StateObject here as we're using the singleton directly
-
     // MARK: - UI State Properties
-    // @State creates local state that the view owns and can modify
-    @State private var showInput = false           // Whether to show the custom amount input field
-    @State private var input = ""                  // Text in the custom amount input field
-    @State private var tick = Date()               // Current time, updated every second for countdown
-    @State private var lastWidgetUpdate = Date()   // Last time we updated home screen widgets
-    @State private var lastLiveActivityUpdate = Date() // Last time we updated Live Activities
+    // @State creates local view state that persists across view updates
+    @State private var showInput = false           // Toggle for manual dosage entry text field
+    @State private var input = ""                  // User's typed dosage amount (e.g., "4.5")
+    @State private var tick = Date()               // Current timestamp, updated by timer for real-time calculations
+    @State private var lastWidgetUpdate = Date()   // Throttle widget updates (expensive operation)
+    @State private var lastLiveActivityUpdate = Date() // Throttle Live Activity updates (battery optimization)
 
-    // MARK: - Timer Properties
-    // Timer for updating Live Activities (runs every minute, less battery intensive)
+    // MARK: - Timer Management
+    /// Timer for updating Live Activities and widgets (runs less frequently to save battery)
+    /// Fires every minute to keep Lock Screen and home screen widgets updated
     @State private var liveTimer: Timer?
     
-    // Timer for in-app UI updates (runs every second for smooth countdown)
+    /// Timer for in-app UI updates (runs every second for smooth countdown animations)
+    /// Only active when the app is in the foreground and there's an active pouch
     @State private var optimizedTimer: Timer?
     
-    // MARK: - Constants
-    // Timer duration is now dynamic based on user settings
+    // MARK: - Computed Properties
+    /// Returns the current timer duration based on user settings.
+    /// Can be 30 minutes (default) or custom duration set in TimerSettings.
     private var pouchDuration: TimeInterval {
         return timerSettings.currentTimerInterval
     }
-    private let TIMER_INTERVAL: TimeInterval = 1.0              // Update UI every second
+    /// How often to update the in-app countdown display (1 second for smooth progress)
+    private let TIMER_INTERVAL: TimeInterval = 1.0
 
     var body: some View {
         ZStack {
