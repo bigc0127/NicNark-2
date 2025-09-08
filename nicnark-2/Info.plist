@@ -34,5 +34,7 @@
 	<false/>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2025 Connor Needling. All rights reserved.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Camera is used to scan barcodes on nicotine pouches cans for quick inventory management.</string>
 </dict>
 </plist>

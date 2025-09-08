@@ -36,7 +36,7 @@ enum LogService {
     }
     
     @discardableResult
-    static func logPouch(amount mg: Double, ctx: NSManagedObjectContext) -> Bool {
+    static func logPouch(amount mg: Double, ctx: NSManagedObjectContext, can: Can? = nil) -> Bool {
         // Check if there's already an active pouch (no removal time)
         let activePouchFetch: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
         activePouchFetch.predicate = NSPredicate(format: "removalTime == nil")
@@ -53,6 +53,11 @@ enum LogService {
         pouch.pouchId = UUID() // Ensure UUID is set for CloudKit
         pouch.insertionTime = .now
         pouch.nicotineAmount = mg
+        
+        // Associate with can if provided
+        if let can = can {
+            can.addToPouchLogs(pouch)
+        }
         
         // Save with proper error handling and CloudKit sync trigger
         do {

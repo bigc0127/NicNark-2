@@ -6,10 +6,22 @@
     <entity name="Item" representedClassName="Item" syncable="YES" codeGenerationType="class">
         <attribute name="timestamp" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
     </entity>
+    <entity name="Can" representedClassName="Can" syncable="YES" codeGenerationType="manual">
+        <attribute name="barcode" optional="YES" attributeType="String"/>
+        <attribute name="brand" optional="YES" attributeType="String"/>
+        <attribute name="dateAdded" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="flavor" optional="YES" attributeType="String"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="initialCount" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="pouchCount" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="strength" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <relationship name="pouchLogs" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="PouchLog" inverseName="can" inverseEntity="PouchLog"/>
+    </entity>
     <entity name="PouchLog" representedClassName="PouchLog" syncable="YES" codeGenerationType="class">
         <attribute name="insertionTime" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="nicotineAmount" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
         <attribute name="pouchId" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
         <attribute name="removalTime" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <relationship name="can" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Can" inverseName="pouchLogs" inverseEntity="Can"/>
     </entity>
 </model>
