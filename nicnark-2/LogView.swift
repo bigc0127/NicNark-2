@@ -47,6 +47,8 @@ struct LogView: View {
     @State private var showingAddCan = false
     @State private var showingCanSelection = false
     @State private var pendingPouchFromShortcut: PouchLog?
+    @State private var showingBarcodeScanner = false
+    @State private var scannedBarcode: String? = nil
     @State private var selectedCan: Can?
     
     // Fetch active cans for display
@@ -184,8 +186,17 @@ struct LogView: View {
             }
         }
         .sheet(isPresented: $showingAddCan) {
-            CanDetailView()
+            CanDetailView(barcode: scannedBarcode)
                 .environment(\.managedObjectContext, ctx)
+                .onDisappear {
+                    scannedBarcode = nil
+                }
+        }
+        .sheet(isPresented: $showingBarcodeScanner) {
+            BarcodeScannerView { barcode in
+                showingBarcodeScanner = false
+                handleScannedBarcode(barcode)
+            }
         }
         .sheet(isPresented: $showingCanSelection) {
             CanSelectionSheet(pendingPouch: pendingPouchFromShortcut) { selectedCan in
@@ -266,6 +277,20 @@ struct LogView: View {
                 .buttonStyle(.bordered)
                 .frame(height: 44)
             }
+            .padding(.horizontal)
+            
+            // Scan Can button
+            Button(action: {
+                showingBarcodeScanner = true
+            }) {
+                HStack {
+                    Image(systemName: "barcode.viewfinder")
+                    Text("Scan Can")
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .frame(height: 44)
             .padding(.horizontal)
             
             // Legacy custom buttons for backward compatibility
@@ -368,6 +393,24 @@ struct LogView: View {
     }
 
     // MARK: – CRUD Operations
+    
+    func handleScannedBarcode(_ barcode: String) {
+        // Check if can with this barcode exists
+        if let existingCan = canManager.findCanByBarcode(barcode, context: ctx) {
+            // Can exists, log a pouch from it if it has pouches left
+            if existingCan.pouchCount > 0 {
+                logPouchFromCan(existingCan)
+            } else {
+                // Can is empty, show add can screen with barcode pre-filled
+                scannedBarcode = barcode
+                showingAddCan = true
+            }
+        } else {
+            // Can doesn't exist, show add can screen with barcode pre-filled
+            scannedBarcode = barcode
+            showingAddCan = true
+        }
+    }
 
     func logPouch(_ mg: Double) {
         LogService.logPouch(amount: mg, ctx: ctx)

@@ -13,17 +13,19 @@ struct CanDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var canManager = CanManager.shared
     
+    let editingCan: Can?
+    let initialBarcode: String?
+    
     @State private var brand = ""
     @State private var flavor = ""
-    @State private var strength: Double = 6
+    @State private var strength: Double = 6.0
     @State private var pouchCount: Int = 20
     @State private var barcode = ""
     @State private var showingBarcodeScanner = false
     
-    let editingCan: Can?
-    
-    init(editingCan: Can? = nil) {
+    init(editingCan: Can? = nil, barcode: String? = nil) {
         self.editingCan = editingCan
+        self.initialBarcode = barcode
     }
     
     var body: some View {
@@ -114,6 +116,16 @@ struct CanDetailView: View {
                 strength = can.strength
                 pouchCount = Int(can.pouchCount)
                 barcode = can.barcode ?? ""
+            } else if let initialBarcode = initialBarcode {
+                // Pre-fill barcode if provided
+                barcode = initialBarcode
+                // Check if this barcode already exists and pre-fill other fields
+                if let existingCan = canManager.findCanByBarcode(initialBarcode, context: viewContext) {
+                    brand = existingCan.brand ?? ""
+                    flavor = existingCan.flavor ?? ""
+                    strength = existingCan.strength
+                    // Keep default pouch count for new can
+                }
             }
         }
         .sheet(isPresented: $showingBarcodeScanner) {
