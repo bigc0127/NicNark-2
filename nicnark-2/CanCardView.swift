@@ -11,8 +11,15 @@ import CoreData
 struct CanCardView: View {
     let can: Can
     let onSelect: () -> Void
+    let onEdit: (() -> Void)?
     @Environment(\.managedObjectContext) private var viewContext
     @StateObject private var canManager = CanManager.shared
+    
+    init(can: Can, onSelect: @escaping () -> Void, onEdit: (() -> Void)? = nil) {
+        self.can = can
+        self.onSelect = onSelect
+        self.onEdit = onEdit
+    }
     
     var body: some View {
         Button(action: onSelect) {
@@ -80,6 +87,19 @@ struct CanCardView: View {
         .buttonStyle(PlainButtonStyle())
         .disabled(can.isEmpty)
         .opacity(can.isEmpty ? 0.6 : 1.0)
+        .contextMenu {
+            if let onEdit = onEdit {
+                Button(action: onEdit) {
+                    Label("Edit Can", systemImage: "pencil")
+                }
+            }
+            
+            Button(role: .destructive) {
+                canManager.deleteCan(can, context: viewContext)
+            } label: {
+                Label("Delete Can", systemImage: "trash")
+            }
+        }
     }
     
     private var strengthColor: Color {

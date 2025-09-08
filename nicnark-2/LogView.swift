@@ -44,6 +44,7 @@ struct LogView: View {
     
     // MARK: - Timer Settings
     @StateObject private var timerSettings = TimerSettings.shared
+    @AppStorage("autoRemovePouches") private var autoRemovePouches = false
     
     // MARK: - Can Inventory Properties
     @StateObject private var canManager = CanManager.shared
@@ -53,6 +54,8 @@ struct LogView: View {
     @State private var showingBarcodeScanner = false
     @State private var scannedBarcode: String? = nil
     @State private var selectedCan: Can?
+    @State private var showingEditCan = false
+    @State private var canToEdit: Can?
     
     // Fetch active cans for display
     @FetchRequest(
@@ -198,6 +201,16 @@ struct LogView: View {
                     scannedBarcode = nil
                 }
         }
+        .sheet(isPresented: $showingEditCan) {
+            if let can = canToEdit {
+                CanDetailView(editingCan: can)
+                    .environment(\.managedObjectContext, ctx)
+                    .onDisappear {
+                        canToEdit = nil
+                        canManager.fetchActiveCans(context: ctx)
+                    }
+            }
+        }
         .sheet(isPresented: $showingBarcodeScanner) {
             BarcodeScannerView { barcode in
                 showingBarcodeScanner = false
@@ -228,10 +241,18 @@ struct LogView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
                         ForEach(activeCans, id: \.self) { can in
-                            CanCardView(can: can) {
-                                // Log pouch from this can
-                                logPouchFromCan(can)
-                            }
+                            CanCardView(
+                                can: can,
+                                onSelect: {
+                                    // Log pouch from this can
+                                    logPouchFromCan(can)
+                                },
+                                onEdit: {
+                                    // Edit this can
+                                    canToEdit = can
+                                    showingEditCan = true
+                                }
+                            )
                         }
                     }
                     .padding(.horizontal)
@@ -476,10 +497,20 @@ struct LogView: View {
             // Now mark as removed in Core Data
             let removalTime = Date.now
             pouch.removalTime = removalTime
+            
+            // If this pouch was from a can, restore the can count
+            if let can = pouch.can {
+                can.pouchCount += 1  // Restore one pouch to the can
+                print("📦 Restored pouch to can \(can.brand ?? "Unknown") - new count: \(can.pouchCount)")
+            }
+            
             try? ctx.save()
             
             // Cancel notifications
             NotificationManager.cancelAlert(id: pouchId)
+            
+            // Refresh can list to show updated counts
+            canManager.fetchActiveCans(context: ctx)
             
             // Update widget persistence helper with the actual removal time
             updateWidgetPersistenceHelperForRemoval(pouch: pouch, removalTime: removalTime)
@@ -541,6 +572,16 @@ struct LogView: View {
 
         if remaining == 0 {
             endLiveActivityIfNeeded(for: pouch)
+            
+            // Auto-remove if enabled
+            if autoRemovePouches {
+                Task { @MainActor in
+                    // Wait a moment for the user to see completion
+                    try? await Task.sleep(nanoseconds: 1 * NSEC_PER_SEC)
+                    removePouch(pouch)
+                    print("🔄 Auto-removed completed pouch")
+                }
+            }
         } else {
             WidgetCenter.shared.reloadAllTimelines()
         }
@@ -605,7 +646,19 @@ struct LogView: View {
               let insertionTime = pouch.insertionTime else { return false }
         let elapsed = Date().timeIntervalSince(insertionTime)
         let remaining = max(pouchDuration - elapsed, 0)
-        return remaining == 0
+        let isCompleted = remaining == 0
+        
+        // Auto-remove if enabled and just completed
+        if isCompleted && autoRemovePouches && !LogView.pouchesBeingRemoved.contains(
+            pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
+        ) {
+            Task { @MainActor in
+                removePouch(pouch)
+                print("🔄 Auto-removed completed pouch from timer check")
+            }
+        }
+        
+        return isCompleted
     }
 
     func throttledWidgetReload(at now: Date) {

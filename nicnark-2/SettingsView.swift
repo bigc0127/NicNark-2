@@ -28,6 +28,7 @@ struct SettingsView: View {
     @StateObject private var tipStore = TipStore()
     @StateObject private var syncManager = CloudKitSyncManager.shared
     @StateObject private var timerSettings = TimerSettings.shared
+    @AppStorage("autoRemovePouches") private var autoRemovePouches = false
     @State private var showingDeleteAlert = false
     @State private var showingTipThankYou = false
     @State private var isDeleting = false
@@ -197,6 +198,12 @@ struct SettingsView: View {
             .pickerStyle(MenuPickerStyle())
             
             Text("Sets how long pouches take to fully absorb nicotine")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            
+            Toggle("Auto-Remove When Complete", isOn: $autoRemovePouches)
+            
+            Text("Automatically remove pouches when the timer completes")
                 .font(.caption)
                 .foregroundColor(.secondary)
         } header: {
