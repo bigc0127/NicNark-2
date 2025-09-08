@@ -58,8 +58,3 @@ class TimerSettings: ObservableObject {
         return selectedDuration.timeInterval
     }
 }
-
-// Update global constant to use the selected duration
-var FULL_RELEASE_TIME: TimeInterval {
-    return TimerSettings.shared.currentTimerInterval
-}

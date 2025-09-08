@@ -21,10 +21,12 @@ public let ABSORPTION_FRACTION: Double = 0.30
  * Research shows peak nicotine absorption varies by individual
  */
 public var FULL_RELEASE_TIME: TimeInterval {
-    if #available(iOS 14.0, *) {
-        return TimerSettings.shared.currentTimerInterval
+    // Access the saved duration directly from UserDefaults to avoid actor isolation issues
+    let savedValue = UserDefaults.standard.integer(forKey: "selectedTimerDuration")
+    if let duration = TimerDuration(rawValue: savedValue) {
+        return duration.timeInterval
     } else {
-        return 30 * 60 // Fallback to 30 minutes
+        return TimerDuration.defaultDuration.timeInterval
     }
 }
 

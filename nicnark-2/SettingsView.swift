@@ -27,6 +27,7 @@ struct SettingsView: View {
     @Environment(\.managedObjectContext) private var viewContext
     @StateObject private var tipStore = TipStore()
     @StateObject private var syncManager = CloudKitSyncManager.shared
+    @StateObject private var timerSettings = TimerSettings.shared
     @State private var showingDeleteAlert = false
     @State private var showingTipThankYou = false
     @State private var isDeleting = false
@@ -37,6 +38,11 @@ struct SettingsView: View {
     @State private var isRunningDiagnostics = false
     @State private var isTestingSyncData = false
     @State private var showingSyncProgress = false
+    @State private var showingExportSheet = false
+    @State private var exportURL: URL?
+    @State private var isExporting = false
+    @State private var exportError: String?
+    @State private var exportStats: (totalLogs: Int, dateRange: String) = (0, "")
     
     #if DEBUG
     @State private var debugToolsVisible = false
@@ -51,6 +57,8 @@ struct SettingsView: View {
     var body: some View {
         Form {
             disclaimerSection
+            timerSettingsSection
+            exportSection
             appInfoSection
             cloudKitSyncSection
             #if DEBUG
@@ -76,9 +84,15 @@ struct SettingsView: View {
         }
         .task {
             await tipStore.loadProducts()
+            exportStats = await ExportManager.getExportStatistics(context: viewContext)
         }
         .sheet(isPresented: $showingFullDisclaimer) {
             FirstRunDisclaimerView(isPresented: $showingFullDisclaimer)
+        }
+        .sheet(isPresented: $showingExportSheet) {
+            if let url = exportURL {
+                DocumentExporter(url: url)
+            }
         }
         .sheet(isPresented: $showingDiagnostics) {
             NavigationView {
@@ -173,12 +187,85 @@ struct SettingsView: View {
         }
     }
 
+    private var timerSettingsSection: some View {
+        Section {
+            Picker("Absorption Timer", selection: $timerSettings.selectedDuration) {
+                ForEach(TimerDuration.allCases, id: \.self) { duration in
+                    Text(duration.displayName).tag(duration)
+                }
+            }
+            .pickerStyle(MenuPickerStyle())
+            
+            Text("Sets how long pouches take to fully absorb nicotine")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        } header: {
+            Text("Timer Settings")
+        } footer: {
+            Text("This affects absorption calculations and Live Activity timers")
+        }
+    }
+    
+    private var exportSection: some View {
+        Section {
+            Button(action: exportPouchLogs) {
+                HStack {
+                    Image(systemName: "square.and.arrow.up")
+                    Text("Export All Pouch Logs")
+                }
+            }
+            .disabled(isExporting)
+            
+            if exportStats.totalLogs > 0 {
+                HStack {
+                    Text("Total Logs:")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Text("\(exportStats.totalLogs)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                
+                HStack {
+                    Text("Date Range:")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Text(exportStats.dateRange)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            if isExporting {
+                HStack {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                    Text("Preparing export...")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            if let error = exportError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundColor(.red)
+            }
+        } header: {
+            Text("Data Export")
+        } footer: {
+            Text("Export all pouch logs as CSV file, including logs older than 24 hours")
+        }
+    }
+    
     private var appInfoSection: some View {
         Section {
             HStack {
                 Text("Version")
                 Spacer()
-                Text("1.0.0")
+                Text("2.0.0")
                     .foregroundColor(.secondary)
             }
             .contentShape(Rectangle())
@@ -566,6 +653,27 @@ struct SettingsView: View {
         6) If a device used a prior build before schema was deployed, delete/reinstall once.
         === END CHECKLIST ===
         """
+    }
+    
+    private func exportPouchLogs() {
+        isExporting = true
+        exportError = nil
+        
+        Task {
+            do {
+                let url = try await ExportManager.exportAllPouchLogs(context: viewContext)
+                await MainActor.run {
+                    self.exportURL = url
+                    self.showingExportSheet = true
+                    self.isExporting = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.exportError = "Export failed: \(error.localizedDescription)"
+                    self.isExporting = false
+                }
+            }
+        }
     }
     
     private func deleteAllData() async {
