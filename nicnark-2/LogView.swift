@@ -45,6 +45,7 @@ struct LogView: View {
     // MARK: - Timer Settings
     @StateObject private var timerSettings = TimerSettings.shared
     @AppStorage("autoRemovePouches") private var autoRemovePouches = false
+    @AppStorage("hideLegacyButtons") private var hideLegacyButtons = false
     
     // MARK: - Can Inventory Properties
     @StateObject private var canManager = CanManager.shared
@@ -364,7 +365,7 @@ struct LogView: View {
             .padding(.horizontal)
             
             // Legacy custom buttons for backward compatibility
-            if !customButtons.isEmpty {
+            if !customButtons.isEmpty && !hideLegacyButtons {
                 Divider()
                     .padding(.horizontal)
                 
@@ -379,6 +380,13 @@ struct LogView: View {
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                deleteCustomButton(button)
+                            } label: {
+                                Label("Delete Button", systemImage: "trash")
+                            }
+                        }
                     }
                 }
                 .padding(.horizontal)
@@ -556,6 +564,18 @@ struct LogView: View {
             WidgetCenter.shared.reloadAllTimelines()
         }
         // Note: PouchRemoved notification is only posted by NotificationManager for external removals
+    }
+    
+    func deleteCustomButton(_ button: CustomButton) {
+        // Delete the custom button from Core Data
+        ctx.delete(button)
+        
+        do {
+            try ctx.save()
+            print("✅ Deleted custom button: \(button.nicotineAmount)mg")
+        } catch {
+            print("❌ Failed to delete custom button: \(error)")
+        }
     }
 
     // MARK: – Live Activity tick (UI refresh loop)

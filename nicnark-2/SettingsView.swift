@@ -29,6 +29,7 @@ struct SettingsView: View {
     @StateObject private var syncManager = CloudKitSyncManager.shared
     @StateObject private var timerSettings = TimerSettings.shared
     @AppStorage("autoRemovePouches") private var autoRemovePouches = false
+    @AppStorage("hideLegacyButtons") private var hideLegacyButtons = false
     @State private var showingDeleteAlert = false
     @State private var showingTipThankYou = false
     @State private var isDeleting = false
@@ -206,10 +207,16 @@ struct SettingsView: View {
             Text("Automatically remove pouches when the timer completes")
                 .font(.caption)
                 .foregroundColor(.secondary)
+            
+            Toggle("Hide Legacy Quick Add Buttons", isOn: $hideLegacyButtons)
+            
+            Text("Hides the legacy quick add buttons from the log view")
+                .font(.caption)
+                .foregroundColor(.secondary)
         } header: {
             Text("Timer Settings")
         } footer: {
-            Text("This affects absorption calculations and Live Activity timers")
+            Text("This affects absorption calculations and Live Activity timers. Legacy buttons can be deleted by long-pressing them.")
         }
     }
     
