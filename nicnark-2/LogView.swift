@@ -42,6 +42,9 @@ struct LogView: View {
     // Track pouches currently being removed to prevent duplicate operations
     @State private static var pouchesBeingRemoved: Set<String> = []
     
+    // MARK: - Timer Settings
+    @StateObject private var timerSettings = TimerSettings.shared
+    
     // MARK: - Can Inventory Properties
     @StateObject private var canManager = CanManager.shared
     @State private var showingAddCan = false
@@ -95,7 +98,10 @@ struct LogView: View {
     @State private var optimizedTimer: Timer?
     
     // MARK: - Constants
-    private let DEFAULT_POUCH_DURATION: TimeInterval = 30 * 60  // 30 minutes in seconds
+    // Timer duration is now dynamic based on user settings
+    private var pouchDuration: TimeInterval {
+        return timerSettings.currentTimerInterval
+    }
     private let TIMER_INTERVAL: TimeInterval = 1.0              // Update UI every second
 
     var body: some View {
@@ -347,15 +353,15 @@ struct LogView: View {
     func countdownPane(for pouch: PouchLog) -> some View {
         let insertionTime = pouch.insertionTime ?? tick
         let elapsed = max(0, tick.timeIntervalSince(insertionTime))
-        // Ensure remaining time never shows more than the default duration
-        let remaining = max(min(DEFAULT_POUCH_DURATION - elapsed, DEFAULT_POUCH_DURATION), 0)
-        let progress = min(max(elapsed / DEFAULT_POUCH_DURATION, 0), 1)
+        // Ensure remaining time never shows more than the user's selected duration
+        let remaining = max(min(pouchDuration - elapsed, pouchDuration), 0)
+        let progress = min(max(elapsed / pouchDuration, 0), 1)
         let isCompleted = remaining == 0
 
         let currentAbsorption = AbsorptionConstants.shared
             .calculateCurrentNicotineLevel(nicotineContent: pouch.nicotineAmount, elapsedTime: elapsed)
         let maxPossibleAbsorption = AbsorptionConstants.shared
-            .calculateAbsorbedNicotine(nicotineContent: pouch.nicotineAmount, useTime: DEFAULT_POUCH_DURATION)
+            .calculateAbsorbedNicotine(nicotineContent: pouch.nicotineAmount, useTime: pouchDuration)
         let absorptionProgress = maxPossibleAbsorption > 0 ? currentAbsorption / maxPossibleAbsorption : 0
 
         VStack(spacing: 12) {
@@ -512,8 +518,8 @@ struct LogView: View {
               let insertionTime = pouch.insertionTime else { return }
 
         let elapsed = Date().timeIntervalSince(insertionTime)
-        let remaining = max(DEFAULT_POUCH_DURATION - elapsed, 0)
-        let progress = min(max(elapsed / DEFAULT_POUCH_DURATION, 0), 1)
+        let remaining = max(pouchDuration - elapsed, 0)
+        let progress = min(max(elapsed / pouchDuration, 0), 1)
 
         let currentLevel = AbsorptionConstants.shared.calculateCurrentNicotineLevel(
             nicotineContent: pouch.nicotineAmount,
@@ -523,7 +529,7 @@ struct LogView: View {
         let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
         
         // Update Live Activity with accurate timer interval based on current pouch data
-        let endTime = insertionTime.addingTimeInterval(DEFAULT_POUCH_DURATION)
+        let endTime = insertionTime.addingTimeInterval(pouchDuration)
         let timerInterval = insertionTime...endTime
         
         await LiveActivityManager.updateLiveActivity(
@@ -598,7 +604,7 @@ struct LogView: View {
         guard let pouch = activePouches.first,
               let insertionTime = pouch.insertionTime else { return false }
         let elapsed = Date().timeIntervalSince(insertionTime)
-        let remaining = max(DEFAULT_POUCH_DURATION - elapsed, 0)
+        let remaining = max(pouchDuration - elapsed, 0)
         return remaining == 0
     }
 
@@ -640,7 +646,7 @@ struct LogView: View {
             // Calculate current nicotine levels for active pouches
             let currentLevel = calculateCurrentTotalNicotineLevel()
             let pouchName = "\(activePouches.count) active pouch\(activePouches.count > 1 ? "es" : "")"
-            let endTime = activePouches.first?.insertionTime?.addingTimeInterval(DEFAULT_POUCH_DURATION)
+            let endTime = activePouches.first?.insertionTime?.addingTimeInterval(pouchDuration)
             
             // Update the persistence helper with current data
             helper.setFromLiveActivity(
