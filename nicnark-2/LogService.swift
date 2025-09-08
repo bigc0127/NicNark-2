@@ -122,6 +122,17 @@ enum LogService {
         // Reload all widget timelines to ensure immediate updates
         WidgetCenter.shared.reloadAllTimelines()
         
+        // Check for notification triggers after logging
+        Task {
+            // Check can inventory if we used a can
+            if can != nil {
+                NotificationManager.checkCanInventory(context: ctx)
+            }
+            
+            // Schedule usage reminder based on settings
+            NotificationManager.scheduleUsageReminder(context: ctx)
+        }
+        
         // Nudge a near-term background refresh to keep the Live Activity fresh soon after start
         if #available(iOS 16.1, *) {
             Task { await BackgroundMaintainer.shared.scheduleSoon() }

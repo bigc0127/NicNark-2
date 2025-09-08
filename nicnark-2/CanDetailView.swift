@@ -255,6 +255,8 @@ struct CanDetailView: View {
             
             do {
                 try viewContext.save()
+                // Check inventory levels for notifications
+                NotificationManager.checkCanInventory(context: viewContext)
             } catch {
                 print("Failed to update can: \(error)")
             }
@@ -269,6 +271,8 @@ struct CanDetailView: View {
                 duration: hasCustomDuration ? duration : 0,
                 context: viewContext
             )
+            // Check inventory levels for notifications
+            NotificationManager.checkCanInventory(context: viewContext)
         }
         
         canManager.fetchActiveCans(context: viewContext)

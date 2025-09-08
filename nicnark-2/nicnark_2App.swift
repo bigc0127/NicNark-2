@@ -162,6 +162,11 @@ struct nicnark_2App: App {
                     // Initialize the notification system (idempotent, safe to call again)
                     NotificationManager.configure()
                     
+                    // Schedule all configured notifications based on user settings
+                    Task { @MainActor in
+                        NotificationManager.scheduleConfiguredNotifications()
+                    }
+                    
                     // Schedule background tasks (handlers already registered in init)
                     if #available(iOS 16.1, *) {
                         Task {

@@ -3,6 +3,7 @@
 import Foundation
 import UserNotifications
 import WidgetKit
+import CoreData
 import os.log
 
 enum NotificationManager {
@@ -15,7 +16,36 @@ enum NotificationManager {
         Task { @MainActor in
             center.delegate = NotificationDelegate.shared
         }
-        center.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+        
+        // Request appropriate permissions based on iOS version
+        var authOptions: UNAuthorizationOptions = [.alert, .sound, .badge]
+        
+        // Add time-sensitive permission for iOS 15+
+        if #available(iOS 15.0, *) {
+            authOptions.insert(.timeSensitive)
+        }
+        
+        center.requestAuthorization(options: authOptions) { granted, error in
+            if let error = error {
+                logger.error("Notification authorization error: \(error.localizedDescription)")
+            } else {
+                logger.info("Notification authorization granted: \(granted)")
+                
+                // Schedule all configured notifications after authorization
+                if granted {
+                    Task { @MainActor in
+                        scheduleConfiguredNotifications()
+                    }
+                }
+            }
+        }
+    }
+    
+    // Schedule all configured notifications based on user settings
+    @MainActor
+    static func scheduleConfiguredNotifications() {
+        let context = PersistenceController.shared.container.viewContext
+        NotificationScheduler.shared.scheduleAllNotifications(context: context)
     }
 
     // iOS17+ badge API
@@ -55,6 +85,17 @@ enum NotificationManager {
         content.body = body
         content.sound = .default
         content.badge = 1
+        
+        // Check if priority notifications are enabled
+        let priorityEnabled = UserDefaults.standard.bool(forKey: "priorityNotifications")
+        if priorityEnabled {
+            // Set interruption level to time-sensitive for iOS 15+
+            if #available(iOS 15.0, *) {
+                content.interruptionLevel = .timeSensitive
+            }
+            // Add relevance score for better delivery
+            content.relevanceScore = 1.0
+        }
 
         let interval = max(1, fireDate.timeIntervalSinceNow)
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
@@ -92,5 +133,26 @@ enum NotificationManager {
         }
 
         clearBadge()
+    }
+    
+    // Reschedule notifications when settings change
+    static func rescheduleNotifications() {
+        Task { @MainActor in
+            scheduleConfiguredNotifications()
+        }
+    }
+    
+    // Check inventory levels after can updates
+    static func checkCanInventory(context: NSManagedObjectContext) {
+        Task {
+            await NotificationScheduler.shared.checkCanInventory(context: context)
+        }
+    }
+    
+    // Schedule usage reminder after pouch logging
+    static func scheduleUsageReminder(context: NSManagedObjectContext) {
+        Task {
+            await NotificationScheduler.shared.scheduleUsageReminder(context: context)
+        }
     }
 }

@@ -30,6 +30,7 @@ struct SettingsView: View {
     @StateObject private var timerSettings = TimerSettings.shared
     @AppStorage("autoRemovePouches") private var autoRemovePouches = false
     @AppStorage("hideLegacyButtons") private var hideLegacyButtons = false
+    @AppStorage("priorityNotifications") private var priorityNotifications = false
     @State private var showingDeleteAlert = false
     @State private var showingTipThankYou = false
     @State private var isDeleting = false
@@ -59,6 +60,7 @@ struct SettingsView: View {
     var body: some View {
         Form {
             disclaimerSection
+            notificationSection
             timerSettingsSection
             exportSection
             appInfoSection
@@ -152,6 +154,27 @@ struct SettingsView: View {
 
     // MARK: - View Sections
     
+    private var notificationSection: some View {
+        Section {
+            NavigationLink(destination: NotificationManagementView()) {
+                HStack {
+                    Image(systemName: "bell.badge")
+                        .foregroundColor(.orange)
+                        .frame(width: 28)
+                    Text("Notification Management")
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+        } header: {
+            Text("Notifications")
+        } footer: {
+            Text("Configure alerts for inventory, usage reminders, daily summaries, and insights")
+        }
+    }
+    
     private var disclaimerSection: some View {
         Section {
             HStack(alignment: .top, spacing: 12) {
@@ -213,10 +236,16 @@ struct SettingsView: View {
             Text("Hides the legacy quick add buttons from the log view")
                 .font(.caption)
                 .foregroundColor(.secondary)
+            
+            Toggle("Priority Completion Notifications", isOn: $priorityNotifications)
+            
+            Text("Mark absorption completion notifications as time-sensitive for immediate delivery")
+                .font(.caption)
+                .foregroundColor(.secondary)
         } header: {
             Text("Timer Settings")
         } footer: {
-            Text("This affects absorption calculations and Live Activity timers. Legacy buttons can be deleted by long-pressing them.")
+            Text("Priority notifications bypass Do Not Disturb and Focus modes. Legacy buttons can be deleted by long-pressing them.")
         }
     }
     
