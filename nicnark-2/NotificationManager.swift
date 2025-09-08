@@ -263,7 +263,6 @@ enum NotificationManager {
         // Step 4: Clear notification badge
         clearBadge()
     }
-    }
     
     /**
      * Re-schedules all notifications when user changes settings.

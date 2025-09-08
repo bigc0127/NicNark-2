@@ -160,34 +160,125 @@ class NotificationScheduler: ObservableObject {
     }
     
     private func scheduleNicotineLevelReminder(context: NSManagedObjectContext) async {
-        // Calculate current nicotine level
-        let currentLevel = await calculateCurrentNicotineLevel(context: context)
+        // Use the comprehensive nicotine calculator that includes decay from removed pouches
+        let calculator = NicotineCalculator()
+        
+        // Get current level and project future levels to find boundary crossings
+        let projection = await calculator.projectNicotineLevels(
+            context: context,
+            settings: settings
+        )
+        
+        logger.info("Current nicotine level: \(String(format: "%.3f", projection.currentLevel))mg")
+        
+        // Check if user is currently outside their target range (immediate alert)
+        let currentLevel = projection.currentLevel
+        let now = Date()
         
         if settings.shouldAlertForLowNicotine(currentLevel: currentLevel) {
-            let content = UNMutableNotificationContent()
-            content.title = "Nicotine Level Low"
-            content.body = String(format: "Your nicotine level (%.1fmg) is approaching the lower limit of your target range", currentLevel)
-            content.sound = .default
-            content.categoryIdentifier = "NICOTINE_LEVEL"
-            
-            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
-            let request = UNNotificationRequest(identifier: usageReminderID, content: content, trigger: trigger)
-            
-            try? await UNUserNotificationCenter.current().add(request)
-            logger.info("Scheduled low nicotine level reminder")
+            await scheduleImmediateNicotineLevelAlert(
+                title: "Nicotine Level Low",
+                body: String(format: "Your nicotine level (%.2fmg) is below your target range (%.1f-%.1fmg)", 
+                             currentLevel, settings.nicotineRangeLow, settings.nicotineRangeHigh),
+                isLowAlert: true
+            )
+            return
         } else if settings.shouldAlertForHighNicotine(currentLevel: currentLevel) {
-            let content = UNMutableNotificationContent()
-            content.title = "Nicotine Level High"
-            content.body = String(format: "Your nicotine level (%.1fmg) is above your target range", currentLevel)
-            content.sound = .default
-            content.categoryIdentifier = "NICOTINE_LEVEL"
-            
-            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
-            let request = UNNotificationRequest(identifier: usageReminderID, content: content, trigger: trigger)
-            
-            try? await UNUserNotificationCenter.current().add(request)
-            logger.info("Scheduled high nicotine level reminder")
+            await scheduleImmediateNicotineLevelAlert(
+                title: "Nicotine Level High",
+                body: String(format: "Your nicotine level (%.2fmg) is above your target range (%.1f-%.1fmg)", 
+                             currentLevel, settings.nicotineRangeLow, settings.nicotineRangeHigh),
+                isLowAlert: false
+            )
+            return
         }
+        
+        // Schedule future alerts for predicted boundary crossings
+        var nextAlert: (date: Date, isLow: Bool, level: Double)? = nil
+        
+        // Check for low boundary crossing
+        if let lowCrossing = projection.lowBoundaryCrossing {
+            // Find the projected level at the crossing time for accurate notification text
+            let crossingLevel = projection.projectedPoints.first { abs($0.timestamp.timeIntervalSince(lowCrossing)) < 300 }?.level ?? settings.effectiveLowBoundary
+            nextAlert = (date: lowCrossing, isLow: true, level: crossingLevel)
+        }
+        
+        // Check for high boundary crossing (if it's sooner than low crossing)
+        if let highCrossing = projection.highBoundaryCrossing {
+            let crossingLevel = projection.projectedPoints.first { abs($0.timestamp.timeIntervalSince(highCrossing)) < 300 }?.level ?? settings.effectiveHighBoundary
+            
+            if let existing = nextAlert {
+                if highCrossing < existing.date {
+                    nextAlert = (date: highCrossing, isLow: false, level: crossingLevel)
+                }
+            } else {
+                nextAlert = (date: highCrossing, isLow: false, level: crossingLevel)
+            }
+        }
+        
+        // Schedule the next boundary crossing alert
+        if let alert = nextAlert {
+            let timeInterval = max(1, alert.date.timeIntervalSinceNow)
+            
+            // Only schedule if it's within the next 24 hours (avoid stale notifications)
+            if timeInterval < 24 * 3600 {
+                let content = UNMutableNotificationContent()
+                
+                if alert.isLow {
+                    content.title = "Nicotine Level Dropping"
+                    content.body = String(format: "Your nicotine level will reach %.2fmg, below your target range", alert.level)
+                } else {
+                    content.title = "Nicotine Level Rising"
+                    content.body = String(format: "Your nicotine level will reach %.2fmg, above your target range", alert.level)
+                }
+                
+                content.sound = .default
+                content.categoryIdentifier = "NICOTINE_LEVEL"
+                
+                // Apply priority settings if enabled
+                if UserDefaults.standard.bool(forKey: "priorityNotifications") {
+                    if #available(iOS 15.0, *) {
+                        content.interruptionLevel = .timeSensitive
+                    }
+                }
+                
+                let trigger = UNTimeIntervalNotificationTrigger(timeInterval: timeInterval, repeats: false)
+                let request = UNNotificationRequest(identifier: usageReminderID, content: content, trigger: trigger)
+                
+                try? await UNUserNotificationCenter.current().add(request)
+                
+                let alertType = alert.isLow ? "low" : "high"
+                logger.info("Scheduled \(alertType) nicotine level reminder for \(alert.date) (\(String(format: "%.1f", timeInterval/60)) mins)")
+            } else {
+                logger.debug("Skipped scheduling reminder - crossing time too far in future: \(alert.date)")
+            }
+        } else {
+            logger.info("No boundary crossings predicted within projection window - no reminder scheduled")
+        }
+    }
+    
+    /// Schedules an immediate nicotine level alert for current violations
+    private func scheduleImmediateNicotineLevelAlert(title: String, body: String, isLowAlert: Bool) async {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        content.categoryIdentifier = "NICOTINE_LEVEL"
+        
+        // Apply priority settings if enabled
+        if UserDefaults.standard.bool(forKey: "priorityNotifications") {
+            if #available(iOS 15.0, *) {
+                content.interruptionLevel = .timeSensitive
+            }
+        }
+        
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+        let request = UNNotificationRequest(identifier: usageReminderID, content: content, trigger: trigger)
+        
+        try? await UNUserNotificationCenter.current().add(request)
+        
+        let alertType = isLowAlert ? "low" : "high"
+        logger.info("Scheduled immediate \(alertType) nicotine level reminder")
     }
     
     // MARK: - Daily Summary
@@ -262,29 +353,13 @@ class NotificationScheduler: ObservableObject {
     
     // MARK: - Helper Methods
     
+    /// Calculates current comprehensive nicotine level including decay from removed pouches
+    /// 
+    /// **DEPRECATED**: This method previously only considered active pouches, missing decay
+    /// from recently removed pouches. Now uses NicotineCalculator for comprehensive calculation.
     private func calculateCurrentNicotineLevel(context: NSManagedObjectContext) async -> Double {
-        let request: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
-        request.predicate = NSPredicate(format: "removalTime == nil")
-        
-        do {
-            let activePouches = try context.fetch(request)
-            var totalLevel = 0.0
-            
-            for pouch in activePouches {
-                guard let insertionTime = pouch.insertionTime else { continue }
-                let elapsed = Date().timeIntervalSince(insertionTime)
-                let level = AbsorptionConstants.shared.calculateCurrentNicotineLevel(
-                    nicotineContent: pouch.nicotineAmount,
-                    elapsedTime: elapsed
-                )
-                totalLevel += level
-            }
-            
-            return totalLevel
-        } catch {
-            logger.error("Failed to calculate nicotine level: \(error.localizedDescription)")
-            return 0
-        }
+        let calculator = NicotineCalculator()
+        return await calculator.calculateTotalNicotineLevel(context: context)
     }
     
     private func calculateDailyStats(context: NSManagedObjectContext, forPreviousDay: Bool) async -> (pouchCount: Int, totalNicotine: Double, averageStrength: Double) {

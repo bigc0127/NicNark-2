@@ -55,6 +55,8 @@ grep -r "LiveActivity" --include="*.swift" .
 ### Centralized Services
 - **LogService**: Unified pouch logging for UI, Shortcuts, and URL schemes
 - **NotificationManager**: Local notifications and badge management
+- **NotificationScheduler**: Comprehensive notification scheduling with nicotine-level-based reminders
+- **NicotineCalculator**: Accurate nicotine level calculation including decay from removed pouches
 - **LiveActivityManager**: iOS 16.1+ Live Activities for real-time tracking
 - **BackgroundMaintainer**: Background task processing for data updates
 
@@ -75,6 +77,16 @@ grep -r "LiveActivity" --include="*.swift" .
 2. **Live Activities**: Started automatically on pouch creation, updated via background tasks
 3. **Notifications**: Scheduled for absorption completion (30 min timer)
 4. **Widgets**: Reload triggered after any data changes via `WidgetCenter.shared.reloadAllTimelines()`
+
+### Notification System
+- **Time-based reminders**: Schedule notifications at fixed intervals after last pouch
+- **Nicotine-level-based reminders**: Calculate comprehensive nicotine levels including:
+  - Active pouch absorption (linear model up to FULL_RELEASE_TIME)
+  - Post-removal decay (exponential decay with 2-hour half-life)
+  - Future boundary crossing prediction to schedule alerts when levels enter/exit target range
+- **Inventory alerts**: Low stock notifications with 24-hour cooldown
+- **Daily summaries**: Configurable time with previous/current day stats
+- **Usage insights**: Trend analysis comparing current vs average usage patterns
 
 ### Background Processing
 - **Identifiers**: `com.nicnark.nicnark-2.bg.refresh`, `com.nicnark.nicnark-2.bg.process`

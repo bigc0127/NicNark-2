@@ -137,13 +137,26 @@ class NotificationSettings: ObservableObject {
         return reminderInterval.timeInterval
     }
     
-    func shouldAlertForLowNicotine(currentLevel: Double) -> Bool {
-        guard reminderType == .nicotineLevelBased else { return false }
-        return currentLevel <= (nicotineRangeLow + nicotineAlertThreshold)
+    /// The effective lower boundary for nicotine level alerts (target low minus threshold)
+    var effectiveLowBoundary: Double {
+        return nicotineRangeLow - nicotineAlertThreshold
     }
     
+    /// The effective upper boundary for nicotine level alerts (target high)
+    var effectiveHighBoundary: Double {
+        return nicotineRangeHigh
+    }
+    
+    /// Determines if the current nicotine level should trigger a low-level alert
+    /// Fixed bug: was using (low + threshold), should be (low - threshold)
+    func shouldAlertForLowNicotine(currentLevel: Double) -> Bool {
+        guard reminderType == .nicotineLevelBased else { return false }
+        return currentLevel <= effectiveLowBoundary
+    }
+    
+    /// Determines if the current nicotine level should trigger a high-level alert
     func shouldAlertForHighNicotine(currentLevel: Double) -> Bool {
         guard reminderType == .nicotineLevelBased else { return false }
-        return currentLevel > nicotineRangeHigh
+        return currentLevel > effectiveHighBoundary
     }
 }

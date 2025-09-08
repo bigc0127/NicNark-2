@@ -72,6 +72,7 @@ public struct AbsorptionConstants {
      * - Example: 6mg pouch after 15 minutes = 6 * 0.30 * (15/30) = 0.9mg absorbed
      * 
      * @param nicotineContent: Total nicotine in the pouch (e.g., 6mg)
+
      * @param useTime: How long the pouch has been in mouth (in seconds)
      * @return: Amount of nicotine absorbed into bloodstream (in mg)
      */
