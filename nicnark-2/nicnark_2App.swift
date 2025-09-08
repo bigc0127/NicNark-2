@@ -9,6 +9,7 @@
 // Import necessary frameworks
 import SwiftUI    // For building the user interface
 import WidgetKit  // For managing home screen widgets
+import BackgroundTasks  // For background task scheduling
 
 /**
  * @main: This attribute tells Swift this is the app's entry point (where execution begins)
@@ -22,6 +23,36 @@ struct nicnark_2App: App {
     // Create a shared Core Data persistence controller (database manager)
     // This manages the SQLite database where pouch logs and settings are stored
     let persistenceController = PersistenceController.shared
+    
+    // MARK: - Background Task Registration
+    // Register background task handlers synchronously to avoid crashes
+    private func registerBackgroundTasks() {
+        #if os(iOS)
+        if #available(iOS 13.0, *) {
+            BGTaskScheduler.shared.register(
+                forTaskWithIdentifier: "com.nicnark.nicnark-2.bg.refresh",
+                using: nil
+            ) { task in
+                Task { @Sendable in
+                    if #available(iOS 16.1, *) {
+                        await BackgroundMaintainer.shared.handleRefresh(task as! BGAppRefreshTask)
+                    }
+                }
+            }
+            
+            BGTaskScheduler.shared.register(
+                forTaskWithIdentifier: "com.nicnark.nicnark-2.bg.process",
+                using: nil
+            ) { task in
+                Task { @Sendable in
+                    if #available(iOS 16.1, *) {
+                        await BackgroundMaintainer.shared.handleProcess(task as! BGProcessingTask)
+                    }
+                }
+            }
+        }
+        #endif
+    }
 
     // MARK: - App Initialization
     /**
@@ -31,6 +62,11 @@ struct nicnark_2App: App {
     init() {
         // Set up push notifications for pouch completion alerts
         NotificationManager.configure()
+        
+        // MARK: - Background Task Registration
+        // CRITICAL: Register background task handlers SYNCHRONOUSLY before app finishes launching
+        // This must happen in init() to avoid NSInternalInconsistencyException
+        registerBackgroundTasks()
         
         // MARK: - iPad Compatibility Configuration
         // Force iPhone behavior even on iPad for consistent user experience
@@ -123,13 +159,13 @@ struct nicnark_2App: App {
                 .onAppear {
                     // Set up notification handling (for when notifications are tapped)
                     UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
-                    // Initialize the notification system
+                    // Initialize the notification system (idempotent, safe to call again)
                     NotificationManager.configure()
                     
-                    // Schedule background tasks for Live Activity updates
+                    // Schedule background tasks (handlers already registered in init)
                     if #available(iOS 16.1, *) {
                         Task {
-                            await BackgroundMaintainer.shared.registerIfNeeded()
+                            // Only schedule tasks, registration already done in init()
                             await BackgroundMaintainer.shared.scheduleRegular()
                         }
                     }

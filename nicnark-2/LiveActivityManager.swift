@@ -428,24 +428,11 @@ actor BackgroundMaintainer {
     private let log = Logger(subsystem: "com.nicnark.nicnark-2", category: "BGTasks")
     
     func registerIfNeeded() async {
+        // Registration now happens synchronously in app init to avoid crashes
+        // This function is kept for compatibility but does nothing
         guard !registered else { return }
         registered = true
-        
-        await MainActor.run {
-            BGTaskScheduler.shared.register(forTaskWithIdentifier: refreshId, using: nil) { task in
-                Task { @Sendable in
-                    await BackgroundMaintainer.shared.handleRefresh(task as! BGAppRefreshTask)
-                }
-            }
-            
-            BGTaskScheduler.shared.register(forTaskWithIdentifier: processId, using: nil) { task in
-                Task { @Sendable in
-                    await BackgroundMaintainer.shared.handleProcess(task as! BGProcessingTask)
-                }
-            }
-        }
-        
-        log.info("BGTasks registered")
+        log.info("BGTasks already registered in app init")
     }
     
     func scheduleRegular() async {
@@ -507,7 +494,7 @@ actor BackgroundMaintainer {
         }
     }
     
-    private func handleRefresh(_ task: BGAppRefreshTask) async {
+    func handleRefresh(_ task: BGAppRefreshTask) async {
         log.info("🔔 BG refresh invoked at \(DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium), privacy: .public)")
         
         await withTaskCancellationHandler {
@@ -529,7 +516,7 @@ actor BackgroundMaintainer {
         }
     }
     
-    private func handleProcess(_ task: BGProcessingTask) async {
+    func handleProcess(_ task: BGProcessingTask) async {
         log.info("⚙️ BG processing invoked at \(DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium), privacy: .public)")
         await scheduleRegular()
         
