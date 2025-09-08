@@ -219,20 +219,21 @@ print("📍 Store URL: \(storeDescription.url?.absoluteString ?? "Unknown")")
                         // Use stable UUID for cross-device identity
                         let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
                         
-                        // Check if Live Activity already exists for this pouch
-                        let existingActivity = Activity<PouchActivityAttributes>.activities
-                            .first { $0.attributes.pouchId == pouchId }
-                        
-                        if existingActivity == nil {
+                        // Use the improved helper to check for existing activity
+                        if !LiveActivityManager.activityExists(for: pouchId) {
                             // Check if this pouch was created recently (within last 5 seconds)
                             // If so, it's likely created locally and we shouldn't sync a Live Activity
                             let isRecentlyCreated = pouch.insertionTime.map { Date().timeIntervalSince($0) < 5 } ?? false
                             
                             if !isRecentlyCreated {
-                                // Start Live Activity for this synced active pouch
-                                Self.logger.info("🔄 Starting Live Activity for synced pouch: \(pouchId, privacy: .public)")
-                                
+                                // Double-check pouch is still active before creating activity
                                 Task {
+                                    guard await LiveActivityManager.isPouchActive(pouchId) else {
+                                        Self.logger.info("🚫 Pouch no longer active, skipping Live Activity sync")
+                                        return
+                                    }
+                                    
+                                    Self.logger.info("🔄 Starting Live Activity for synced pouch: \(pouchId, privacy: .public)")
                                     let success = await LiveActivityManager.startLiveActivity(
                                         for: pouchId,
                                         nicotineAmount: pouch.nicotineAmount,
@@ -255,13 +256,12 @@ print("📍 Store URL: \(storeDescription.url?.absoluteString ?? "Unknown")")
                     // End Live Activities for pouches that were completed on other devices
                     for activity in Activity<PouchActivityAttributes>.activities {
                         let pouchId = activity.attributes.pouchId
-                        let stillActive = activePouches.contains { pouch in
-                            (pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString) == pouchId
-                        }
                         
-                        if !stillActive {
-                            Self.logger.info("🔄 Ending Live Activity for completed pouch: \(pouchId, privacy: .public)")
-                            Task {
+                        // Use Core Data guard to check if pouch is still active
+                        Task {
+                            let isStillActive = await LiveActivityManager.isPouchActive(pouchId)
+                            if !isStillActive {
+                                Self.logger.info("🔄 Ending Live Activity for completed pouch: \(pouchId, privacy: .public)")
                                 await LiveActivityManager.endLiveActivity(for: pouchId)
                             }
                         }

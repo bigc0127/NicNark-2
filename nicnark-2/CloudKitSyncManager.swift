@@ -128,13 +128,20 @@ class CloudKitSyncManager: ObservableObject {
             // Start Live Activities for new active pouches (from other devices)
             for pouch in activePouches {
                 let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
-                let hasActivity = currentActivities.contains { $0.attributes.pouchId == pouchId }
                 
-                if !hasActivity {
+                // Use our improved helper to check for existing activity
+                if !LiveActivityManager.activityExists(for: pouchId) {
+                    // Double-check the pouch is still active before creating
+                    guard await LiveActivityManager.isPouchActive(pouchId) else {
+                        logger.info("🚫 Skipping Live Activity for inactive pouch during sync: \(pouchId, privacy: .public)")
+                        continue
+                    }
+                    
                     logger.info("🆕 Starting Live Activity for synced pouch from another device")
                     let success = await LiveActivityManager.startLiveActivity(
                         for: pouchId,
-                        nicotineAmount: pouch.nicotineAmount
+                        nicotineAmount: pouch.nicotineAmount,
+                        isFromSync: true  // Mark as from sync to prevent ending other activities
                     )
                     
                     if success {
@@ -148,12 +155,12 @@ class CloudKitSyncManager: ObservableObject {
             // End Live Activities for pouches completed on other devices
             for activity in currentActivities {
                 let pouchId = activity.attributes.pouchId
-                let stillActive = activePouches.contains { pouch in
-                    (pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString) == pouchId
-                }
                 
-                if !stillActive {
-                    logger.info("🛑 Ending Live Activity for pouch completed on another device")
+                // Use our Core Data guard to check if pouch is still active
+                let isStillActive = await LiveActivityManager.isPouchActive(pouchId)
+                
+                if !isStillActive {
+                    logger.info("🛑 Ending Live Activity for pouch completed on another device: \(pouchId, privacy: .public)")
                     await LiveActivityManager.endLiveActivity(for: pouchId)
                 }
             }

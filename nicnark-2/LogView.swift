@@ -297,17 +297,32 @@ struct LogView: View {
             LogView.pouchesBeingRemoved.remove(pouchId)
         }
         
-        let removalTime = Date.now
-        pouch.removalTime = removalTime
-        try? ctx.save()
-        endLiveActivityIfNeeded(for: pouch)
-
-        NotificationManager.cancelAlert(id: pouchId)
-        
-        // Update widget persistence helper with the actual removal time
-        updateWidgetPersistenceHelperForRemoval(pouch: pouch, removalTime: removalTime)
-        
-        WidgetCenter.shared.reloadAllTimelines()
+        // CRITICAL: End Live Activity FIRST before marking as removed in Core Data
+        // This prevents background tasks from seeing an inactive pouch and creating a new activity
+        Task { @MainActor in
+            // End the Live Activity immediately
+            if #available(iOS 16.1, *) {
+                await LiveActivityManager.endLiveActivity(for: pouchId)
+            }
+            
+            // Stop timers immediately to prevent any further updates
+            liveTimer?.invalidate()
+            liveTimer = nil
+            stopOptimizedTimer()
+            
+            // Now mark as removed in Core Data
+            let removalTime = Date.now
+            pouch.removalTime = removalTime
+            try? ctx.save()
+            
+            // Cancel notifications
+            NotificationManager.cancelAlert(id: pouchId)
+            
+            // Update widget persistence helper with the actual removal time
+            updateWidgetPersistenceHelperForRemoval(pouch: pouch, removalTime: removalTime)
+            
+            WidgetCenter.shared.reloadAllTimelines()
+        }
         // Note: PouchRemoved notification is only posted by NotificationManager for external removals
     }
 

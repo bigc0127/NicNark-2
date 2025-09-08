@@ -18,6 +18,9 @@ class LiveActivityManager: ObservableObject {
     // Track active activities by pouch ID to prevent duplicates
     private static var activeActivitiesByPouchId: [String: String] = [:] // pouchId -> activityId
     
+    // Serial queue to prevent race conditions in activity management
+    private static let activityQueue = DispatchQueue(label: "com.nicnark.liveactivity.queue", qos: .userInitiated)
+    
     // Minimal snapshot type for background computations
     struct TrackedActivity: Hashable {
         let id: String
@@ -56,6 +59,43 @@ class LiveActivityManager: ObservableObject {
         logger.info("Active activities: \(count)")
     }
     
+    // MARK: - Core Data Guards
+    
+    /// Check if a pouch is still active (not removed) in Core Data
+    static func isPouchActive(_ pouchId: String) async -> Bool {
+        await MainActor.run {
+            let context = PersistenceController.shared.container.viewContext
+            
+            if let uuid = UUID(uuidString: pouchId) {
+                let fetch: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
+                fetch.predicate = NSPredicate(format: "pouchId == %@", uuid as CVarArg)
+                fetch.fetchLimit = 1
+                
+                do {
+                    if let pouchLog = try context.fetch(fetch).first {
+                        return pouchLog.removalTime == nil
+                    }
+                } catch {
+                    Logger(subsystem: "com.nicnark.nicnark-2", category: "LiveActivity")
+                        .error("Failed to check pouch status: \(error.localizedDescription, privacy: .public)")
+                }
+            }
+            return false
+        }
+    }
+    
+    /// Check if an activity already exists for a pouch
+    static func activityExists(for pouchId: String) -> Bool {
+        // Check both our tracking dictionary and actual activities
+        if activeActivitiesByPouchId[pouchId] != nil {
+            return true
+        }
+        
+        // Also check actual activities in case tracking is out of sync
+        return Activity<PouchActivityAttributes>.activities
+            .contains { $0.attributes.pouchId == pouchId }
+    }
+    
     // MARK: - Start
     
     static func startLiveActivity(for pouchId: String, nicotineAmount: Double, isFromSync: Bool = false) async -> Bool {
@@ -66,20 +106,23 @@ class LiveActivityManager: ObservableObject {
             return false
         }
         
-        // First check our tracking dictionary to prevent duplicates at the call level
-        if activeActivitiesByPouchId[pouchId] != nil {
-            log.info("Live Activity already tracked for pouch: \(pouchId, privacy: .public)")
-            return true
+        // CRITICAL: First check if the pouch is still active in Core Data
+        // This prevents creating activities for already-removed pouches
+        guard await isPouchActive(pouchId) else {
+            log.info("Pouch no longer active, skipping Live Activity: \(pouchId, privacy: .public)")
+            return false
         }
         
-        // Also check if Live Activity already exists in the system
-        let existingActivity = Activity<PouchActivityAttributes>.activities
-            .first { $0.attributes.pouchId == pouchId }
-        
-        if let existing = existingActivity {
+        // Check if activity already exists to prevent duplicates
+        if activityExists(for: pouchId) {
             log.info("Live Activity already exists for pouch: \(pouchId, privacy: .public)")
-            // Update our tracking dictionary to stay in sync
-            activeActivitiesByPouchId[pouchId] = existing.id
+            
+            // Sync our tracking dictionary with actual activities if needed
+            if activeActivitiesByPouchId[pouchId] == nil,
+               let existing = Activity<PouchActivityAttributes>.activities
+                   .first(where: { $0.attributes.pouchId == pouchId }) {
+                activeActivitiesByPouchId[pouchId] = existing.id
+            }
             return true
         }
         
@@ -87,29 +130,6 @@ class LiveActivityManager: ObservableObject {
         if !isFromSync {
             // For local creation, end all other activities (one pouch at a time)
             await endAllLiveActivities()
-        } else {
-            // For sync operations, check if the pouch is actually active
-            let pouchData = await MainActor.run { () -> (startTime: Date, nicotineAmount: Double, isActive: Bool)? in
-                let context = PersistenceController.shared.container.viewContext
-                if let uuid = UUID(uuidString: pouchId) {
-                    let fetch: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
-                    fetch.predicate = NSPredicate(format: "pouchId == %@", uuid as CVarArg)
-                    fetch.fetchLimit = 1
-                    do {
-                        if let pouchLog = try context.fetch(fetch).first, let startTime = pouchLog.insertionTime {
-                            let isActive = pouchLog.removalTime == nil
-                            return (startTime: startTime, nicotineAmount: pouchLog.nicotineAmount, isActive: isActive)
-                        }
-                    } catch {
-                        log.warning("Sync fetch error: \(error.localizedDescription, privacy: .public)")
-                    }
-                }
-                return nil
-            }
-            guard let data = pouchData, data.isActive else {
-                log.info("Sync: Skipping Live Activity for inactive/removed pouch: \(pouchId, privacy: .public)")
-                return false
-            }
         }
         
         let start = Date()
@@ -139,7 +159,7 @@ class LiveActivityManager: ObservableObject {
             let newActivity = try Activity.request(attributes: attributes, content: content)
             // Track this new activity to prevent duplicates
             activeActivitiesByPouchId[pouchId] = newActivity.id
-            log.info("Live Activity started for pouch: \(pouchId, privacy: .public)")
+            log.info("🎆 Live Activity CREATED - ID: \(newActivity.id), PouchID: \(pouchId, privacy: .public), FromSync: \(isFromSync)")
             
             // Seed widget snapshot immediately
             let helper = WidgetPersistenceHelper()
@@ -321,11 +341,14 @@ class LiveActivityManager: ObservableObject {
     static func endLiveActivity(for pouchId: String) async {
         let log = Logger(subsystem: "com.nicnark.nicnark-2", category: "LiveActivity")
         
-        // Remove from tracking dictionary first to prevent race conditions
-        activeActivitiesByPouchId.removeValue(forKey: pouchId)
+        // Remove from tracking dictionary FIRST to prevent any new activity creation
+        // This is critical to prevent race conditions
+        let wasTracked = activeActivitiesByPouchId.removeValue(forKey: pouchId) != nil
         
         guard let activity = Activity<PouchActivityAttributes>.activities.first(where: { $0.attributes.pouchId == pouchId }) else {
-            log.warning("No activity to end for pouch: \(pouchId, privacy: .public)")
+            if wasTracked {
+                log.warning("Activity was tracked but not found for pouch: \(pouchId, privacy: .public)")
+            }
             return
         }
         
@@ -373,10 +396,16 @@ class LiveActivityManager: ObservableObject {
     }
     
     static func endAllLiveActivities() async {
-        // Clear all tracking first
+        let log = Logger(subsystem: "com.nicnark.nicnark-2", category: "LiveActivity")
+        
+        // Clear all tracking first to prevent race conditions
+        let trackedCount = activeActivitiesByPouchId.count
         activeActivitiesByPouchId.removeAll()
         
-        for activity in Activity<PouchActivityAttributes>.activities {
+        let activities = Activity<PouchActivityAttributes>.activities
+        log.info("Ending all activities - tracked: \(trackedCount), actual: \(activities.count)")
+        
+        for activity in activities {
             await activity.end(nil, dismissalPolicy: .immediate)
         }
     }
@@ -543,47 +572,62 @@ actor BackgroundMaintainer {
     private func applyBatchedActivityUpdates() async {
         let now = Date()
         let items = snapshotTracked()
-        guard !items.isEmpty else { return }
+        guard !items.isEmpty else {
+            log.info("No active Live Activities to update")
+            return
+        }
         
-        // For each Live Activity, try to get the actual pouch data from Core Data
-        // to ensure we're using the most up-to-date start time if it was edited
-        await MainActor.run {
-            for t in items {
-                Task {
-                    // Check if pouch still exists and is active (not removed)
-                    guard let actualPouchData = await getActualPouchData(for: t.pouchId),
-                          actualPouchData.isActive else {
-                        // Pouch was removed or doesn't exist, end the live activity
-                        await LiveActivityManager.endLiveActivity(for: t.pouchId)
-                        return
-                    }
-                    
-                    let effectiveStartTime = actualPouchData.startTime
-                    let effectiveNicotineAmount = actualPouchData.nicotineAmount
-                    
-                    let elapsed = max(0, now.timeIntervalSince(effectiveStartTime))
-                    let endTime = effectiveStartTime.addingTimeInterval(FULL_RELEASE_TIME)
-                    
-                    if now >= endTime {
-                        await LiveActivityManager.endLiveActivity(for: t.pouchId)
-                    } else {
-                        let progress = min(max(elapsed / FULL_RELEASE_TIME, 0), 1)
-                        let currentLevel = AbsorptionConstants.shared
-                            .calculateCurrentNicotineLevel(nicotineContent: effectiveNicotineAmount, elapsedTime: elapsed)
-                        let timer = effectiveStartTime...endTime
-                        
-                        await LiveActivityManager.updateLiveActivity(
-                            for: t.pouchId,
-                            timerInterval: timer,
-                            absorptionProgress: progress,
-                            currentNicotineLevel: currentLevel
-                        )
-                    }
-                }
+        log.info("🔄 Processing \(items.count) Live Activities for background update")
+        
+        // Process each Live Activity
+        for t in items {
+            // Check if pouch is still active in Core Data
+            let isPouchActive = await LiveActivityManager.isPouchActive(t.pouchId)
+            
+            if !isPouchActive {
+                // Pouch was removed, end the Live Activity
+                log.info("📱 Ending Live Activity for removed pouch: \(t.pouchId, privacy: .public)")
+                await LiveActivityManager.endLiveActivity(for: t.pouchId)
+                continue
+            }
+            
+            // Get actual pouch data to ensure we have the latest state
+            guard let actualPouchData = await getActualPouchData(for: t.pouchId) else {
+                log.warning("Could not fetch pouch data for: \(t.pouchId, privacy: .public)")
+                continue
+            }
+            
+            let effectiveStartTime = actualPouchData.startTime
+            let effectiveNicotineAmount = actualPouchData.nicotineAmount
+            let elapsed = max(0, now.timeIntervalSince(effectiveStartTime))
+            let endTime = effectiveStartTime.addingTimeInterval(FULL_RELEASE_TIME)
+            
+            // Decision matrix logging
+            let isExpired = now >= endTime
+            log.info("📊 Pouch \(t.pouchId, privacy: .public): active=\(actualPouchData.isActive), expired=\(isExpired), elapsed=\(Int(elapsed))s")
+            
+            if isExpired {
+                log.info("⏰ Timer expired, ending Live Activity for: \(t.pouchId, privacy: .public)")
+                await LiveActivityManager.endLiveActivity(for: t.pouchId)
+            } else {
+                // Update the Live Activity with current state
+                let progress = min(max(elapsed / FULL_RELEASE_TIME, 0), 1)
+                let currentLevel = AbsorptionConstants.shared
+                    .calculateCurrentNicotineLevel(nicotineContent: effectiveNicotineAmount, elapsedTime: elapsed)
+                let timer = effectiveStartTime...endTime
+                
+                log.info("📱 Updating Live Activity: progress=\(Int(progress * 100))%, level=\(String(format: "%.3f", currentLevel))mg")
+                
+                await LiveActivityManager.updateLiveActivity(
+                    for: t.pouchId,
+                    timerInterval: timer,
+                    absorptionProgress: progress,
+                    currentNicotineLevel: currentLevel
+                )
             }
         }
         
-        log.info("🔄 Applied batched updates to \(items.count, privacy: .public) activities at \(DateFormatter.localizedString(from: now, dateStyle: .none, timeStyle: .medium), privacy: .public)")
+        log.info("✅ Background update complete at \(DateFormatter.localizedString(from: now, dateStyle: .none, timeStyle: .medium), privacy: .public)")
     }
     
     // Synchronous helper for immediate checks (used in startLiveActivity)
