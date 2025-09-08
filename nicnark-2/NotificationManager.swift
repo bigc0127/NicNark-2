@@ -17,13 +17,8 @@ enum NotificationManager {
             center.delegate = NotificationDelegate.shared
         }
         
-        // Request appropriate permissions based on iOS version
-        var authOptions: UNAuthorizationOptions = [.alert, .sound, .badge]
-        
-        // Add time-sensitive permission for iOS 15+
-        if #available(iOS 15.0, *) {
-            authOptions.insert(.timeSensitive)
-        }
+        // Request appropriate permissions
+        let authOptions: UNAuthorizationOptions = [.alert, .sound, .badge]
         
         center.requestAuthorization(options: authOptions) { granted, error in
             if let error = error {

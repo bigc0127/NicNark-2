@@ -28,7 +28,7 @@ struct NotificationManagementView: View {
     private var canInventorySection: some View {
         Section {
             Toggle("Low Inventory Alerts", isOn: $settings.canLowInventoryEnabled)
-                .onChange(of: settings.canLowInventoryEnabled) { _ in
+                .onChange(of: settings.canLowInventoryEnabled) {
                     NotificationManager.rescheduleNotifications()
                 }
             
@@ -41,7 +41,7 @@ struct NotificationManagementView: View {
                             .foregroundColor(.secondary)
                     }
                 }
-                .onChange(of: settings.canLowInventoryThreshold) { _ in
+                .onChange(of: settings.canLowInventoryThreshold) {
                     NotificationManager.rescheduleNotifications()
                 }
             }
@@ -63,7 +63,7 @@ struct NotificationManagementView: View {
                     Text(type.displayName).tag(type)
                 }
             }
-            .onChange(of: settings.reminderType) { _ in
+            .onChange(of: settings.reminderType) {
                 NotificationManager.rescheduleNotifications()
             }
             
@@ -86,7 +86,7 @@ struct NotificationManagementView: View {
                 Text(interval.displayName).tag(interval)
             }
         }
-        .onChange(of: settings.reminderInterval) { _ in
+        .onChange(of: settings.reminderInterval) {
             NotificationManager.rescheduleNotifications()
         }
         
@@ -99,7 +99,7 @@ struct NotificationManagementView: View {
                         .foregroundColor(.secondary)
                 }
             }
-            .onChange(of: settings.customReminderMinutes) { _ in
+            .onChange(of: settings.customReminderMinutes) {
                 NotificationManager.rescheduleNotifications()
             }
         }
@@ -116,7 +116,7 @@ struct NotificationManagementView: View {
                 VStack(alignment: .leading) {
                     Text("Low: \(String(format: "%.1f", settings.nicotineRangeLow))mg")
                     Slider(value: $settings.nicotineRangeLow, in: 0...5, step: 0.1)
-                        .onChange(of: settings.nicotineRangeLow) { _ in
+                        .onChange(of: settings.nicotineRangeLow) {
                             NotificationManager.rescheduleNotifications()
                         }
                 }
@@ -124,7 +124,7 @@ struct NotificationManagementView: View {
                 VStack(alignment: .leading) {
                     Text("High: \(String(format: "%.1f", settings.nicotineRangeHigh))mg")
                     Slider(value: $settings.nicotineRangeHigh, in: 0.5...10, step: 0.1)
-                        .onChange(of: settings.nicotineRangeHigh) { _ in
+                        .onChange(of: settings.nicotineRangeHigh) {
                             NotificationManager.rescheduleNotifications()
                         }
                 }
@@ -140,7 +140,7 @@ struct NotificationManagementView: View {
                     Text("0.5mg").tag(0.5)
                 }
                 .pickerStyle(SegmentedPickerStyle())
-                .onChange(of: settings.nicotineAlertThreshold) { _ in
+                .onChange(of: settings.nicotineAlertThreshold) {
                     NotificationManager.rescheduleNotifications()
                 }
             }
@@ -167,7 +167,7 @@ struct NotificationManagementView: View {
         Section(header: Label("Daily Summary", systemImage: "chart.bar.doc.horizontal"),
                 footer: dailySummaryFooter) {
             Toggle("Daily Summary", isOn: $settings.dailySummaryEnabled)
-                .onChange(of: settings.dailySummaryEnabled) { _ in
+                .onChange(of: settings.dailySummaryEnabled) {
                     NotificationManager.rescheduleNotifications()
                 }
             
@@ -175,12 +175,12 @@ struct NotificationManagementView: View {
                 DatePicker("Summary Time", 
                           selection: $settings.dailySummaryDate,
                           displayedComponents: .hourAndMinute)
-                    .onChange(of: settings.dailySummaryDate) { _ in
+                    .onChange(of: settings.dailySummaryDate) {
                         NotificationManager.rescheduleNotifications()
                     }
                 
                 Toggle("Show Previous Day", isOn: $settings.dailySummaryShowPreviousDay)
-                    .onChange(of: settings.dailySummaryShowPreviousDay) { _ in
+                    .onChange(of: settings.dailySummaryShowPreviousDay) {
                         NotificationManager.rescheduleNotifications()
                     }
             }
@@ -205,7 +205,7 @@ struct NotificationManagementView: View {
     private var usageInsightsSection: some View {
         Section {
             Toggle("Usage Insights", isOn: $settings.insightsEnabled)
-                .onChange(of: settings.insightsEnabled) { _ in
+                .onChange(of: settings.insightsEnabled) {
                     NotificationManager.rescheduleNotifications()
                 }
             
@@ -215,7 +215,7 @@ struct NotificationManagementView: View {
                         Text(period.displayName).tag(period)
                     }
                 }
-                .onChange(of: settings.insightsPeriod) { _ in
+                .onChange(of: settings.insightsPeriod) {
                     NotificationManager.rescheduleNotifications()
                 }
                 
@@ -227,7 +227,7 @@ struct NotificationManagementView: View {
                             .foregroundColor(.secondary)
                     }
                 }
-                .onChange(of: settings.insightsThresholdPercentage) { _ in
+                .onChange(of: settings.insightsThresholdPercentage) {
                     NotificationManager.rescheduleNotifications()
                 }
             }
