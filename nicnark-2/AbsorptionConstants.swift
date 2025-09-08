@@ -16,10 +16,17 @@ import CoreData
 public let ABSORPTION_FRACTION: Double = 0.30
 
 /**
- * FULL_RELEASE_TIME: How long it takes for maximum absorption (30 minutes)
- * Research shows peak nicotine absorption occurs around 30 minutes for oral pouches
+ * FULL_RELEASE_TIME: How long it takes for maximum absorption
+ * v2.0: Now configurable - 30, 45, or 60 minutes based on user preference
+ * Research shows peak nicotine absorption varies by individual
  */
-public let FULL_RELEASE_TIME: TimeInterval = 30 * 60 // 30 minutes in seconds
+public var FULL_RELEASE_TIME: TimeInterval {
+    if #available(iOS 14.0, *) {
+        return TimerSettings.shared.currentTimerInterval
+    } else {
+        return 30 * 60 // Fallback to 30 minutes
+    }
+}
 
 /**
  * AbsorptionConstants: Contains all the mathematical models for nicotine calculations
