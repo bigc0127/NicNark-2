@@ -587,20 +587,21 @@ struct UsageGraphView: View {
                                 Text(String(format: "%.3f mg", nicotineInfo.current))
                                     .font(.caption)
                                     .fontWeight(.medium)
-                            
-                            // Show if in/out of target range
-                            if nicotineInfo.current < notificationSettings.nicotineRangeLow {
-                                Text("(Below target)")
-                                    .font(.caption2)
-                                    .foregroundColor(.orange)
-                            } else if nicotineInfo.current > notificationSettings.nicotineRangeHigh {
-                                Text("(Above target)")
-                                    .font(.caption2)
-                                    .foregroundColor(.red)
-                            } else {
-                                Text("(In range)")
-                                    .font(.caption2)
-                                    .foregroundColor(.green)
+                                
+                                // Show if in/out of target range
+                                if nicotineInfo.current < notificationSettings.nicotineRangeLow {
+                                    Text("(Below target)")
+                                        .font(.caption2)
+                                        .foregroundColor(.orange)
+                                } else if nicotineInfo.current > notificationSettings.nicotineRangeHigh {
+                                    Text("(Above target)")
+                                        .font(.caption2)
+                                        .foregroundColor(.red)
+                                } else {
+                                    Text("(In range)")
+                                        .font(.caption2)
+                                        .foregroundColor(.green)
+                                }
                             }
                         }
                         
