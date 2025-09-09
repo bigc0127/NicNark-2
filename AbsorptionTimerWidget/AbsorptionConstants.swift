@@ -5,7 +5,18 @@ import Foundation
 
 // MARK: - Global Constants
 public let ABSORPTION_FRACTION: Double = 0.30
-public let FULL_RELEASE_TIME: TimeInterval = 30 * 60 // 30 minutes
+
+// Mirror the app's dynamic FULL_RELEASE_TIME based on user preference
+public var FULL_RELEASE_TIME: TimeInterval {
+    let savedValue = UserDefaults.standard.integer(forKey: "selectedTimerDuration")
+    let minutes: Int
+    switch savedValue {
+    case 45: minutes = 45
+    case 60: minutes = 60
+    default: minutes = 30
+    }
+    return TimeInterval(minutes * 60)
+}
 
 public struct AbsorptionConstants {
     // MARK: - Singleton for performance

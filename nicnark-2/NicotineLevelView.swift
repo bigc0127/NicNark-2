@@ -298,11 +298,14 @@ struct NicotineLevelView: View {
             currentTime = currentTime.addingTimeInterval(15 * 60) // 15 minutes
         }
         
-        // Calculate nicotine level at each time point
-        return timePoints.compactMap { timePoint in
-            let totalLevel = calculateTotalNicotineLevelAt(time: timePoint)
-            return NicotinePoint(time: timePoint, level: max(0, totalLevel))
+        // Calculate nicotine level at each time point using the centralized calculator
+        let calculator = NicotineCalculator()
+        var points: [NicotinePoint] = []
+        for timePoint in timePoints {
+            let level = await calculator.calculateTotalNicotineLevel(context: viewContext, at: timePoint)
+            points.append(NicotinePoint(time: timePoint, level: max(0, level)))
         }
+        return points
     }
     
     private func calculateTotalNicotineLevelAt(time: Date) -> Double {

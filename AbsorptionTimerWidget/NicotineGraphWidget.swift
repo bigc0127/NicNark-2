@@ -107,7 +107,7 @@ struct NicotineGraphProvider: TimelineProvider {
         )
     }
     
-    private func generateChartData(from pouches: [PouchLog], now: Date, sixHoursAgo: Date) -> [NicotineChartPoint] {
+    private func generateChartData(context: NSManagedObjectContext, now: Date, sixHoursAgo: Date) async -> [NicotineChartPoint] {
         var timePoints: [Date] = []
         var currentTime = sixHoursAgo
         
@@ -117,67 +117,14 @@ struct NicotineGraphProvider: TimelineProvider {
             currentTime = currentTime.addingTimeInterval(30 * 60) // 30 minutes
         }
         
-        return timePoints.compactMap { timePoint in
-            let totalLevel = calculateTotalNicotineLevelAt(time: timePoint, pouches: pouches)
-            return NicotineChartPoint(time: timePoint, level: max(0, totalLevel))
+        // Use centralized NicotineCalculator for consistency with the app
+        let calculator = NicotineCalculator()
+        var points: [NicotineChartPoint] = []
+        for timePoint in timePoints {
+            let level = await calculator.calculateTotalNicotineLevel(context: context, at: timePoint)
+            points.append(NicotineChartPoint(time: timePoint, level: max(0, level)))
         }
-    }
-    
-    private func calculateTotalNicotineLevelAt(time: Date, pouches: [PouchLog]) -> Double {
-        var totalLevel = 0.0
-        
-        for pouchLog in pouches {
-            guard let insertionTime = pouchLog.insertionTime else { continue }
-            
-            // Only consider pouches that were inserted before our calculation timestamp
-            guard insertionTime <= time else { continue }
-            
-            let removalTime = pouchLog.removalTime ?? insertionTime.addingTimeInterval(FULL_RELEASE_TIME)
-            
-            let contribution = calculatePouchContribution(
-                pouchLog: pouchLog,
-                currentTime: time,
-                insertionTime: insertionTime,
-                endTime: removalTime
-            )
-            totalLevel += contribution
-        }
-        
-        return max(0, totalLevel) // Ensure non-negative
-    }
-    
-    private func calculatePouchContribution(
-        pouchLog: PouchLog,
-        currentTime: Date,
-        insertionTime: Date,
-        endTime: Date
-    ) -> Double {
-        let nicotineContent = pouchLog.nicotineAmount
-        
-        if currentTime <= endTime {
-            // During absorption phase
-            let timeInMouth = min(
-                currentTime.timeIntervalSince(insertionTime),
-                endTime.timeIntervalSince(insertionTime)
-            )
-            return absorptionConstants.calculateCurrentNicotineLevel(
-                nicotineContent: nicotineContent,
-                elapsedTime: timeInMouth
-            )
-        } else {
-            // Post-absorption decay phase
-            let actualTimeInMouth = endTime.timeIntervalSince(insertionTime)
-            let totalAbsorbed = absorptionConstants.calculateAbsorbedNicotine(
-                nicotineContent: nicotineContent,
-                useTime: actualTimeInMouth
-            )
-            
-            let timeSinceRemoval = currentTime.timeIntervalSince(endTime)
-            return absorptionConstants.calculateDecayedNicotine(
-                initialLevel: totalAbsorbed,
-                timeSinceRemoval: timeSinceRemoval
-            )
-        }
+        return points
     }
     
     private func calculateTimeSinceLastPouch(pouches: [PouchLog], now: Date) -> String {
@@ -314,17 +261,12 @@ struct NicotineGraphProvider: TimelineProvider {
             
             let recentPouches = try context.fetch(recentPouchesRequest)
             
-            // Fetch ALL pouches from last 10 hours for comprehensive level calculation (including decay)
-            let tenHoursAgo = now.addingTimeInterval(-10 * 3600)
-            let allPouchesRequest = PouchLog.fetchRequest()
-            allPouchesRequest.predicate = NSPredicate(format: "insertionTime >= %@", tenHoursAgo as NSDate)
-            let allPouches = try context.fetch(allPouchesRequest)
-            
             // Generate chart data from recent pouches (6 hours for display)
-            let chartData = generateChartData(from: recentPouches, now: now, sixHoursAgo: sixHoursAgo)
+            let chartData = await generateChartData(context: context, now: now, sixHoursAgo: sixHoursAgo)
             
-            // Calculate current total nicotine level using ALL pouches (for decay calculation)
-            let currentLevel = calculateTotalNicotineLevelAt(time: now, pouches: allPouches)
+            // Calculate current total nicotine level using centralized calculator
+            let calculator = NicotineCalculator()
+            let currentLevel = await calculator.calculateTotalNicotineLevel(context: context, at: now)
             
             // Check for active pouches
             let activePouchesRequest = PouchLog.fetchRequest()
