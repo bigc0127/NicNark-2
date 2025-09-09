@@ -1,7 +1,42 @@
+//
+// UsageGraphView.swift
+// nicnark-2
+//
+// 24-Hour Usage Timeline with Statistics and Insights
+//
+// This view provides a comprehensive 24-hour timeline of pouch usage with:
+// • Hour-by-hour breakdown of pouch consumption
+// • Real-time statistics (streak count, time since last pouch)
+// • Interactive pouch cards with edit/delete capabilities
+// • Smart reminder information (time-based or nicotine-level-based)
+// • Nicotine level monitoring and predictions
+// • Visual feedback with color coding and animations
+//
+// The view uses a ViewModel pattern for better separation of concerns and
+// efficient data updates. It maintains a lightweight projection of Core Data
+// entities to minimize memory usage and improve scrolling performance.
+//
+
 import SwiftUI
 import CoreData
 
-// MARK: - Lightweight projection of Core Data row
+// MARK: - Data Models
+
+/**
+ * PouchEvent: Lightweight representation of a pouch usage event.
+ * 
+ * This struct is a projection of the Core Data PouchLog entity,
+ * containing only the essential data needed for display. This approach:
+ * - Reduces memory footprint for large datasets
+ * - Improves scrolling performance
+ * - Decouples UI from Core Data managed object lifecycle
+ * 
+ * Properties:
+ * - id: Unique identifier matching the Core Data pouchId
+ * - name: Display name (e.g., "6mg Pouch")
+ * - removedAt: When the pouch was removed (or insertion time if still active)
+ * - nicotineMg: Nicotine content for absorption calculations
+ */
 public struct PouchEvent: Identifiable, Hashable {
     public let id: UUID
     public let name: String
@@ -9,6 +44,20 @@ public struct PouchEvent: Identifiable, Hashable {
     public let nicotineMg: Double
 }
 
+/**
+ * HourBucket: Groups events within a single hour for timeline display.
+ * 
+ * The timeline is divided into 24 hour-long buckets, each containing
+ * all pouches used during that hour. This structure enables:
+ * - Efficient rendering of the timeline
+ * - Easy identification of usage patterns
+ * - Clear visual separation of time periods
+ * 
+ * Properties:
+ * - id: Unique identifier for SwiftUI ForEach
+ * - hourStart: Beginning of the hour period
+ * - events: All pouches used during this hour
+ */
 struct HourBucket: Identifiable, Hashable {
     let id = UUID()
     let hourStart: Date
@@ -16,28 +65,63 @@ struct HourBucket: Identifiable, Hashable {
 }
 
 // MARK: - ViewModel
+
+/**
+ * UsageGraphViewModel: Manages data and business logic for the usage timeline.
+ * 
+ * This ViewModel handles:
+ * - Converting Core Data entities to lightweight projections
+ * - Calculating time-based statistics (streak, time since last)
+ * - Managing timer updates for real-time display
+ * - Grouping events into hourly buckets
+ * - Tracking active pouch state
+ * 
+ * The ViewModel pattern provides:
+ * - Separation of UI and business logic
+ * - Testability of data transformations
+ * - Efficient update batching with @Published
+ * - Memory management through lightweight projections
+ * 
+ * @MainActor ensures all updates happen on the main thread for UI safety.
+ */
 @MainActor
 final class UsageGraphViewModel: ObservableObject {
-    @Published var events: [PouchEvent] = []
-    @Published var streakDays: Int = 0
+    // MARK: - Published Properties
+    @Published var events: [PouchEvent] = []           // All events in last 24 hours
+    @Published var streakDays: Int = 0                 // Count of pouches in 24hr window
 
-    // “Since last pouch” fallback (when no active pouch)
-    @Published private(set) var sinceLastPhrase: String = "0 hours 00 mins"
-    @Published private(set) var sinceLastHH: Int = 0
-    @Published private(set) var sinceLastMM: Int = 0
+    // Time tracking for inactive state
+    @Published private(set) var sinceLastPhrase: String = "0 hours 00 mins"  // Formatted time string
+    @Published private(set) var sinceLastHH: Int = 0                          // Hours component
+    @Published private(set) var sinceLastMM: Int = 0                          // Minutes component
 
-    // Active pouch state (header switches to “Pouch is currently in”)
-    @Published private(set) var hasActivePouch: Bool = false
-    @Published private(set) var activeElapsedPhrase: String = "00:00"
+    // Active pouch tracking (displays "currently in" instead of "since last")
+    @Published private(set) var hasActivePouch: Bool = false      // Whether a pouch is currently in use
+    @Published private(set) var activeElapsedPhrase: String = "00:00"  // MM:SS format for active timer
 
-    private var timer: Timer?
-    private let calendar = Calendar.current
+    // MARK: - Private Properties
+    private var timer: Timer?                          // Updates time displays every 2 minutes
+    private let calendar = Calendar.current            // For date calculations
 
-    // A lightweight way for VM to ask for the current NSManagedObjectContext when the timer ticks.
+    // Provides access to Core Data context for timer updates without tight coupling
     static var contextProvider: (() -> NSManagedObjectContext)?
 
-    deinit { timer?.invalidate() }
+    deinit { timer?.invalidate() }  // Clean up timer to prevent memory leaks
 
+    /**
+     * Updates the view model with fresh data from Core Data.
+     * 
+     * This method:
+     * 1. Converts Core Data entities to lightweight PouchEvent structs
+     * 2. Filters to only include events from the last 24 hours
+     * 3. Sorts events newest first for display
+     * 4. Updates statistics (streak count, time since last)
+     * 5. Refreshes active pouch state
+     * 
+     * - Parameters:
+     *   - items: Array of PouchLog Core Data entities
+     *   - context: Managed object context for querying active pouches
+     */
     func setEvents(_ items: [PouchLog], context: NSManagedObjectContext) {
         // Convert Core Data rows into lightweight events
         let converted: [PouchEvent] = items.compactMap { row in
@@ -71,6 +155,20 @@ final class UsageGraphViewModel: ObservableObject {
         }
     }
 
+    /**
+     * Computed property that groups events into 24 hourly buckets.
+     * 
+     * Creates a descending list of 24 hours starting from the current hour.
+     * Each bucket contains all events that occurred during that hour.
+     * Empty hours still appear in the list with empty event arrays.
+     * 
+     * This structure enables the timeline view to show:
+     * - Clear hour-by-hour breakdown
+     * - Usage patterns throughout the day
+     * - Empty periods for context
+     * 
+     * - Returns: Array of 24 HourBucket objects, newest hour first
+     */
     var hourBuckets: [HourBucket] {
         let now = Date()
         let startOfHour = calendar.dateInterval(of: .hour, for: now)?.start
@@ -93,6 +191,16 @@ final class UsageGraphViewModel: ObservableObject {
         }
     }
 
+    /**
+     * Starts a timer to update time-based displays.
+     * 
+     * Timer fires every 2 minutes (optimized from 1 minute to save battery).
+     * Updates:
+     * - "Since last pouch" time display
+     * - "Currently in" elapsed time for active pouches
+     * 
+     * Uses RunLoop.common mode to ensure updates continue during scrolling.
+     */
     private func startTimerIfNeeded() {
         guard timer == nil else { return }
         // Optimized: Only update every 2 minutes instead of every minute for power savings
@@ -115,6 +223,13 @@ final class UsageGraphViewModel: ObservableObject {
         if let t = timer { RunLoop.main.add(t, forMode: .common) }
     }
 
+    /**
+     * Recalculates the time elapsed since the last pouch was removed.
+     * 
+     * Updates the display strings and numeric components used in the UI.
+     * Shows "0 hours 00 mins" if no pouches have been used.
+     * Only considers completed pouches (with removal time < now).
+     */
     private func recomputeTimeSinceLast() {
         guard let lastRemoved = events
             .filter({ $0.removedAt < Date() })
@@ -131,6 +246,15 @@ final class UsageGraphViewModel: ObservableObject {
         sinceLastPhrase = "\(sinceLastHH) hours \(String(format: "%02d", sinceLastMM)) mins"
     }
 
+    /**
+     * Queries Core Data for currently active pouches.
+     * 
+     * An active pouch has removalTime == nil, indicating it's still in use.
+     * Returns both the active state and elapsed time since insertion.
+     * 
+     * - Parameter context: Core Data context for querying
+     * - Returns: Tuple of (hasActive: Bool, elapsedSeconds: TimeInterval?)
+     */
     private func fetchHasActivePouch(context: NSManagedObjectContext) -> (Bool, TimeInterval?) {
         let request = NSFetchRequest<PouchLog>(entityName: "PouchLog")
         request.predicate = NSPredicate(format: "removalTime == nil")
@@ -141,25 +265,53 @@ final class UsageGraphViewModel: ObservableObject {
         return (false, nil)
     }
 
+    /**
+     * Formats a time interval as MM:SS string.
+     * 
+     * Used for the active pouch elapsed time display.
+     * Ensures non-negative values and zero-pads components.
+     * 
+     * - Parameter interval: Time in seconds
+     * - Returns: Formatted string like "12:34"
+     */
     private static func mmss(_ interval: TimeInterval) -> String {
         let secs = Int(max(interval, 0))
         return String(format: "%02d:%02d", secs/60, secs%60)
     }
 }
 
-// MARK: - View
-struct UsageGraphView: View {
-    @Environment(\.managedObjectContext) private var viewContext
-    @StateObject private var vm = UsageGraphViewModel()
-    @StateObject private var notificationSettings = NotificationSettings.shared
+// MARK: - Main View
 
+/**
+ * UsageGraphView: Interactive 24-hour timeline of pouch usage.
+ * 
+ * This view provides comprehensive usage tracking with:
+ * - Visual timeline divided into hourly sections
+ * - Real-time statistics (streak count, time tracking)
+ * - Smart reminder information based on user settings
+ * - Interactive pouch cards with edit/delete capabilities
+ * - Nicotine level monitoring with predictions
+ * 
+ * The view uses reactive updates through:
+ * - @FetchRequest for Core Data changes
+ * - NotificationCenter for external updates
+ * - Timer-based updates for time displays
+ * - @Published properties in the ViewModel
+ */
+struct UsageGraphView: View {
+    // MARK: - Environment & State
+    @Environment(\.managedObjectContext) private var viewContext           // Core Data context
+    @StateObject private var vm = UsageGraphViewModel()                    // View model for data management
+    @StateObject private var notificationSettings = NotificationSettings.shared  // User notification preferences
+
+    // Core Data fetch for pouches in last 24 hours
     @FetchRequest private var recentLogs: FetchedResults<PouchLog>
 
-    var streakDays: Int
-    @State private var refreshTrigger = false
-    @State private var showingEditSheet = false
-    @State private var selectedPouchForEdit: PouchLog?
-    @State private var nicotineInfo: (current: Double, prediction: String?) = (0.0, nil)
+    var streakDays: Int                                                    // Initial streak count (can be overridden)
+    @State private var refreshTrigger = false                              // Forces view refresh on external changes
+    @State private var showingEditSheet = false                            // Controls edit sheet presentation
+    @State private var selectedPouchForEdit: PouchLog?                     // Pouch being edited
+    @State private var nicotineInfo: (current: Double, prediction: String?) = (0.0, nil)  // Current level and prediction
 
     init(streakDays: Int = 0) {
         self.streakDays = streakDays
@@ -340,6 +492,22 @@ struct UsageGraphView: View {
         return nil
     }
 
+    /**
+     * Header section displaying key statistics.
+     * 
+     * Shows two main metrics:
+     * 1. 24-Hour Streak: Total pouches used in last 24 hours (left side)
+     * 2. Time Display: Either "Since last pouch" or "Currently in" (right side)
+     * 
+     * The right side dynamically switches based on active pouch state:
+     * - Active pouch: Shows elapsed time in MM:SS format
+     * - No active: Shows time since last in "X hours YY mins" format
+     * 
+     * Colors indicate state:
+     * - Orange: Streak count
+     * - Blue: Active pouch timer
+     * - Green: Time since last pouch
+     */
     private var headerTopSection: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 4) {
@@ -370,6 +538,24 @@ struct UsageGraphView: View {
         .padding(.vertical, 12)
     }
     
+    /**
+     * Reminder information section below the header.
+     * 
+     * Displays different content based on reminder type:
+     * 
+     * Time-based reminders:
+     * - Shows next reminder time
+     * - Calculates remaining time until reminder
+     * - Indicates when reminder is due
+     * 
+     * Nicotine-level-based reminders:
+     * - Shows current nicotine level in mg
+     * - Indicates if level is in/above/below target range
+     * - Predicts when next boundary crossing will occur
+     * - Shows decay rate when applicable
+     * 
+     * Hidden when reminders are disabled.
+     */
     @ViewBuilder
     private var reminderInfoSection: some View {
         if notificationSettings.reminderType != .disabled {
@@ -459,6 +645,18 @@ struct UsageGraphView: View {
         }
     }
     
+    /**
+     * Updates nicotine level information for level-based reminders.
+     * 
+     * Calculates:
+     * - Current total nicotine level from all sources
+     * - Whether level is in target range
+     * - Predictions for boundary crossings
+     * - Decay rate information
+     * 
+     * This runs asynchronously to avoid blocking the UI during
+     * complex calculations involving multiple pouches and decay curves.
+     */
     private func updateNicotineInfo() {
         guard notificationSettings.reminderType == .nicotineLevelBased else { return }
         
@@ -520,11 +718,27 @@ struct UsageGraphView: View {
     }
 }
 
-// MARK: - Hour row
-private struct HourRowView: View {
-    let bucket: HourBucket
-    let onEditPouch: (PouchEvent) -> Void
+// MARK: - Hour Row Component
 
+/**
+ * HourRowView: Single row in the timeline representing one hour.
+ * 
+ * Layout:
+ * - Hour label (e.g., "3PM") on the left
+ * - Hour range title (e.g., "3:00 PM - 3:59 PM")
+ * - Horizontal scroll of pouch cards or empty state
+ * 
+ * The horizontal scrolling allows multiple pouches per hour
+ * without vertical space constraints.
+ * 
+ * - Parameter bucket: HourBucket containing hour info and events
+ * - Parameter onEditPouch: Callback when a pouch card is tapped for editing
+ */
+private struct HourRowView: View {
+    let bucket: HourBucket                         // Hour data and events
+    let onEditPouch: (PouchEvent) -> Void         // Edit action handler
+
+    // Static formatter for hour labels (reused for performance)
     private static let hourLabel: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "ha"
@@ -573,21 +787,54 @@ private struct HourRowView: View {
     }
 }
 
-// MARK: - Pouch card
-private struct PouchCard: View {
-    let event: PouchEvent
-    let onEdit: () -> Void
-    
-    @State private var isPressed = false
-    @State private var longPressTimer: Timer?
+// MARK: - Pouch Card Component
 
+/**
+ * PouchCard: Interactive card representing a single pouch usage event.
+ * 
+ * Visual design:
+ * - Blue pill icon with white background
+ * - Pouch name and strength
+ * - Time and absorbed nicotine amount
+ * - Subtle press animation for feedback
+ * 
+ * Interaction:
+ * - Double tap to edit (primary action)
+ * - Long press (0.8s) to edit (alternative)
+ * - Visual feedback with scale animation
+ * - Haptic feedback on activation
+ * 
+ * The card calculates absorbed nicotine based on the
+ * standard absorption model (30% of total over 30 minutes).
+ * 
+ * - Parameter event: PouchEvent data to display
+ * - Parameter onEdit: Callback when edit is triggered
+ */
+private struct PouchCard: View {
+    let event: PouchEvent                          // Event data to display
+    let onEdit: () -> Void                         // Edit action handler
+    
+    @State private var isPressed = false           // Tracks press state for animation
+    @State private var longPressTimer: Timer?      // Timer for long press detection
+
+    // Static formatter for time display (reused for performance)
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "h:mm a"
         return f
     }()
 
-    // For the Usage view (completed items), clamp to max absorbed per your linear model.
+    /**
+     * Calculates the absorbed nicotine amount for this event.
+     * 
+     * Uses the standard absorption model:
+     * - Maximum absorption = 30% of pouch nicotine content
+     * - Assumes full absorption for completed pouches
+     * 
+     * This provides consistent display across the app.
+     * 
+     * - Returns: Absorbed nicotine in mg
+     */
     private func absorbedAtEvent() -> Double {
         let maxAbsorbed = event.nicotineMg * ABSORPTION_FRACTION
         return maxAbsorbed
@@ -685,6 +932,13 @@ Image(systemName: "ellipsis")
     }
 }
 
+/**
+ * EmptyHourPill: Placeholder shown for hours with no pouch usage.
+ * 
+ * Provides visual consistency in the timeline by showing
+ * a subtle "No pouches" indicator instead of empty space.
+ * Uses tertiary fill color for minimal visual weight.
+ */
 private struct EmptyHourPill: View {
     var body: some View {
         Text("No pouches")

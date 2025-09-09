@@ -2,7 +2,27 @@
 // SettingsView.swift
 // nicnark-2
 //
-// Fixed settings view with proper initialization
+// Comprehensive Settings Interface with CloudKit Integration
+//
+// This view provides centralized access to all app settings:
+// • Inventory Management - Direct link to full inventory interface
+// • Notification Management - All reminder and alert settings
+// • Timer Settings - Absorption duration and auto-removal options
+// • Data Export - CSV export of all pouch logs
+// • CloudKit Sync - Multi-device synchronization controls
+// • Support/Tips - In-app purchase tip jar
+// • Data Management - Complete data deletion
+//
+// The view integrates deeply with CloudKit for:
+// - Sync status monitoring and display
+// - Manual sync triggers
+// - Diagnostic tools for troubleshooting
+// - Multi-device feature explanations
+//
+// Special features:
+// - Secret developer tools (tap version 5x in DEBUG builds)
+// - CloudKit schema validation checklist
+// - Production deployment verification
 //
 
 import SwiftUI
@@ -22,12 +42,30 @@ import ActivityKit
 import WidgetKit
 #endif
 
+/**
+ * SettingsView: Main settings interface for the app.
+ * 
+ * Organized into logical sections:
+ * 1. Medical Disclaimer - Important health/safety information
+ * 2. Inventory - Link to full inventory management
+ * 3. Notifications - Comprehensive reminder configuration
+ * 4. Timer Settings - Absorption and auto-removal preferences
+ * 5. Data Export - Export all pouch logs as CSV
+ * 6. App Information - Version and developer details
+ * 7. CloudKit Sync - Multi-device synchronization
+ * 8. Support - Tip jar for supporting development
+ * 9. Data Management - Delete all data option
+ * 10. About - App description and privacy statement
+ * 
+ * The view uses @StateObject for managers to ensure single instances
+ * and @AppStorage for simple persistent preferences.
+ */
 struct SettingsView: View {
-    // MARK: - Properties
-    @Environment(\.managedObjectContext) private var viewContext
-    @StateObject private var tipStore = TipStore()
-    @StateObject private var syncManager = CloudKitSyncManager.shared
-    @StateObject private var timerSettings = TimerSettings.shared
+    // MARK: - Environment & State Management
+    @Environment(\.managedObjectContext) private var viewContext           // Core Data context
+    @StateObject private var tipStore = TipStore()                         // In-app purchase manager
+    @StateObject private var syncManager = CloudKitSyncManager.shared      // CloudKit sync manager
+    @StateObject private var timerSettings = TimerSettings.shared          // Timer duration settings
     @AppStorage("autoRemovePouches") private var autoRemovePouches = false
     @AppStorage("hideLegacyButtons") private var hideLegacyButtons = false
     @AppStorage("priorityNotifications") private var priorityNotifications = false
@@ -155,6 +193,18 @@ struct SettingsView: View {
 
     // MARK: - View Sections
     
+    /**
+     * Inventory Management Section
+     * 
+     * Provides a prominent link to the full InventoryManagementView.
+     * Features:
+     * - Blue tray icon for visual identification
+     * - Navigation chevron indicating it's a push navigation
+     * - Descriptive footer explaining the feature
+     * 
+     * This is placed prominently as it's a key feature for tracking
+     * pouch consumption accurately.
+     */
     private var inventorySection: some View {
         Section {
             NavigationLink(destination: InventoryManagementView()) {
@@ -176,6 +226,17 @@ struct SettingsView: View {
         }
     }
     
+    /**
+     * Notification Management Section
+     * 
+     * Links to the comprehensive NotificationManagementView where users can:
+     * - Configure usage reminders (time or nicotine-level based)
+     * - Set up daily summaries
+     * - Enable usage insights
+     * - Configure inventory alerts
+     * 
+     * Uses an orange bell icon to stand out as an important configuration area.
+     */
     private var notificationSection: some View {
         Section {
             NavigationLink(destination: NotificationManagementView()) {
@@ -355,6 +416,26 @@ struct SettingsView: View {
         }
     }
     
+    /**
+     * CloudKit Synchronization Section
+     * 
+     * Complex section handling multi-device sync configuration:
+     * - Toggle for enabling/disabling sync
+     * - Visual status indicator with color coding
+     * - Diagnostic tools for troubleshooting
+     * - Test sync functionality
+     * - Manual sync trigger
+     * - Multi-device feature explanation
+     * 
+     * Color coding:
+     * - Green: Sync enabled and working
+     * - Orange: Sync disabled by user
+     * - Red: CloudKit unavailable (no iCloud account)
+     * - Gray: Loading or unknown state
+     * 
+     * This section is critical for users with multiple devices
+     * (iPhone and iPad) to keep data synchronized.
+     */
     private var cloudKitSyncSection: some View {
         Section {
             // CloudKit Sync Toggle

@@ -2,7 +2,20 @@
 //  NotificationSettings.swift
 //  nicnark-2
 //
-//  Notification preferences and management
+//  Centralized notification preferences and helper logic
+//
+//  This module defines all user-facing notification settings and
+//  provides helpers to derive effective thresholds and intervals.
+//
+//  Features:
+//  • Time-based usage reminders (configurable intervals, including custom)
+//  • Nicotine-level-based reminders with target range and alert threshold
+//  • Daily summary scheduling with configurable time
+//  • Usage insights period and deviation threshold
+//  • Can inventory low-stock alerts
+//
+//  The class is @MainActor to ensure settings changes update UI-bound
+//  views safely. Backing storage uses @AppStorage to persist across launches.
 //
 
 import Foundation
@@ -80,6 +93,22 @@ enum InsightPeriod: String, CaseIterable, Codable {
 }
 
 // MARK: - Main Settings Class
+
+/**
+ * NotificationSettings: Central store for notification preferences.
+ * 
+ * Responsibilities:
+ * - Persist user choices for reminders, daily summaries, and insights
+ * - Provide derived values for scheduling logic (effective intervals, boundaries)
+ * - Encapsulate decision-making helpers (shouldAlertForLow/HighNicotine)
+ * 
+ * Storage Strategy:
+ * - Uses @AppStorage for simple persistence tied to UserDefaults
+ * - Exposes Swift-friendly computed properties for enum-backed selections
+ * 
+ * Threading:
+ * - Annotated @MainActor so property updates remain UI-safe
+ */
 @MainActor
 class NotificationSettings: ObservableObject {
     static let shared = NotificationSettings()
@@ -130,6 +159,14 @@ class NotificationSettings: ObservableObject {
     private init() {}
     
     // MARK: - Helper Methods
+    
+    /**
+     * Returns the effective reminder interval in seconds.
+     * 
+     * If the user selected a custom interval, converts the custom minutes
+     * to seconds. Otherwise returns the pre-defined interval for the
+     * selected ReminderInterval value.
+     */
     func getEffectiveReminderInterval() -> TimeInterval {
         if reminderInterval == .custom {
             return TimeInterval(customReminderMinutes * 60)
@@ -137,7 +174,7 @@ class NotificationSettings: ObservableObject {
         return reminderInterval.timeInterval
     }
     
-    /// The effective reminder interval in minutes
+    /// The effective reminder interval in minutes, used for UI labels
     var effectiveReminderMinutes: Int {
         if reminderInterval == .custom {
             return customReminderMinutes
@@ -145,18 +182,20 @@ class NotificationSettings: ObservableObject {
         return Int(reminderInterval.timeInterval / 60)
     }
     
-    /// The effective lower boundary for nicotine level alerts (target low minus threshold)
+    /// The effective lower boundary for nicotine level alerts (target low minus threshold).
+    /// If currentLevel <= this boundary, a low-level alert is warranted.
     var effectiveLowBoundary: Double {
         return nicotineRangeLow - nicotineAlertThreshold
     }
     
-    /// The effective upper boundary for nicotine level alerts (target high)
+    /// The effective upper boundary for nicotine level alerts (target high).
+    /// If currentLevel > this boundary, a high-level alert is warranted.
     var effectiveHighBoundary: Double {
         return nicotineRangeHigh
     }
     
-    /// Determines if the current nicotine level should trigger a low-level alert
-    /// Fixed bug: was using (low + threshold), should be (low - threshold)
+    /// Determines if the current nicotine level should trigger a low-level alert.
+    /// Fixed bug: previously used (low + threshold), now correct with (low - threshold).
     func shouldAlertForLowNicotine(currentLevel: Double) -> Bool {
         guard reminderType == .nicotineLevelBased else { return false }
         return currentLevel <= effectiveLowBoundary
