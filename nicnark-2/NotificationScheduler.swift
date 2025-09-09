@@ -173,7 +173,6 @@ class NotificationScheduler: ObservableObject {
         
         // Check if user is currently outside their target range (immediate alert)
         let currentLevel = projection.currentLevel
-        let now = Date()
         
         if settings.shouldAlertForLowNicotine(currentLevel: currentLevel) {
             await scheduleImmediateNicotineLevelAlert(
