@@ -657,19 +657,20 @@ actor BackgroundMaintainer {
             
             let effectiveStartTime = actualPouchData.startTime
             let effectiveNicotineAmount = actualPouchData.nicotineAmount
+            let effectiveDuration = actualPouchData.duration  // Use pouch-specific duration
             let elapsed = max(0, now.timeIntervalSince(effectiveStartTime))
-            let endTime = effectiveStartTime.addingTimeInterval(FULL_RELEASE_TIME)
+            let endTime = effectiveStartTime.addingTimeInterval(effectiveDuration)  // Use actual duration, not FULL_RELEASE_TIME
             
             // Decision matrix logging
             let isExpired = now >= endTime
-            log.info("📊 Pouch \(t.pouchId, privacy: .public): active=\(actualPouchData.isActive), expired=\(isExpired), elapsed=\(Int(elapsed))s")
+            log.info("📊 Pouch \(t.pouchId, privacy: .public): active=\(actualPouchData.isActive), expired=\(isExpired), elapsed=\(Int(elapsed))s, duration=\(Int(effectiveDuration))s")
             
             if isExpired {
                 log.info("⏰ Timer expired, ending Live Activity for: \(t.pouchId, privacy: .public)")
                 await LiveActivityManager.endLiveActivity(for: t.pouchId)
             } else {
                 // Update the Live Activity with current state
-                let progress = min(max(elapsed / FULL_RELEASE_TIME, 0), 1)
+                let progress = min(max(elapsed / effectiveDuration, 0), 1)  // Use actual duration for progress
                 let currentLevel = AbsorptionConstants.shared
                     .calculateCurrentNicotineLevel(nicotineContent: effectiveNicotineAmount, elapsedTime: elapsed)
                 let timer = effectiveStartTime...endTime
@@ -689,7 +690,7 @@ actor BackgroundMaintainer {
     }
     
     // Synchronous helper for immediate checks (used in startLiveActivity)
-    func getActualPouchDataSync(for pouchId: String) -> (startTime: Date, nicotineAmount: Double, isActive: Bool)? {
+    func getActualPouchDataSync(for pouchId: String) -> (startTime: Date, nicotineAmount: Double, isActive: Bool, duration: TimeInterval)? {
         let context = PersistenceController.shared.container.viewContext
         
         if let uuid = UUID(uuidString: pouchId) {
@@ -699,7 +700,9 @@ actor BackgroundMaintainer {
             do {
                 if let pouchLog = try context.fetch(fetch).first, let startTime = pouchLog.insertionTime {
                     let isActive = pouchLog.removalTime == nil
-                    return (startTime: startTime, nicotineAmount: pouchLog.nicotineAmount, isActive: isActive)
+                    // Get the pouch's specific duration (stored in minutes, convert to seconds)
+                    let duration = TimeInterval(pouchLog.timerDuration * 60)
+                    return (startTime: startTime, nicotineAmount: pouchLog.nicotineAmount, isActive: isActive, duration: duration)
                 }
             } catch {
                 log.warning("Sync fetch error: \(error.localizedDescription, privacy: .public)")
@@ -708,7 +711,7 @@ actor BackgroundMaintainer {
         return nil
     }
     
-    private func getActualPouchData(for pouchId: String) async -> (startTime: Date, nicotineAmount: Double, isActive: Bool)? {
+    private func getActualPouchData(for pouchId: String) async -> (startTime: Date, nicotineAmount: Double, isActive: Bool, duration: TimeInterval)? {
         return await MainActor.run {
             let context = PersistenceController.shared.container.viewContext
             
@@ -720,7 +723,9 @@ actor BackgroundMaintainer {
                 do {
                     if let pouchLog = try context.fetch(fetch).first, let startTime = pouchLog.insertionTime {
                         let isActive = pouchLog.removalTime == nil // Only active if not removed
-                        return (startTime: startTime, nicotineAmount: pouchLog.nicotineAmount, isActive: isActive)
+                        // Get the pouch's specific duration (stored in minutes, convert to seconds)
+                        let duration = TimeInterval(pouchLog.timerDuration * 60)
+                        return (startTime: startTime, nicotineAmount: pouchLog.nicotineAmount, isActive: isActive, duration: duration)
                     } else {
                         log.warning("UUID lookup failed or missing insertionTime for pouchId: \(uuid.uuidString, privacy: .public)")
                     }

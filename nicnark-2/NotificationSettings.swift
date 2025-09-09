@@ -137,6 +137,14 @@ class NotificationSettings: ObservableObject {
         return reminderInterval.timeInterval
     }
     
+    /// The effective reminder interval in minutes
+    var effectiveReminderMinutes: Int {
+        if reminderInterval == .custom {
+            return customReminderMinutes
+        }
+        return Int(reminderInterval.timeInterval / 60)
+    }
+    
     /// The effective lower boundary for nicotine level alerts (target low minus threshold)
     var effectiveLowBoundary: Double {
         return nicotineRangeLow - nicotineAlertThreshold

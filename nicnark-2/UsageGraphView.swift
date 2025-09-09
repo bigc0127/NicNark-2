@@ -151,6 +151,7 @@ final class UsageGraphViewModel: ObservableObject {
 struct UsageGraphView: View {
     @Environment(\.managedObjectContext) private var viewContext
     @StateObject private var vm = UsageGraphViewModel()
+    @StateObject private var notificationSettings = NotificationSettings.shared
 
     @FetchRequest private var recentLogs: FetchedResults<PouchLog>
 
@@ -158,6 +159,7 @@ struct UsageGraphView: View {
     @State private var refreshTrigger = false
     @State private var showingEditSheet = false
     @State private var selectedPouchForEdit: PouchLog?
+    @State private var nicotineInfo: (current: Double, prediction: String?) = (0.0, nil)
 
     init(streakDays: Int = 0) {
         self.streakDays = streakDays
@@ -197,6 +199,7 @@ struct UsageGraphView: View {
     private var mainContentView: some View {
         VStack(spacing: 0) {
             headerTopSection
+            reminderInfoSection
             Divider()
             scrollableContent
         }
@@ -365,6 +368,155 @@ struct UsageGraphView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+    
+    @ViewBuilder
+    private var reminderInfoSection: some View {
+        if notificationSettings.reminderType != .disabled {
+            HStack {
+                Image(systemName: notificationSettings.reminderType == .nicotineLevelBased ? "chart.line.uptrend.xyaxis" : "clock")
+                    .foregroundColor(.secondary)
+                    .font(.caption)
+                
+                if notificationSettings.reminderType == .nicotineLevelBased {
+                    // Show nicotine level info
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Current Nicotine Level")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        HStack(spacing: 4) {
+                            Text(String(format: "%.2f mg", nicotineInfo.current))
+                                .font(.caption)
+                                .fontWeight(.medium)
+                            
+                            // Show if in/out of target range
+                            if nicotineInfo.current < notificationSettings.nicotineRangeLow {
+                                Text("(Below target)")
+                                    .font(.caption2)
+                                    .foregroundColor(.orange)
+                            } else if nicotineInfo.current > notificationSettings.nicotineRangeHigh {
+                                Text("(Above target)")
+                                    .font(.caption2)
+                                    .foregroundColor(.red)
+                            } else {
+                                Text("(In range)")
+                                    .font(.caption2)
+                                    .foregroundColor(.green)
+                            }
+                        }
+                        
+                        if let prediction = nicotineInfo.prediction {
+                            Text(prediction)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                } else {
+                    // Show time-based reminder info
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Next Reminder")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        
+                        if vm.hasActivePouch {
+                            Text("After pouch removal")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                        } else {
+                            let intervalText = notificationSettings.reminderInterval == .custom
+                                ? "\(notificationSettings.customReminderMinutes) min"
+                                : notificationSettings.reminderInterval.displayName
+                            let remainingMins = max(0, notificationSettings.effectiveReminderMinutes - (vm.sinceLastHH * 60 + vm.sinceLastMM))
+                            
+                            if remainingMins > 0 {
+                                let hours = remainingMins / 60
+                                let mins = remainingMins % 60
+                                let timeText = hours > 0 ? "\(hours)h \(mins)m" : "\(mins)m"
+                                Text("In \(timeText) (\(intervalText) interval)")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                            } else {
+                                Text("Due now (\(intervalText) interval)")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.orange)
+                            }
+                        }
+                    }
+                }
+                
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(Color(.systemGray6))
+            .onAppear {
+                updateNicotineInfo()
+            }
+            .onChange(of: refreshTrigger) { _, _ in
+                updateNicotineInfo()
+            }
+        }
+    }
+    
+    private func updateNicotineInfo() {
+        guard notificationSettings.reminderType == .nicotineLevelBased else { return }
+        
+        Task {
+            let calculator = NicotineCalculator()
+            let currentLevel = await calculator.calculateTotalNicotineLevel(context: viewContext)
+            
+            var predictionText: String? = nil
+            
+            if currentLevel < notificationSettings.nicotineRangeLow - notificationSettings.nicotineAlertThreshold {
+                // Already below alert threshold, show immediate alert
+                predictionText = "⚠️ Below alert threshold"
+            } else if currentLevel > notificationSettings.nicotineRangeHigh + notificationSettings.nicotineAlertThreshold {
+                // Already above alert threshold
+                predictionText = "⚠️ Above alert threshold"  
+            } else {
+                // Get projection to find future boundary crossings
+                let projection = await calculator.projectNicotineLevels(
+                    context: viewContext,
+                    settings: notificationSettings,
+                    duration: 4 * 3600 // Project 4 hours ahead
+                )
+                
+                // Check for predicted boundary crossings
+                if let lowCrossing = projection.lowBoundaryCrossing {
+                    let minutesUntil = Int(lowCrossing.timeIntervalSinceNow / 60)
+                    if minutesUntil > 0 {
+                        let hours = minutesUntil / 60
+                        let mins = minutesUntil % 60
+                        let timeText = hours > 0 ? "\(hours)h \(mins)m" : "\(mins)m"
+                        predictionText = "Alert in ~\(timeText) (going below range)"
+                    }
+                } else if let highCrossing = projection.highBoundaryCrossing {
+                    let minutesUntil = Int(highCrossing.timeIntervalSinceNow / 60)
+                    if minutesUntil > 0 {
+                        let hours = minutesUntil / 60
+                        let mins = minutesUntil % 60
+                        let timeText = hours > 0 ? "\(hours)h \(mins)m" : "\(mins)m"
+                        predictionText = "Alert in ~\(timeText) (going above range)"
+                    }
+                } else if currentLevel >= notificationSettings.nicotineRangeLow && currentLevel <= notificationSettings.nicotineRangeHigh {
+                    predictionText = "✓ Stable in target range"
+                }
+                
+                // Show decay info if current level is significant but no alerts predicted
+                if predictionText == nil && currentLevel > 0.1 {
+                    let halfLife = 2.0 * 60 * 60 // 2 hours in seconds
+                    let decayRate = currentLevel * 0.693 / halfLife * 60 // mg per minute
+                    if decayRate > 0.001 {
+                        predictionText = String(format: "Decaying at %.3f mg/min", decayRate)
+                    }
+                }
+            }
+            
+            await MainActor.run {
+                nicotineInfo = (currentLevel, predictionText)
+            }
+        }
     }
 }
 

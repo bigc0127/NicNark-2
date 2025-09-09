@@ -60,6 +60,7 @@ struct SettingsView: View {
     var body: some View {
         Form {
             disclaimerSection
+            inventorySection
             notificationSection
             timerSettingsSection
             exportSection
@@ -153,6 +154,27 @@ struct SettingsView: View {
     }
 
     // MARK: - View Sections
+    
+    private var inventorySection: some View {
+        Section {
+            NavigationLink(destination: InventoryManagementView()) {
+                HStack {
+                    Image(systemName: "tray.2.fill")
+                        .foregroundColor(.blue)
+                        .frame(width: 28)
+                    Text("Inventory Management")
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+        } header: {
+            Text("Inventory")
+        } footer: {
+            Text("Manage your can inventory, add new cans, and adjust pouch counts")
+        }
+    }
     
     private var notificationSection: some View {
         Section {

@@ -174,7 +174,16 @@ struct LogView: View {
         .navigationTitle("NicNark")
         .navigationBarTitleDisplayMode(.large)
         .onAppear {
-            cleanUpStale()
+            // Only clean up stale pouches after a delay to avoid conflicts with CloudKit sync
+            // This prevents accidentally removing pouches that are still being synced
+            Task {
+                // Wait a moment for CloudKit sync to update pouch states
+                try? await Task.sleep(nanoseconds: 2 * NSEC_PER_SEC)
+                await MainActor.run {
+                    cleanUpStale()
+                }
+            }
+            
             if #available(iOS 16.1, *) {
                 let authInfo = ActivityAuthorizationInfo()
                 print("📱 Live Activities enabled: \(authInfo.areActivitiesEnabled)")
@@ -744,8 +753,10 @@ struct LogView: View {
     private func checkIfPouchCompleted() -> Bool {
         guard let pouch = activePouches.first,
               let insertionTime = pouch.insertionTime else { return false }
+        // Use the pouch's specific duration, not the app's default
+        let actualDuration = TimeInterval(pouch.timerDuration * 60)  // Convert minutes to seconds
         let elapsed = Date().timeIntervalSince(insertionTime)
-        let remaining = max(pouchDuration - elapsed, 0)
+        let remaining = max(actualDuration - elapsed, 0)
         let isCompleted = remaining == 0
         
         // Auto-remove if enabled and just completed
@@ -779,10 +790,32 @@ struct LogView: View {
     }
 
     func cleanUpStale() {
+        // Only clean up stale pouches if auto-remove is enabled
+        // AND the pouch has actually completed its timer duration
+        guard autoRemovePouches else { return }
+        
         let request = PouchLog.fetchRequest()
-        request.predicate = NSPredicate(format:"removalTime == nil AND insertionTime < %@", Date(timeIntervalSinceNow: -1800) as CVarArg)
+        request.predicate = NSPredicate(format:"removalTime == nil")
+        
         if let logs = try? ctx.fetch(request) {
-            logs.forEach(removePouch)
+            for pouch in logs {
+                guard let insertionTime = pouch.insertionTime else { continue }
+                
+                // Use the pouch's specific timer duration (stored in minutes)
+                let pouchDurationSeconds = TimeInterval(pouch.timerDuration * 60)
+                let elapsed = Date().timeIntervalSince(insertionTime)
+                
+                // Only auto-remove if the timer has actually completed
+                // Add 5 second grace period to avoid edge cases
+                if elapsed > (pouchDurationSeconds + 5) {
+                    print("🧹 Cleaning up completed pouch from \(elapsed / 60) minutes ago")
+                    removePouch(pouch)
+                } else if elapsed > pouchDurationSeconds {
+                    // Timer just completed, normal auto-remove
+                    print("⏰ Auto-removing just-completed pouch")
+                    removePouch(pouch)
+                }
+            }
         }
     }
     
@@ -799,7 +832,9 @@ struct LogView: View {
             // Calculate current nicotine levels for active pouches
             let currentLevel = calculateCurrentTotalNicotineLevel()
             let pouchName = "\(activePouches.count) active pouch\(activePouches.count > 1 ? "es" : "")"
-            let endTime = activePouches.first?.insertionTime?.addingTimeInterval(pouchDuration)
+            // Use the pouch's specific duration, not the app default
+            let pouchSpecificDuration = activePouches.first.map { TimeInterval($0.timerDuration * 60) } ?? FULL_RELEASE_TIME
+            let endTime = activePouches.first?.insertionTime?.addingTimeInterval(pouchSpecificDuration)
             
             // Update the persistence helper with current data
             helper.setFromLiveActivity(

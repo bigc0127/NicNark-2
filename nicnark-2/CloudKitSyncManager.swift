@@ -183,9 +183,12 @@ class CloudKitSyncManager: ObservableObject {
                     }
                     
                     logger.info("🆕 Starting Live Activity for synced pouch from another device")
+                    // Use the pouch's specific duration (stored in minutes, convert to seconds)
+                    let duration = TimeInterval(pouch.timerDuration * 60)
                     let success = await LiveActivityManager.startLiveActivity(
                         for: pouchId,
                         nicotineAmount: pouch.nicotineAmount,
+                        duration: duration,  // Pass the pouch's specific duration
                         isFromSync: true  // Mark as from sync to prevent ending other activities
                     )
                     
@@ -239,11 +242,13 @@ class CloudKitSyncManager: ObservableObject {
                     elapsedTime: elapsed
                 )
                 
+                // Use the pouch's specific duration, not the default
+                let pouchDuration = TimeInterval(activePouch.timerDuration * 60)
                 helper.setFromLiveActivity(
                     level: currentLevel,
                     peak: activePouch.nicotineAmount * ABSORPTION_FRACTION,
                     pouchName: "\(Int(activePouch.nicotineAmount))mg pouch",
-                    endTime: insertionTime.addingTimeInterval(FULL_RELEASE_TIME)
+                    endTime: insertionTime.addingTimeInterval(pouchDuration)
                 )
                 
                 // Nudge widgets
