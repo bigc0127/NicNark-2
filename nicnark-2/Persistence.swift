@@ -263,11 +263,16 @@ print("📍 Store URL: \(storeDescription.url?.absoluteString ?? "Unknown")")
                                     Self.logger.info("🔄 Starting Live Activity for synced pouch: \(pouchId, privacy: .public)")
                                     // Use the pouch's specific duration (stored in minutes, convert to seconds)
                                     let duration = TimeInterval(pouch.timerDuration * 60)
+                                    
+                                    // Pass the original insertion time so synced pouches show accurate countdown.
+                                    // Without this, a pouch logged 15 minutes ago on another device would
+                                    // incorrectly restart with a full 30-minute timer.
                                     let success = await LiveActivityManager.startLiveActivity(
                                         for: pouchId,
                                         nicotineAmount: pouch.nicotineAmount,
-                                        duration: duration,  // Pass the pouch's specific duration
-                                        isFromSync: true
+                                        insertionTime: pouch.insertionTime,  // Preserves correct remaining time
+                                        duration: duration,  // Respects custom duration settings
+                                        isFromSync: true  // Avoids ending activities on other devices
                                     )
                                     if success {
                                         Self.logger.info("✅ Live Activity started for synced pouch")

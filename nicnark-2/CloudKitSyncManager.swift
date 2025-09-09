@@ -185,11 +185,15 @@ class CloudKitSyncManager: ObservableObject {
                     logger.info("🆕 Starting Live Activity for synced pouch from another device")
                     // Use the pouch's specific duration (stored in minutes, convert to seconds)
                     let duration = TimeInterval(pouch.timerDuration * 60)
+                    
+                    // CRITICAL: Pass the actual insertion time from Core Data so the
+                    // Live Activity shows the correct remaining time, not a full restart
                     let success = await LiveActivityManager.startLiveActivity(
                         for: pouchId,
                         nicotineAmount: pouch.nicotineAmount,
-                        duration: duration,  // Pass the pouch's specific duration
-                        isFromSync: true  // Mark as from sync to prevent ending other activities
+                        insertionTime: pouch.insertionTime,  // Ensures timer shows correct remaining time
+                        duration: duration,  // Pouch's actual duration (may be custom)
+                        isFromSync: true  // Prevents ending other device's activities
                     )
                     
                     if success {

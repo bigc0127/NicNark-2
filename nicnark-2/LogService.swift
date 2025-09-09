@@ -148,6 +148,10 @@ enum LogService {
         
         // STEP 8: Start Live Activity for real-time tracking (iOS 16.1+)
         // Live Activities show on the Lock Screen and Dynamic Island with a countdown timer
+        // 
+        // CRITICAL: We pass the pouch's actual insertion time from Core Data to ensure the
+        // Live Activity countdown matches exactly what's displayed in-app and in widgets.
+        // Without this, the timer would restart from 30 minutes whenever the activity refreshes.
         if #available(iOS 16.1, *) {
             // Use UUID as identifier for consistency across devices and app launches
             let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
@@ -155,7 +159,8 @@ enum LogService {
                 _ = await LiveActivityManager.startLiveActivity(
                     for: pouchId, 
                     nicotineAmount: mg,
-                    duration: duration  // How long to show the countdown
+                    insertionTime: pouch.insertionTime,  // Pass actual insertion time for accurate countdown
+                    duration: duration  // How long the absorption should take
                 )
             }
         }
@@ -223,7 +228,11 @@ enum LogService {
         
         // Format display name for the widget
         let pouchName = "\(Int(pouch.nicotineAmount))mg pouch"
-        let endTime = pouch.insertionTime?.addingTimeInterval(FULL_RELEASE_TIME)  // When absorption completes
+        
+        // IMPORTANT: Use the pouch's actual duration for widget end time calculation.
+        // Previously used FULL_RELEASE_TIME which could mismatch if pouch has custom duration.
+        let pouchDuration = TimeInterval(pouch.timerDuration * 60)  // Convert stored minutes to seconds
+        let endTime = pouch.insertionTime?.addingTimeInterval(pouchDuration)  // Accurate completion time
         
         // Store all the data widgets need to display current status
         helper.setFromLiveActivity(

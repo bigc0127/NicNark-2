@@ -168,7 +168,21 @@ class LiveActivityManager: ObservableObject {
     
     // MARK: - Start
     
-    static func startLiveActivity(for pouchId: String, nicotineAmount: Double, duration: TimeInterval? = nil, isFromSync: Bool = false) async -> Bool {
+    /**
+     * Starts a Live Activity for the given pouch.
+     *
+     * Parameters:
+     * - pouchId: Stable UUID of the pouch (used across devices)
+     * - nicotineAmount: Nicotine content of the pouch in mg
+     * - insertionTime: The ACTUAL time the pouch was inserted (from Core Data).
+     *                  If nil, falls back to `Date()`.
+     * - duration: Absorption duration to display (in seconds). If nil, uses FULL_RELEASE_TIME.
+     * - isFromSync: If true, this activity was started due to CloudKit sync (don't end others).
+     *
+     * Important: Using the actual insertionTime keeps the Live Activity's countdown
+     * perfectly aligned with the in‑app timer, widgets, and notifications.
+     */
+    static func startLiveActivity(for pouchId: String, nicotineAmount: Double, insertionTime: Date? = nil, duration: TimeInterval? = nil, isFromSync: Bool = false) async -> Bool {
         let log = Logger(subsystem: "com.nicnark.nicnark-2", category: "LiveActivity")
         let auth = ActivityAuthorizationInfo()
         guard auth.areActivitiesEnabled else {
@@ -202,7 +216,9 @@ class LiveActivityManager: ObservableObject {
             await endAllLiveActivities()
         }
         
-        let start = Date()
+        // Use the ACTUAL insertion time from Core Data whenever possible.
+        // This avoids mismatches where the activity restarts at a default duration.
+        let start = insertionTime ?? Date()
         let actualDuration = duration ?? FULL_RELEASE_TIME
         let end = start.addingTimeInterval(actualDuration)
         let attributes = PouchActivityAttributes(
@@ -242,8 +258,8 @@ class LiveActivityManager: ObservableObject {
             )
             WidgetCenter.shared.reloadAllTimelines()
             
-            // Foreground ticker for smooth UI while app is active
-            Task { await startForegroundMinuteTicker(pouchId: pouchId, nicotineAmount: nicotineAmount, duration: actualDuration) }
+        // Foreground ticker for smooth UI while app is active
+        Task { await startForegroundMinuteTicker(pouchId: pouchId, nicotineAmount: nicotineAmount, startTime: start, duration: actualDuration) }
             // Schedule an early background refresh in case the app soon goes inactive
             Task { await BackgroundMaintainer.shared.scheduleSoon() }
             
@@ -266,12 +282,19 @@ class LiveActivityManager: ObservableObject {
     
     // MARK: - Foreground ticker
     
-    private static func startForegroundMinuteTicker(pouchId: String, nicotineAmount: Double, duration: TimeInterval) async {
+    /**
+     * Foreground ticker that updates the Live Activity while the app is active.
+     *
+     * Uses the explicit `startTime` passed from the creator rather than the
+     * activity's attributes to guard against any drift or attribute desyncs.
+     */
+    private static func startForegroundMinuteTicker(pouchId: String, nicotineAmount: Double, startTime: Date, duration: TimeInterval) async {
         let log = Logger(subsystem: "com.nicnark.nicnark-2", category: "LiveActivity")
         var updateCount = 0
         
         while true {
-            guard let activity = Activity<PouchActivityAttributes>.activities.first(where: { $0.attributes.pouchId == pouchId }) else {
+            // Only need to verify existence; no need to bind a local variable
+            guard Activity<PouchActivityAttributes>.activities.first(where: { $0.attributes.pouchId == pouchId }) != nil else {
                 log.info("Ticker stopped: no activity")
                 break
             }
@@ -284,7 +307,8 @@ class LiveActivityManager: ObservableObject {
                 break
             }
             
-            let elapsed = Date().timeIntervalSince(activity.attributes.startTime)
+            // Use the actual start time passed in, not the activity's attribute
+            let elapsed = Date().timeIntervalSince(startTime)
             let remaining = max(0, duration - elapsed)
             if remaining <= 0 {
                 await endLiveActivity(for: pouchId)
@@ -294,7 +318,8 @@ class LiveActivityManager: ObservableObject {
             let currentLevel = AbsorptionConstants.shared
                 .calculateCurrentNicotineLevel(nicotineContent: nicotineAmount, elapsedTime: elapsed)
             let progress = min(max(elapsed / duration, 0), 1)
-            let timer = activity.attributes.startTime...activity.attributes.endTime
+            // Use the actual start time and calculated end time
+            let timer = startTime...startTime.addingTimeInterval(duration)
             
             await updateLiveActivity(
                 for: pouchId,
@@ -315,7 +340,8 @@ class LiveActivityManager: ObservableObject {
     
     static func updateLiveActivityStartTime(for pouchId: String, newStartTime: Date, nicotineAmount: Double) async {
         let log = Logger(subsystem: "com.nicnark.nicnark-2", category: "LiveActivity")
-        guard Activity<PouchActivityAttributes>.activities.first(where: { $0.attributes.pouchId == pouchId }) != nil else {
+        // Only need a boolean existence check to avoid unused variable warnings
+        guard Activity<PouchActivityAttributes>.activities.contains(where: { $0.attributes.pouchId == pouchId }) else {
             log.warning("No activity to update start time for pouch: \(pouchId, privacy: .public)")
             return
         }
