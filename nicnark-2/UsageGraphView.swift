@@ -311,7 +311,7 @@ struct UsageGraphView: View {
     @State private var refreshTrigger = false                              // Forces view refresh on external changes
     @State private var showingEditSheet = false                            // Controls edit sheet presentation
     @State private var selectedPouchForEdit: PouchLog?                     // Pouch being edited
-    @State private var nicotineInfo: (current: Double, prediction: String?) = (0.0, nil)  // Current level and prediction
+    @State private var nicotineInfo: (current: Double, prediction: String?, estimatedAfterCurrent: Double?) = (0.0, nil, nil)  // Current level, prediction, and estimated after current pouch
 
     init(streakDays: Int = 0) {
         self.streakDays = streakDays
@@ -567,13 +567,26 @@ struct UsageGraphView: View {
                 if notificationSettings.reminderType == .nicotineLevelBased {
                     // Show nicotine level info
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Current Nicotine Level")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                        HStack(spacing: 4) {
-                            Text(String(format: "%.2f mg", nicotineInfo.current))
-                                .font(.caption)
-                                .fontWeight(.medium)
+                        if vm.hasActivePouch, let estimated = nicotineInfo.estimatedAfterCurrent {
+                            // Show estimated level after current pouch completes
+                            Text("Estimated after current pouch")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                            HStack(spacing: 4) {
+                                Text(String(format: "%.3f mg", estimated))
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.blue)
+                            }
+                        } else {
+                            // Show current level when no active pouch
+                            Text("Current Nicotine Level")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                            HStack(spacing: 4) {
+                                Text(String(format: "%.3f mg", nicotineInfo.current))
+                                    .font(.caption)
+                                    .fontWeight(.medium)
                             
                             // Show if in/out of target range
                             if nicotineInfo.current < notificationSettings.nicotineRangeLow {
@@ -664,6 +677,23 @@ struct UsageGraphView: View {
             let calculator = NicotineCalculator()
             let currentLevel = await calculator.calculateTotalNicotineLevel(context: viewContext)
             
+            // Calculate estimated level after current pouch completes
+            var estimatedAfterCurrent: Double? = nil
+            if vm.hasActivePouch {
+                // Get the active pouch details
+                let request: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
+                request.predicate = NSPredicate(format: "removalTime == nil")
+                request.fetchLimit = 1
+                
+                if let activePouch = try? viewContext.fetch(request).first,
+                   let insertionTime = activePouch.insertionTime {
+                    // Calculate what the level will be when this pouch completes
+                    let pouchDuration = TimeInterval(activePouch.timerDuration * 60) // Convert minutes to seconds
+                    let completionTime = insertionTime.addingTimeInterval(pouchDuration)
+                    estimatedAfterCurrent = await calculator.calculateTotalNicotineLevel(context: viewContext, at: completionTime)
+                }
+            }
+            
             var predictionText: String? = nil
             
             if currentLevel < notificationSettings.nicotineRangeLow - notificationSettings.nicotineAlertThreshold {
@@ -712,7 +742,7 @@ struct UsageGraphView: View {
             }
             
             await MainActor.run {
-                nicotineInfo = (currentLevel, predictionText)
+                nicotineInfo = (currentLevel, predictionText, estimatedAfterCurrent)
             }
         }
     }

@@ -83,7 +83,7 @@ struct NicotineGraphProvider: TimelineProvider {
         var chartData = generateFallbackChartData(currentLevel: currentLevel, now: now)
         var timeSinceText = calculateTimeSinceLastPouchFallback(now: now)
         let lastUpdated = persistenceHelper.getSnapshotLastUpdated()
-        var updatedText = formatUpdatedText(since: lastUpdated, now: now)
+        var updatedText = formatUpdatedText(since: lastUpdated ?? now, now: now)
         
         // Only attempt Core Data if we explicitly know it's readable in this process
         if persistenceHelper.isCoreDataReadable() {
@@ -129,20 +129,21 @@ struct NicotineGraphProvider: TimelineProvider {
         for pouchLog in pouches {
             guard let insertionTime = pouchLog.insertionTime else { continue }
             
-            let removalTime = pouchLog.removalTime ?? time
+            // Only consider pouches that were inserted before our calculation timestamp
+            guard insertionTime <= time else { continue }
             
-            if insertionTime <= time {
-                let contribution = calculatePouchContribution(
-                    pouchLog: pouchLog,
-                    currentTime: time,
-                    insertionTime: insertionTime,
-                    endTime: removalTime
-                )
-                totalLevel += contribution
-            }
+            let removalTime = pouchLog.removalTime ?? insertionTime.addingTimeInterval(FULL_RELEASE_TIME)
+            
+            let contribution = calculatePouchContribution(
+                pouchLog: pouchLog,
+                currentTime: time,
+                insertionTime: insertionTime,
+                endTime: removalTime
+            )
+            totalLevel += contribution
         }
         
-        return totalLevel
+        return max(0, totalLevel) // Ensure non-negative
     }
     
     private func calculatePouchContribution(
@@ -283,6 +284,22 @@ struct NicotineGraphProvider: TimelineProvider {
         return "No recent data available"
     }
     
+    private func formatUpdatedText(since: Date, now: Date) -> String {
+        let timeDiff = now.timeIntervalSince(since)
+        
+        if timeDiff < 60 {
+            return "Updated: just now"
+        } else if timeDiff < 3600 {
+            let minutes = Int(timeDiff / 60)
+            return "Updated: \(minutes) min\(minutes == 1 ? "" : "s") ago"
+        } else if timeDiff < 86400 {
+            let hours = Int(timeDiff / 3600)
+            return "Updated: \(hours) hour\(hours == 1 ? "" : "s") ago"
+        } else {
+            return "Updated: over a day ago"
+        }
+    }
+    
     // MARK: - Core Data Access for Widget
     private func fetchCoreDataForWidget(now: Date) async -> (success: Bool, currentLevel: Double, chartData: [NicotineChartPoint], timeSince: String, hasActive: Bool) {
         let persistenceHelper = WidgetPersistenceHelper()
@@ -297,11 +314,17 @@ struct NicotineGraphProvider: TimelineProvider {
             
             let recentPouches = try context.fetch(recentPouchesRequest)
             
-            // Generate chart data
+            // Fetch ALL pouches from last 10 hours for comprehensive level calculation (including decay)
+            let tenHoursAgo = now.addingTimeInterval(-10 * 3600)
+            let allPouchesRequest = PouchLog.fetchRequest()
+            allPouchesRequest.predicate = NSPredicate(format: "insertionTime >= %@", tenHoursAgo as NSDate)
+            let allPouches = try context.fetch(allPouchesRequest)
+            
+            // Generate chart data from recent pouches (6 hours for display)
             let chartData = generateChartData(from: recentPouches, now: now, sixHoursAgo: sixHoursAgo)
             
-            // Calculate current total nicotine level
-            let currentLevel = calculateTotalNicotineLevelAt(time: now, pouches: recentPouches)
+            // Calculate current total nicotine level using ALL pouches (for decay calculation)
+            let currentLevel = calculateTotalNicotineLevelAt(time: now, pouches: allPouches)
             
             // Check for active pouches
             let activePouchesRequest = PouchLog.fetchRequest()
