@@ -74,6 +74,24 @@ public final class WidgetPersistenceHelper {
         return Date(timeIntervalSince1970: ts)
     }
     
+    // MARK: Manual update methods for sync functionality
+    
+    public func setCurrentNicotineLevel(_ level: Double) {
+        defaults?.set(level, forKey: Keys.currentLevel)
+        defaults?.set(Date().timeIntervalSince1970, forKey: Keys.lastUpdated)
+    }
+    
+    public func setActivityRunning(_ isRunning: Bool) {
+        defaults?.set(isRunning, forKey: Keys.activityRunning)
+    }
+    
+    public func updateSnapshot(level: Double, isRunning: Bool) {
+        guard let d = defaults else { return }
+        d.set(level, forKey: Keys.currentLevel)
+        d.set(isRunning, forKey: Keys.activityRunning)
+        d.set(Date().timeIntervalSince1970, forKey: Keys.lastUpdated)
+    }
+    
     // MARK: Capability checks
     // Check if Core Data store is actually accessible with data
     // Only return true if we can successfully read data from the store

@@ -42,7 +42,6 @@ struct NicotineChartPoint: Identifiable, Hashable {
 // MARK: - Widget Provider
 struct NicotineGraphProvider: TimelineProvider {
     private let logger = Logger(subsystem: "com.nicnark.nicnark-2", category: "NicotineWidget")
-    private let absorptionConstants = AbsorptionConstants.shared
     
     func placeholder(in context: Context) -> NicotineGraphEntry {
         NicotineGraphEntry.placeholder
@@ -50,52 +49,53 @@ struct NicotineGraphProvider: TimelineProvider {
 
     func getSnapshot(in context: Context, completion: @escaping (NicotineGraphEntry) -> ()) {
         logger.info("📱 Widget snapshot requested")
-        Task {
-            let entry = await generateEntry()
-            completion(entry)
-        }
+        let entry = generateEntry()
+        completion(entry)
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<Entry>) -> ()) {
         logger.info("📱 Widget timeline requested")
-        Task {
-            let currentEntry = await generateEntry()
-            
-            // More aggressive update schedule:
-            // - Every 1 minute if there are active pouches (for real-time updates)
-            // - Every 5 minutes otherwise (to catch new activity)
-            let updateInterval = currentEntry.hasActivePouches ? 60.0 : 300.0
-            let nextUpdateDate = Date().addingTimeInterval(updateInterval)
-            
-            // Use after policy with calculated next update date
-            let timeline = Timeline(entries: [currentEntry], policy: .after(nextUpdateDate))
-            completion(timeline)
-        }
+        let currentEntry = generateEntry()
+        
+        // More aggressive update schedule:
+        // - Every 1 minute if there are active pouches (for real-time updates)
+        // - Every 5 minutes otherwise (to catch new activity)
+        let updateInterval = currentEntry.hasActivePouches ? 60.0 : 300.0
+        let nextUpdateDate = Date().addingTimeInterval(updateInterval)
+        
+        // Use after policy with calculated next update date
+        let timeline = Timeline(entries: [currentEntry], policy: .after(nextUpdateDate))
+        completion(timeline)
     }
     
-    private func generateEntry() async -> NicotineGraphEntry {
+    private func generateEntry() -> NicotineGraphEntry {
         let persistenceHelper = WidgetPersistenceHelper()
         let now = Date()
         
-        // Default: App Group snapshot (reliable across app and widget)
-        var currentLevel = persistenceHelper.getCurrentNicotineLevel()
-        var hasActivePouches = persistenceHelper.isActivityRunning()
-        var chartData = generateFallbackChartData(currentLevel: currentLevel, now: now)
-        var timeSinceText = calculateTimeSinceLastPouchFallback(now: now)
-        let lastUpdated = persistenceHelper.getSnapshotLastUpdated()
-        var updatedText = formatUpdatedText(since: lastUpdated ?? now, now: now)
-        
-        // Only attempt Core Data if we explicitly know it's readable in this process
+        // PRIORITY 1: Try fresh Core Data calculation first
         if persistenceHelper.isCoreDataReadable() {
-            let result = await fetchCoreDataForWidget(now: now)
+            let result = fetchCoreDataForWidget(now: now)
             if result.success {
-                currentLevel = result.currentLevel
-                chartData = result.chartData
-                timeSinceText = result.timeSince
-                hasActivePouches = result.hasActive
-                updatedText = "Updated: just now"
+                logger.info("📱 Widget using fresh Core Data: level=\(result.currentLevel)")
+                return NicotineGraphEntry(
+                    date: now,
+                    chartData: result.chartData,
+                    timeSinceLastPouch: result.timeSince,
+                    currentLevel: result.currentLevel,
+                    hasActivePouches: result.hasActive,
+                    updatedText: "Updated: just now"
+                )
             }
         }
+        
+        // PRIORITY 2: Fallback to App Group snapshot (stale but reliable)
+        logger.info("📱 Widget falling back to snapshot data")
+        let currentLevel = persistenceHelper.getCurrentNicotineLevel()
+        let hasActivePouches = persistenceHelper.isActivityRunning()
+        let chartData = generateFallbackChartData(currentLevel: currentLevel, now: now)
+        let timeSinceText = calculateTimeSinceLastPouchFallback(now: now)
+        let lastUpdated = persistenceHelper.getSnapshotLastUpdated()
+        let updatedText = formatUpdatedText(since: lastUpdated ?? now, now: now)
         
         return NicotineGraphEntry(
             date: now,
@@ -107,7 +107,7 @@ struct NicotineGraphProvider: TimelineProvider {
         )
     }
     
-    private func generateChartData(context: NSManagedObjectContext, now: Date, sixHoursAgo: Date) async -> [NicotineChartPoint] {
+    private func generateChartData(context: NSManagedObjectContext, now: Date, sixHoursAgo: Date) -> [NicotineChartPoint] {
         var timePoints: [Date] = []
         var currentTime = sixHoursAgo
         
@@ -117,11 +117,11 @@ struct NicotineGraphProvider: TimelineProvider {
             currentTime = currentTime.addingTimeInterval(30 * 60) // 30 minutes
         }
         
-        // Use centralized NicotineCalculator for consistency with the app
-        let calculator = NicotineCalculator()
+        // Use widget nicotine calculator for consistency with the app
+        let calculator = WidgetNicotineCalculator()
         var points: [NicotineChartPoint] = []
         for timePoint in timePoints {
-            let level = await calculator.calculateTotalNicotineLevel(context: context, at: timePoint)
+            let level = calculator.calculateTotalNicotineLevel(context: context, at: timePoint)
             points.append(NicotineChartPoint(time: timePoint, level: max(0, level)))
         }
         return points
@@ -248,7 +248,7 @@ struct NicotineGraphProvider: TimelineProvider {
     }
     
     // MARK: - Core Data Access for Widget
-    private func fetchCoreDataForWidget(now: Date) async -> (success: Bool, currentLevel: Double, chartData: [NicotineChartPoint], timeSince: String, hasActive: Bool) {
+    private func fetchCoreDataForWidget(now: Date) -> (success: Bool, currentLevel: Double, chartData: [NicotineChartPoint], timeSince: String, hasActive: Bool) {
         let persistenceHelper = WidgetPersistenceHelper()
         let context = persistenceHelper.backgroundContext()
         
@@ -262,11 +262,11 @@ struct NicotineGraphProvider: TimelineProvider {
             let recentPouches = try context.fetch(recentPouchesRequest)
             
             // Generate chart data from recent pouches (6 hours for display)
-            let chartData = await generateChartData(context: context, now: now, sixHoursAgo: sixHoursAgo)
+            let chartData = generateChartData(context: context, now: now, sixHoursAgo: sixHoursAgo)
             
-            // Calculate current total nicotine level using centralized calculator
-            let calculator = NicotineCalculator()
-            let currentLevel = await calculator.calculateTotalNicotineLevel(context: context, at: now)
+            // Calculate current total nicotine level using widget calculator
+            let calculator = WidgetNicotineCalculator()
+            let currentLevel = calculator.calculateTotalNicotineLevel(context: context, at: now)
             
             // Check for active pouches
             let activePouchesRequest = PouchLog.fetchRequest()
@@ -333,7 +333,7 @@ struct SmallWidgetView: View {
                     .minimumScaleFactor(0.7)
                 
                 if entry.currentLevel > 0 {
-                    Text("Current: \(entry.currentLevel, specifier: "%.2f") mg")
+                    Text("Current: \(entry.currentLevel, specifier: "%.3f") mg")
                         .font(.caption2)
                         .foregroundColor(levelColor(for: entry.currentLevel))
                         .fontWeight(.semibold)
@@ -391,7 +391,7 @@ struct MediumWidgetView: View {
                         .minimumScaleFactor(0.8)
                     
                     if entry.currentLevel > 0 {
-                        Text("Current: \(entry.currentLevel, specifier: "%.2f") mg")
+                        Text("Current: \(entry.currentLevel, specifier: "%.3f") mg")
                             .font(.caption2)
                             .foregroundColor(levelColor(for: entry.currentLevel))
                             .fontWeight(.semibold)
@@ -473,7 +473,7 @@ struct LargeWidgetView: View {
                         Text("Current")
                             .font(.caption2)
                             .foregroundColor(.secondary)
-                        Text("\(entry.currentLevel, specifier: "%.2f") mg")
+                        Text("\(entry.currentLevel, specifier: "%.3f") mg")
                             .font(.caption)
                             .fontWeight(.bold)
                             .foregroundColor(levelColor(for: entry.currentLevel))
@@ -599,9 +599,40 @@ struct RefreshWidgetIntent: AppIntent {
     static var description = IntentDescription("Force refresh the widget data")
     
     func perform() async throws -> some IntentResult {
-        // Force Core Data to refresh and reload widget timelines
-        WidgetCenter.shared.reloadAllTimelines()
-        return .result()
+        let helper = WidgetPersistenceHelper()
+        
+        // Try to get fresh data from Core Data
+        if helper.isCoreDataReadable() {
+            let context = helper.backgroundContext()
+            let calculator = WidgetNicotineCalculator()
+            
+            do {
+                // Calculate fresh nicotine level
+                let currentLevel = calculator.calculateTotalNicotineLevel(context: context, at: Date())
+                
+                // Check for active pouches
+                let activePouchesRequest = PouchLog.fetchRequest()
+                activePouchesRequest.predicate = NSPredicate(format: "removalTime == nil")
+                let activePouches = try context.fetch(activePouchesRequest)
+                let hasActive = !activePouches.isEmpty
+                
+                // Update the snapshot with fresh data
+                helper.updateSnapshot(level: currentLevel, isRunning: hasActive)
+                
+                // Reload all widget timelines
+                WidgetCenter.shared.reloadAllTimelines()
+                
+                return .result(dialog: "Widget refreshed with level \(String(format: "%.3f", currentLevel)) mg")
+            } catch {
+                // Fallback: just reload timelines
+                WidgetCenter.shared.reloadAllTimelines()
+                return .result(dialog: "Widget refreshed (using cached data)")
+            }
+        } else {
+            // Core Data not accessible, just reload timelines
+            WidgetCenter.shared.reloadAllTimelines()
+            return .result(dialog: "Widget timeline refreshed")
+        }
     }
 }
 

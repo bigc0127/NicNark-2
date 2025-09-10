@@ -100,8 +100,10 @@ grep -r "LiveActivity" --include="*.swift" .
 
 ### Multi-Target Dependencies
 - **Shared Logic**: `LogService`, `PersistenceController` used across main app and extensions
+- **Shared Nicotine Calculations**: `WidgetNicotineCalculator` provides unified calculation logic for widgets with minimal dependencies, ensuring widget and main app show identical nicotine levels
 - **Widget Communication**: Core Data sharing via App Groups
 - **Intent Execution**: App Intents run inside the main app target and write directly via Core Data
+- **Widget Data Refresh**: `RefreshWidgetIntent` now performs actual data refresh by recalculating nicotine levels and updating snapshot data, rather than simple timeline reload
 
 ## Development Notes
 
@@ -124,3 +126,5 @@ grep -r "LiveActivity" --include="*.swift" .
 - **Widget Bundle**: Single Live Activity widget type
 - **Data Sharing**: Core Data model shared via App Groups
 - **Update Strategy**: Timeline reload after every data mutation
+- **Data Precision**: Widget displays nicotine levels to 3 decimal places (%.3f format) to match main app precision
+- **Calculation Parity**: Widget and main app use unified calculation logic ensuring identical results
