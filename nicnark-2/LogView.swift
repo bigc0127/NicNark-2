@@ -849,21 +849,20 @@ struct LogView: View {
     }
     
     private func calculateCurrentTotalNicotineLevel() -> Double {
-        let now = Date()
-        var totalLevel = 0.0
+        // Use the centralized calculator to ensure consistency across all views
+        let calculator = NicotineCalculator()
+        // Calculate asynchronously but return synchronously for UI compatibility
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: Double = 0.0
         
-        for pouch in activePouches {
-            guard let insertionTime = pouch.insertionTime else { continue }
-            let elapsed = now.timeIntervalSince(insertionTime)
-            
-            let currentContribution = AbsorptionConstants.shared.calculateCurrentNicotineLevel(
-                nicotineContent: pouch.nicotineAmount,
-                elapsedTime: elapsed
-            )
-            totalLevel += currentContribution
+        Task {
+            result = await calculator.calculateTotalNicotineLevel(context: ctx)
+            semaphore.signal()
         }
         
-        return totalLevel
+        // Wait for async calculation to complete (with timeout)
+        _ = semaphore.wait(timeout: .now() + 0.5)
+        return result
     }
     
     // MARK: - Sync Overlay

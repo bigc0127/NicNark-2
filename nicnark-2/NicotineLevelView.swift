@@ -308,63 +308,7 @@ struct NicotineLevelView: View {
         return points
     }
     
-    private func calculateTotalNicotineLevelAt(time: Date) -> Double {
-        var totalLevel = 0.0
-        
-        for pouchLog in recentLogs {
-            guard let insertionTime = pouchLog.insertionTime else { continue }
-            
-            let removalTime = pouchLog.removalTime ?? time
-            let endTime = removalTime
-            
-            // Only consider pouches that were active or had effects at this time
-            if insertionTime <= time {
-                let contribution = calculatePouchContribution(
-                    pouchLog: pouchLog,
-                    currentTime: time,
-                    insertionTime: insertionTime,
-                    endTime: endTime
-                )
-                totalLevel += contribution
-            }
-        }
-        
-        return totalLevel
-    }
-    
-    private func calculatePouchContribution(
-        pouchLog: PouchLog,
-        currentTime: Date,
-        insertionTime: Date,
-        endTime: Date
-    ) -> Double {
-        let nicotineContent = pouchLog.nicotineAmount
-        
-        if currentTime <= endTime {
-            // During absorption phase
-            let timeInMouth = min(
-                currentTime.timeIntervalSince(insertionTime),
-                endTime.timeIntervalSince(insertionTime)
-            )
-            return absorptionConstants.calculateCurrentNicotineLevel(
-                nicotineContent: nicotineContent,
-                elapsedTime: timeInMouth
-            )
-        } else {
-            // Post-absorption decay phase
-            let actualTimeInMouth = endTime.timeIntervalSince(insertionTime)
-            let totalAbsorbed = absorptionConstants.calculateAbsorbedNicotine(
-                nicotineContent: nicotineContent,
-                useTime: actualTimeInMouth
-            )
-            
-            let timeSinceRemoval = currentTime.timeIntervalSince(endTime)
-            return absorptionConstants.calculateDecayedNicotine(
-                initialLevel: totalAbsorbed,
-                timeSinceRemoval: timeSinceRemoval
-            )
-        }
-    }
+    // Removed unused local calculation functions - now using centralized NicotineCalculator
 }
 
 // MARK: - Previews
