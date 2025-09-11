@@ -236,7 +236,7 @@ struct CanDetailView: View {
             // Update existing can
             can.brand = brand
             can.flavor = flavor.isEmpty ? nil : flavor
-            can.strength = strength
+            can.strength = round(strength)  // Round to avoid floating-point precision issues
             can.pouchCount = Int32(pouchCount)
             can.barcode = barcode.isEmpty ? nil : barcode
             can.duration = hasCustomDuration ? Int32(duration) : 0
@@ -247,7 +247,7 @@ struct CanDetailView: View {
                     barcode: barcode,
                     brand: brand,
                     flavor: flavor.isEmpty ? nil : flavor,
-                    strength: strength,
+                    strength: round(strength),  // Round to avoid floating-point precision issues
                     duration: hasCustomDuration ? duration : 0,
                     context: viewContext
                 )
@@ -265,7 +265,7 @@ struct CanDetailView: View {
             _ = canManager.createCan(
                 brand: brand,
                 flavor: flavor.isEmpty ? nil : flavor,
-                strength: strength,
+                strength: round(strength),  // Round to avoid floating-point precision issues
                 pouchCount: pouchCount,
                 barcode: barcode.isEmpty ? nil : barcode,
                 duration: hasCustomDuration ? duration : 0,

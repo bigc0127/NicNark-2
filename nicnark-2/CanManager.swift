@@ -72,7 +72,7 @@ class CanManager: ObservableObject {
         can.id = UUID()                        // Unique identifier for CloudKit sync
         can.brand = brand                      // Manufacturer name
         can.flavor = flavor                    // Flavor description (optional)
-        can.strength = strength                // Nicotine mg per pouch
+        can.strength = round(strength)         // Nicotine mg per pouch (rounded to avoid precision issues)
         can.pouchCount = Int32(pouchCount)     // Current remaining pouches
         can.initialCount = Int32(pouchCount)   // Original pouch count (for analytics)
         can.barcode = barcode                  // For barcode scanning (optional)
@@ -86,7 +86,7 @@ class CanManager: ObservableObject {
                 barcode: barcode,
                 brand: brand,
                 flavor: flavor,
-                strength: strength,
+                strength: round(strength),  // Use rounded strength for consistency
                 duration: duration,
                 context: context
             )
@@ -144,8 +144,11 @@ class CanManager: ObservableObject {
     ) -> Bool {
         guard can.pouchCount > 0 else { return false }  // Can't log from empty can
         
+        // Round amount to avoid floating-point precision issues (9.0000000001 -> 9.0)
+        let roundedAmount = round(amount)
+        
         // LogService handles the complete logging process including decrementing the can's count
-        let success = LogService.logPouch(amount: amount, ctx: context, can: can)
+        let success = LogService.logPouch(amount: roundedAmount, ctx: context, can: can)
         
         if success {
             // Ensure the database changes are saved (LogService already saves, but this is extra safety)
@@ -177,7 +180,7 @@ class CanManager: ObservableObject {
                 barcode: barcode,
                 brand: can.brand ?? "",
                 flavor: can.flavor,
-                strength: can.strength,
+                strength: round(can.strength),  // Round strength to avoid precision issues
                 duration: Int(can.duration),
                 context: context
             )
@@ -312,7 +315,7 @@ class CanManager: ObservableObject {
         // Always update the can details (in case information changed)
         template.brand = brand                  // Manufacturer name
         template.flavor = flavor               // Flavor description
-        template.strength = strength           // Nicotine strength
+        template.strength = round(strength)    // Nicotine strength (rounded to avoid precision issues)
         template.duration = Int32(duration)    // Custom timer duration
         template.lastUpdated = Date()          // Track when template was last modified
         

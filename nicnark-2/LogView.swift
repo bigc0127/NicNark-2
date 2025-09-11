@@ -549,9 +549,11 @@ struct LogView: View {
         guard can.pouchCount > 0 else { return }
         
         // Log the pouch with can association
+        // Round strength to avoid floating-point precision issues (9.0000000001 -> 9.0)
+        let roundedStrength = round(can.strength)
         let success = canManager.logPouchFromCan(
             can: can,
-            amount: can.strength,
+            amount: roundedStrength,
             context: ctx
         )
         
