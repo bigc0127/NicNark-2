@@ -214,6 +214,13 @@ class LiveActivityManager: ObservableObject {
         if !isFromSync {
             // For local creation, end all other activities (one pouch at a time)
             await endAllLiveActivities()
+        } else {
+            // CRITICAL: If this is from sync and ANY activity already exists, do not create another one
+            // We enforce a strict one-activity-at-a-time policy across all pouches
+            if !Activity<PouchActivityAttributes>.activities.isEmpty {
+                log.info("Sync attempted to create activity but one already exists - blocking to maintain single-activity policy")
+                return false
+            }
         }
         
         // Use the ACTUAL insertion time from Core Data whenever possible.

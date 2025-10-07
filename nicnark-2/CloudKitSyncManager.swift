@@ -159,6 +159,24 @@ class CloudKitSyncManager: ObservableObject {
         logger.info("🔄 Remote data sync completed")
     }
     
+    /**
+     * Syncs Live Activities across devices using CloudKit data.
+     * 
+     * SINGLE-ACTIVITY POLICY:
+     * This app enforces a strict one-Live-Activity-at-a-time policy, even when multiple
+     * pouches are active simultaneously. This is because:
+     * 1. iOS limits Live Activities per app (system throttling)
+     * 2. Multiple Live Activities create visual clutter on lock screen
+     * 3. Users want to see aggregated info (total nicotine, longest timer)
+     * 
+     * SELECTION CRITERIA:
+     * When multiple pouches are active, we create ONE Live Activity that represents:
+     * - Timer: The pouch with the LONGEST remaining duration
+     * - Nicotine: The SUM of all active pouches' nicotine amounts
+     * - Progress: Based on the longest timer's progress
+     * 
+     * This gives users the most relevant information at a glance.
+     */
     private func syncLiveActivitiesAcrossDevices() async {
         let context = PersistenceController.shared.container.viewContext
         
@@ -170,45 +188,9 @@ class CloudKitSyncManager: ObservableObject {
             let activePouches = try context.fetch(fetchRequest)
             let currentActivities = Activity<PouchActivityAttributes>.activities
             
-            // Start Live Activities for new active pouches (from other devices)
-            for pouch in activePouches {
-                let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
-                
-                // Use our improved helper to check for existing activity
-                if !LiveActivityManager.activityExists(for: pouchId) {
-                    // Double-check the pouch is still active before creating
-                    guard await LiveActivityManager.isPouchActive(pouchId) else {
-                        logger.info("🚫 Skipping Live Activity for inactive pouch during sync: \(pouchId, privacy: .public)")
-                        continue
-                    }
-                    
-                    logger.info("🆕 Starting Live Activity for synced pouch from another device")
-                    // Use the pouch's specific duration (stored in minutes, convert to seconds)
-                    let duration = TimeInterval(pouch.timerDuration * 60)
-                    
-                    // CRITICAL: Pass the actual insertion time from Core Data so the
-                    // Live Activity shows the correct remaining time, not a full restart
-                    let success = await LiveActivityManager.startLiveActivity(
-                        for: pouchId,
-                        nicotineAmount: pouch.nicotineAmount,
-                        insertionTime: pouch.insertionTime,  // Ensures timer shows correct remaining time
-                        duration: duration,  // Pouch's actual duration (may be custom)
-                        isFromSync: true  // Prevents ending other device's activities
-                    )
-                    
-                    if success {
-                        logger.info("✅ Live Activity started for cross-device pouch")
-                    } else {
-                        logger.error("❌ Failed to start Live Activity for cross-device pouch")
-                    }
-                }
-            }
-            
-            // End Live Activities for pouches completed on other devices
+            // STEP 1: End Live Activities for pouches completed on other devices
             for activity in currentActivities {
                 let pouchId = activity.attributes.pouchId
-                
-                // Use our Core Data guard to check if pouch is still active
                 let isStillActive = await LiveActivityManager.isPouchActive(pouchId)
                 
                 if !isStillActive {
@@ -217,7 +199,73 @@ class CloudKitSyncManager: ObservableObject {
                 }
             }
             
-            logger.info("🔄 Cross-device Live Activity sync: \(activePouches.count) active pouches, \(currentActivities.count) activities")
+            // STEP 2: Check if we still have any Live Activities after cleanup
+            let remainingActivities = Activity<PouchActivityAttributes>.activities
+            
+            // STEP 3: If a Live Activity already exists, don't create more (single-activity policy)
+            if !remainingActivities.isEmpty {
+                logger.info("✅ Live Activity already exists - maintaining single-activity policy (\(activePouches.count) active pouches)")
+                return
+            }
+            
+            // STEP 4: If no Live Activity exists but we have active pouches, create ONE
+            guard !activePouches.isEmpty else {
+                logger.info("ℹ️ No active pouches - no Live Activity needed")
+                return
+            }
+            
+            // STEP 5: Find the pouch with the longest remaining duration
+            let now = Date()
+            var longestPouch: PouchLog?
+            var longestRemainingTime: TimeInterval = 0
+            var totalNicotine: Double = 0
+            
+            for pouch in activePouches {
+                guard let insertionTime = pouch.insertionTime else { continue }
+                
+                let duration = TimeInterval(pouch.timerDuration * 60)
+                let elapsed = now.timeIntervalSince(insertionTime)
+                let remaining = max(0, duration - elapsed)
+                
+                // Sum all nicotine
+                totalNicotine += pouch.nicotineAmount
+                
+                // Track longest remaining time
+                if remaining > longestRemainingTime {
+                    longestRemainingTime = remaining
+                    longestPouch = pouch
+                }
+            }
+            
+            // STEP 6: Create ONE Live Activity for the pouch with longest timer
+            guard let representativePouch = longestPouch,
+                  let pouchId = representativePouch.pouchId?.uuidString else {
+                logger.warning("⚠️ Could not determine representative pouch for Live Activity")
+                return
+            }
+            
+            // Double-check the pouch is still active before creating
+            guard await LiveActivityManager.isPouchActive(pouchId) else {
+                logger.info("🚫 Skipping Live Activity - representative pouch no longer active: \(pouchId, privacy: .public)")
+                return
+            }
+            
+            logger.info("🆕 Creating single Live Activity for \(activePouches.count) active pouches (total: \(totalNicotine)mg, longest: \(longestRemainingTime/60)min)")
+            
+            let duration = TimeInterval(representativePouch.timerDuration * 60)
+            let success = await LiveActivityManager.startLiveActivity(
+                for: pouchId,
+                nicotineAmount: totalNicotine,  // Show TOTAL nicotine from all pouches
+                insertionTime: representativePouch.insertionTime,  // Use longest pouch's start time
+                duration: duration,  // Use longest pouch's duration
+                isFromSync: true  // Prevents ending existing activities
+            )
+            
+            if success {
+                logger.info("✅ Single Live Activity created for \(activePouches.count) pouches")
+            } else {
+                logger.error("❌ Failed to create Live Activity during sync")
+            }
             
         } catch {
             logger.error("❌ Failed to sync Live Activities: \(error.localizedDescription, privacy: .public)")
