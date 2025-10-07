@@ -127,33 +127,6 @@ struct nicnark_2App: App {
                     }
                 }
                 
-                // MARK: - Siri Shortcuts Integration
-                // Handle Siri Shortcuts and iOS Shortcuts app actions
-                // When user says "Log a 6mg pouch" to Siri, this code runs
-                .onContinueUserActivity("com.nicnark.logPouch") { activity in
-                    let ctx = persistenceController.container.viewContext
-                    
-                    // Extract nicotine amount from the shortcut data
-                    // Try both Int and String formats for maximum compatibility
-                    let mgFromInt = activity.userInfo?["mg"] as? Int
-                    let mgFromString = (activity.userInfo?["mg"] as? String).flatMap(Int.init)
-                    
-                    // Early exit if we can't get a valid amount
-                    guard let mg = mgFromInt ?? mgFromString, mg > 0 else {
-                        return
-                    }
-
-                    // Run the logging operation on the main thread
-                    Task { @MainActor in
-                        // Use the same LogService that the UI uses (consistent behavior)
-                        let success = LogService.logPouch(amount: Double(mg), ctx: ctx)
-                        if success {
-                            // Update home screen widgets after successful logging
-                            WidgetCenter.shared.reloadAllTimelines()
-                        }
-                    }
-                }
-                
                 // MARK: - App Launch Configuration
                 // Set up services when the app interface appears
                 .onAppear {

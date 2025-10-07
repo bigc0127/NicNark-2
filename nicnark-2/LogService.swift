@@ -35,6 +35,31 @@ enum LogService {
     /// Custom buttons are NOT created for these predefined amounts to avoid duplicates.
     private static let predefinedAmounts: Set<Double> = [3.0, 6.0]
     
+    /**
+     * Calculates weighted average duration for multiple pouches.
+     * 
+     * When logging multiple pouches at once (e.g., 2 pouches from a 30-min can,
+     * 1 pouch from a 45-min can), this computes the weighted average based on
+     * nicotine content to determine the appropriate timer duration.
+     * 
+     * - Parameter pouches: Array of (nicotineAmount, duration) tuples
+     * - Returns: Weighted average duration in seconds
+     */
+    static func calculateWeightedDuration(pouches: [(nicotineAmount: Double, duration: TimeInterval)]) -> TimeInterval {
+        guard !pouches.isEmpty else { return FULL_RELEASE_TIME }
+        
+        let totalNicotine = pouches.reduce(0) { $0 + $1.nicotineAmount }
+        guard totalNicotine > 0 else { return FULL_RELEASE_TIME }
+        
+        // Weight each duration by its nicotine contribution
+        let weightedSum = pouches.reduce(0.0) { sum, pouch in
+            let weight = pouch.nicotineAmount / totalNicotine
+            return sum + (pouch.duration * weight)
+        }
+        
+        return weightedSum
+    }
+    
 /**
      * Creates a CustomButton entity for non-standard dosage amounts.
      * 
@@ -87,16 +112,8 @@ enum LogService {
      */
     @discardableResult
     static func logPouch(amount mg: Double, ctx: NSManagedObjectContext, can: Can? = nil, customDuration: TimeInterval? = nil) -> Bool {
-        // STEP 1: Prevent double-logging by checking for existing active pouches
-        // An active pouch is one without a removalTime (user hasn't marked it as removed)
-        let activePouchFetch: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
-        activePouchFetch.predicate = NSPredicate(format: "removalTime == nil")
-        activePouchFetch.fetchLimit = 1
-        
-        if let existingActivePouches = try? ctx.fetch(activePouchFetch), !existingActivePouches.isEmpty {
-            print("⚠️ Cannot log new pouch: Active pouch already exists")
-            return false  // Exit early - only one active pouch allowed at a time
-        }
+        // STEP 1: Allow multiple active pouches (removed restriction)
+        // Multiple pouches can now be active simultaneously with independent timers
         
         // STEP 2: Create custom dosage button for this amount (if not 3mg/6mg)
         ensureCustomButton(for: mg, in: ctx)
@@ -108,10 +125,20 @@ enum LogService {
         pouch.nicotineAmount = mg        // How much nicotine (e.g., 3.0, 6.0)
         
         // STEP 4: Determine absorption duration (how long the pouch should be tracked)
-        // Priority: customDuration > can's custom duration > default 30 minutes
+        // Priority: customDuration > can's custom duration > app default timer setting
         let canDuration = can?.duration ?? 0  // Duration from can settings (in minutes)
-        let durationMinutes = Int32((customDuration ?? (canDuration > 0 ? TimeInterval(canDuration * 60) : FULL_RELEASE_TIME)) / 60)
-        pouch.timerDuration = durationMinutes  // Store in Core Data as minutes
+        let durationSeconds: TimeInterval
+        if let customDuration = customDuration {
+            // Explicit custom duration provided (e.g., multi-pouch weighted average)
+            durationSeconds = customDuration
+        } else if canDuration > 0 {
+            // Use can-specific duration (convert minutes to seconds)
+            durationSeconds = TimeInterval(canDuration * 60)
+        } else {
+            // Fall back to app's global timer setting
+            durationSeconds = FULL_RELEASE_TIME
+        }
+        pouch.timerDuration = Int32(durationSeconds / 60)  // Store in Core Data as minutes
         
         // STEP 5: Link to inventory and decrement pouch count (if logging from a tracked can)
         if let can = can {
@@ -142,9 +169,9 @@ enum LogService {
             return false
         }
         
-        // STEP 7: Calculate final duration in seconds for Live Activities and notifications
-        // Convert can duration from minutes to seconds if needed
-        let duration = customDuration ?? (canDuration > 0 ? TimeInterval(canDuration * 60) : FULL_RELEASE_TIME)
+        // STEP 7: Use the calculated duration for Live Activities and notifications
+        // (Already calculated in STEP 4)
+        let duration = durationSeconds
         
         // STEP 8: Start Live Activity for real-time tracking (iOS 16.1+)
         // Live Activities show on the Lock Screen and Dynamic Island with a countdown timer

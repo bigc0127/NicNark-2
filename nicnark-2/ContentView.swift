@@ -123,28 +123,6 @@ struct ContentView: View {
             }
         }
         
-        // MARK: - Shortcuts Integration
-        // Handle Siri Shortcuts and iOS Shortcuts app integration
-        .onContinueUserActivity("com.nicnark.logPouch") { activity in
-            let ctx = viewContext  // Get database context
-            
-            // Try to extract nicotine amount from the shortcut data
-            // Accept both Int and String formats for flexibility
-            let mgFromInt = activity.userInfo?["mg"] as? Int
-            let mgFromString = (activity.userInfo?["mg"] as? String).flatMap(Int.init)
-            
-            // guard statement: if we can't get a valid amount, exit early
-            guard let mg = mgFromInt ?? mgFromString, mg > 0 else {
-                return
-            }
-
-            // Task { @MainActor in } runs code on the main thread asynchronously
-            Task { @MainActor in
-                // Use the centralized logging service (same logic as manual logging)
-                LogService.logPouch(amount: Double(mg), ctx: ctx)
-            }
-        }
-        
         // MARK: - App Initialization
         // .task runs when the view appears (similar to viewDidLoad in UIKit)
         .task {

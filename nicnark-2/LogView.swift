@@ -79,9 +79,8 @@ struct LogView: View {
     
     // MARK: - Can Inventory Management
     @StateObject private var canManager = CanManager.shared           // Singleton for managing can inventory
+    @State private var loadedPouches: [UUID: Int] = [:]              // Track loaded pouches per can (canID -> count)
     @State private var showingAddCan = false                          // Controls "Add Can" sheet presentation
-    @State private var showingCanSelection = false                    // Sheet for associating pouches with cans
-    @State private var pendingPouchFromShortcut: PouchLog?           // Pouch awaiting can association (from shortcuts)
     @State private var showingBarcodeScanner = false                  // Barcode scanner sheet presentation
     @State private var scannedBarcode: String? = nil                  // Temporarily holds scanned barcode data
     @State private var selectedCan: Can?                              // Currently selected can for operations
@@ -149,20 +148,150 @@ struct LogView: View {
     }
     /// How often to update the in-app countdown display (1 second for smooth progress)
     private let TIMER_INTERVAL: TimeInterval = 1.0
+    
+    // MARK: - Multi-Pouch Loading Computed Properties
+    
+    /// Total number of pouches loaded across all cans
+    private var totalLoadedPouches: Int {
+        loadedPouches.values.reduce(0, +)
+    }
+    
+    /// Total nicotine from all loaded pouches
+    private var totalNicotine: Double {
+        activeCans.reduce(0.0) { total, can in
+            guard let canId = can.id, let count = loadedPouches[canId], count > 0 else { return total }
+            return total + (can.strength * Double(count))
+        }
+    }
+    
+    /// Whether the Start Timer button should be enabled
+    private var canStartTimer: Bool {
+        totalLoadedPouches > 0  // Can start even if other pouches are active
+    }
+    
+    /// Weighted average duration based on loaded pouches
+    private var weightedDuration: TimeInterval {
+        var pouchData: [(nicotineAmount: Double, duration: TimeInterval)] = []
+        
+        for can in activeCans {
+            guard let canId = can.id, let count = loadedPouches[canId], count > 0 else { continue }
+            
+            let duration: TimeInterval
+            if can.duration > 0 {
+                // Can has custom duration
+                duration = TimeInterval(can.duration * 60)
+            } else {
+                // Use app default
+                duration = FULL_RELEASE_TIME
+            }
+            
+            // Add each pouch from this can
+            for _ in 0..<count {
+                pouchData.append((nicotineAmount: can.strength, duration: duration))
+            }
+        }
+        
+        return LogService.calculateWeightedDuration(pouches: pouchData)
+    }
 
     var body: some View {
         ZStack {
-            VStack(spacing: 20) {
-                Text("Log a Pouch").font(.headline)
-
-                if activePouches.isEmpty {
-                    quickButtonsView
-                    if showInput { customRowView }
+            ScrollView {
+                VStack(spacing: 16) {
+                    // Loading interface
+                    Text("Load Pouches")
+                        .font(.headline)
+                        .padding(.top, 16)
+                    
+                    // Vertical scrolling can inventory
+                    if !activeCans.isEmpty {
+                        ForEach(activeCans, id: \.self) { can in
+                            if let canId = can.id {
+                                // Get active pouches for this specific can
+                                let canActivePouches = activePouches.filter { pouch in
+                                    pouch.can?.id == canId
+                                }
+                                
+                                CanCardView(
+                                    can: can,
+                                    loadedCount: loadedPouches[canId] ?? 0,
+                                    activePouches: Array(canActivePouches),
+                                    onIncrement: {
+                                        incrementPouch(for: canId)
+                                    },
+                                    onDecrement: {
+                                        decrementPouch(for: canId)
+                                    },
+                                    onEdit: {
+                                        canToEdit = can
+                                        DispatchQueue.main.async {
+                                            showingEditCan = true
+                                        }
+                                    }
+                                )
+                                .padding(.horizontal)
+                            }
+                        }
+                    } else {
+                        // Empty state - no cans
+                        VStack(spacing: 12) {
+                            Image(systemName: "tray")
+                                .font(.system(size: 48))
+                                .foregroundColor(.gray)
+                            
+                            Text("No cans in inventory")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+                            
+                            Text("Add a can to start tracking")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .frame(height: 180)
+                        .frame(maxWidth: .infinity)
+                        .background(Color(.secondarySystemBackground))
+                        .cornerRadius(12)
+                        .padding(.horizontal)
+                    }
+                    
+                    // Add can and scan buttons
+                    HStack(spacing: 12) {
+                        Button(action: {
+                            showingAddCan = true
+                        }) {
+                            HStack {
+                                Image(systemName: "plus.circle.fill")
+                                Text("Add Can")
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .frame(height: 44)
+                        
+                        Button(action: {
+                            showingBarcodeScanner = true
+                        }) {
+                            HStack {
+                                Image(systemName: "barcode.viewfinder")
+                                Text("Scan Barcode")
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .frame(height: 44)
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom, canStartTimer ? 100 : 16) // Space for Start Timer button if shown
                 }
-
-                if let pouch = activePouches.first { countdownPane(for: pouch) }
             }
-            .padding()
+            
+            // Start Timer button (shown when pouches are loaded)
+            if canStartTimer {
+                VStack {
+                    Spacer()
+                    startTimerButton
+                        .padding()
+                        .background(Color(.systemBackground))
+                }
+            }
             
             // Sync overlay - only shows when syncing and iCloud is enabled
             if #available(iOS 16.1, *) {
@@ -227,23 +356,11 @@ struct LogView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchLogged"))) { notification in
-            // When a pouch is logged from anywhere (shortcuts, URL schemes, etc.), start the Live Activity timer
+            // When a pouch is logged from anywhere (URL schemes, etc.), start the Live Activity timer
             startLiveTimerIfNeeded()
             // Also start the optimized timer for in-app updates
             if !activePouches.isEmpty {
                 startOptimizedTimer()
-            }
-            
-            // Check if this was from a shortcut and needs can association
-            if let userInfo = notification.userInfo,
-               let isFromShortcut = userInfo["isFromShortcut"] as? Bool,
-               isFromShortcut,
-               let pouchId = userInfo["pouchId"] as? String {
-                // Find the pouch and show can selection
-                if let pouch = activePouches.first(where: { $0.pouchId?.uuidString == pouchId }) {
-                    pendingPouchFromShortcut = pouch
-                    showingCanSelection = true
-                }
             }
         }
         .sheet(isPresented: $showingAddCan) {
@@ -276,16 +393,6 @@ struct LogView: View {
                 showingBarcodeScanner = false
                 handleScannedBarcode(barcode)
             }
-        }
-        .sheet(isPresented: $showingCanSelection) {
-            CanSelectionSheet(pendingPouch: pendingPouchFromShortcut) { selectedCan in
-                if let pouch = pendingPouchFromShortcut {
-                    canManager.associatePouchWithCan(pouch, can: selectedCan, context: ctx)
-                }
-                pendingPouchFromShortcut = nil
-                showingCanSelection = false
-            }
-            .environment(\.managedObjectContext, ctx)
         }
         .onAppear {
             canManager.fetchActiveCans(context: ctx)
@@ -323,125 +430,39 @@ struct LogView: View {
     }
 
     // MARK: - UI Components
+    
+    var startTimerButton: some View {
+        Button(action: startTimerWithLoadedPouches) {
+            VStack(spacing: 8) {
+                HStack {
+                    Image(systemName: "play.fill")
+                    Text("Start Timer")
+                        .fontWeight(.semibold)
+                }
+                .font(.title2)
+                
+                Text("\(totalLoadedPouches) pouch\(totalLoadedPouches == 1 ? "" : "es") • \(String(format: "%.1f", totalNicotine))mg")
+                    .font(.caption)
+            }
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(Color.blue)
+            .foregroundColor(.white)
+            .cornerRadius(12)
+            .shadow(radius: 4)
+        }
+        .disabled(!canStartTimer)
+    }
 
+    // LEGACY VIEW - No longer used in v2.1 (multi-pouch loading)
+    // Kept for reference/rollback purposes
+    /*
     var quickButtonsView: some View {
         VStack(spacing: 16) {
-            // Can inventory scroll view
-            if !activeCans.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(activeCans, id: \.self) { can in
-                            CanCardView(
-                                can: can,
-                                onSelect: {
-                                    // Log pouch from this can
-                                    logPouchFromCan(can)
-                                },
-                                onEdit: {
-                                    // Edit this can
-                                    canToEdit = can
-                                    // Small delay to ensure canToEdit is set before sheet presents
-                                    DispatchQueue.main.async {
-                                        showingEditCan = true
-                                    }
-                                }
-                            )
-                        }
-                    }
-                    .padding(.horizontal)
-                }
-                .frame(height: 200)
-            } else {
-                // Empty state - no cans
-                VStack(spacing: 12) {
-                    Image(systemName: "tray")
-                        .font(.system(size: 48))
-                        .foregroundColor(.gray)
-                    
-                    Text("No cans in inventory")
-                        .font(.headline)
-                        .foregroundColor(.secondary)
-                    
-                    Text("Add a can to start tracking")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                .frame(height: 180)
-                .frame(maxWidth: .infinity)
-                .background(Color(.secondarySystemBackground))
-                .cornerRadius(12)
-                .padding(.horizontal)
-            }
-            
-            // Add can and manual log buttons
-            HStack(spacing: 12) {
-                Button(action: {
-                    showingAddCan = true
-                }) {
-                    HStack {
-                        Image(systemName: "plus.circle.fill")
-                        Text("Add Can")
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .frame(height: 44)
-                
-                Button(action: {
-                    showInput.toggle()
-                }) {
-                    HStack {
-                        Image(systemName: "number")
-                        Text("Manual Log")
-                    }
-                }
-                .buttonStyle(.bordered)
-                .frame(height: 44)
-            }
-            .padding(.horizontal)
-            
-            // Scan Can button
-            Button(action: {
-                showingBarcodeScanner = true
-            }) {
-                HStack {
-                    Image(systemName: "barcode.viewfinder")
-                    Text("Scan Can")
-                }
-                .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .frame(height: 44)
-            .padding(.horizontal)
-            
-            // Legacy custom buttons for backward compatibility
-            if !customButtons.isEmpty && !hideLegacyButtons {
-                Divider()
-                    .padding(.horizontal)
-                
-                Text("Quick Add (Legacy)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                
-                HStack(spacing: 8) {
-                    ForEach(customButtons, id: \.self) { button in
-                        Button("\(button.nicotineAmount, specifier: "%.0f") mg") {
-                            logPouch(button.nicotineAmount)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                deleteCustomButton(button)
-                            } label: {
-                                Label("Delete Button", systemImage: "trash")
-                            }
-                        }
-                    }
-                }
-                .padding(.horizontal)
-            }
+            // Old horizontal scroll view implementation
         }
     }
+    */
 
     var customRowView: some View {
         HStack {
@@ -521,6 +542,139 @@ struct LogView: View {
         .cornerRadius(12)
     }
 
+    // MARK: – Multi-Pouch Loading Operations
+    
+    func incrementPouch(for canId: UUID) {
+        let current = loadedPouches[canId] ?? 0
+        loadedPouches[canId] = current + 1
+    }
+    
+    func decrementPouch(for canId: UUID) {
+        guard let current = loadedPouches[canId], current > 0 else { return }
+        if current == 1 {
+            loadedPouches.removeValue(forKey: canId)
+        } else {
+            loadedPouches[canId] = current - 1
+        }
+    }
+    
+    func startTimerWithLoadedPouches() {
+        guard canStartTimer else { return }
+        
+        // Haptic feedback
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.impactOccurred()
+        
+        var successCount = 0
+        var longestDuration: TimeInterval = 0
+        var longestPouchId: String?
+        var totalNicotine: Double = 0
+        
+        // First, log all pouches WITHOUT starting Live Activities
+        // We'll manually create ONE Live Activity afterward
+        for can in activeCans {
+            guard let canId = can.id, let count = loadedPouches[canId], count > 0 else { continue }
+            
+            // Log each pouch from this can individually
+            for i in 0..<count {
+                // Create pouch without triggering Live Activity
+                let pouch = PouchLog(context: ctx)
+                pouch.pouchId = UUID()
+                // Add microsecond offset to prevent visual grouping in Usage view
+                // Each pouch gets a unique timestamp (0ms, 100ms, 200ms, etc.)
+                pouch.insertionTime = Date.now.addingTimeInterval(TimeInterval(i) * 0.1)
+                pouch.nicotineAmount = can.strength
+                
+                // Set duration
+                let durationSeconds: TimeInterval
+                if can.duration > 0 {
+                    durationSeconds = TimeInterval(can.duration * 60)
+                } else {
+                    durationSeconds = FULL_RELEASE_TIME
+                }
+                pouch.timerDuration = Int32(durationSeconds / 60)
+                
+                // Associate with can and decrement inventory
+                can.addToPouchLogs(pouch)
+                can.usePouch()
+                
+                totalNicotine += can.strength
+                
+                // Track longest duration pouch for Live Activity
+                if durationSeconds >= longestDuration {
+                    longestDuration = durationSeconds
+                    longestPouchId = pouch.pouchId?.uuidString
+                }
+                
+                successCount += 1
+                print("✅ Logged \(can.strength)mg pouch from \(can.brand ?? "Unknown")")
+            }
+        }
+        
+        // Save all pouches
+        do {
+            try ctx.save()
+            print("✅ Saved \(successCount) pouches")
+        } catch {
+            print("❌ Failed to save pouches: \(error)")
+            let errorGenerator = UINotificationFeedbackGenerator()
+            errorGenerator.notificationOccurred(.error)
+            return
+        }
+        
+        if successCount > 0, let pouchId = longestPouchId {
+            // Clear loaded pouches
+            loadedPouches.removeAll()
+            
+            // Create ONE Live Activity for the longest timer
+            if #available(iOS 16.1, *) {
+                Task {
+                    _ = await LiveActivityManager.startLiveActivity(
+                        for: pouchId,
+                        nicotineAmount: totalNicotine,  // Show total nicotine
+                        insertionTime: Date.now,
+                        duration: longestDuration
+                    )
+                }
+            }
+            
+            // Schedule completion notification for longest timer
+            let fireDate = Date().addingTimeInterval(longestDuration)
+            NotificationManager.scheduleCompletionAlert(
+                id: pouchId,
+                title: "Absorption complete",
+                body: "Your pouches have finished absorbing.",
+                fireDate: fireDate
+            )
+            
+            // Start Live Activity timer
+            startLiveTimerIfNeeded()
+            updateWidgetPersistenceHelper()
+            
+            // Refresh can list
+            canManager.fetchActiveCans(context: ctx)
+            
+            // Trigger CloudKit sync
+            Task {
+                await PersistenceController.shared.triggerCloudKitSync()
+            }
+            
+            // Update widgets
+            WidgetCenter.shared.reloadAllTimelines()
+            
+            // Success haptic
+            let successGenerator = UINotificationFeedbackGenerator()
+            successGenerator.notificationOccurred(.success)
+            
+            print("✅ Started \(successCount) separate timers with ONE Live Activity (longest: \(longestDuration/60) min)")
+        } else {
+            // Error haptic
+            let errorGenerator = UINotificationFeedbackGenerator()
+            errorGenerator.notificationOccurred(.error)
+            print("❌ Failed to start timers")
+        }
+    }
+    
     // MARK: – CRUD Operations
     
     func handleScannedBarcode(_ barcode: String) {
