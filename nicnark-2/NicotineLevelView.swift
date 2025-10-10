@@ -21,6 +21,12 @@ private struct NicotinePoint: Identifiable, Hashable {
     }
 }
 
+private struct LineSegment: Identifiable {
+    let id = UUID()
+    let points: [NicotinePoint]
+    let color: Color
+}
+
 struct NicotineLevelView: View {
     // MARK: - Properties
     @Environment(\.managedObjectContext) private var viewContext
@@ -28,6 +34,7 @@ struct NicotineLevelView: View {
     
     @State private var selectedPoint: NicotinePoint?
     @State private var chartData: [NicotinePoint] = []
+    @State private var lineSegments: [LineSegment] = []
     @State private var isLoading = true
     @State private var refreshTrigger = false
     @State private var updateTimer: Timer?
@@ -117,30 +124,17 @@ struct NicotineLevelView: View {
     
     private var chartView: some View {
         Chart {
-            // Draw the main line with segments colored by trend
-            ForEach(Array(chartData.indices), id: \.self) { index in
-                if index > 0 {
-                    let currentPoint = chartData[index]
-                    let previousPoint = chartData[index - 1]
-                    
-                    // Color based on if this segment is going up or down
-                    let isIncreasing = currentPoint.level > previousPoint.level
-                    let segmentColor: Color = isIncreasing ? .green : .red
-                    
-                    // Draw line segment from previous to current point
+            // Draw each colored segment as a series
+            ForEach(lineSegments) { segment in
+                ForEach(segment.points) { point in
                     LineMark(
-                        x: .value("Time", previousPoint.time),
-                        y: .value("Nicotine", previousPoint.level)
+                        x: .value("Time", point.time),
+                        y: .value("Nicotine", point.level),
+                        series: .value("Segment", segment.id.uuidString)
                     )
-                    .foregroundStyle(segmentColor)
+                    .foregroundStyle(segment.color)
                     .lineStyle(StrokeStyle(lineWidth: 3))
-                    
-                    LineMark(
-                        x: .value("Time", currentPoint.time),
-                        y: .value("Nicotine", currentPoint.level)
-                    )
-                    .foregroundStyle(segmentColor)
-                    .lineStyle(StrokeStyle(lineWidth: 3))
+                    .interpolationMethod(.linear)
                 }
             }
             
@@ -350,6 +344,48 @@ struct NicotineLevelView: View {
     }
     
     // MARK: - Data Generation
+    
+    private func createLineSegments(from points: [NicotinePoint]) {
+        guard points.count >= 2 else {
+            lineSegments = []
+            return
+        }
+        
+        var segments: [LineSegment] = []
+        var currentSegmentPoints: [NicotinePoint] = [points[0]]
+        var currentColor: Color? = nil
+        
+        for index in 1..<points.count {
+            let current = points[index]
+            let previous = points[index - 1]
+            let isIncreasing = current.level > previous.level
+            let color: Color = isIncreasing ? .green : .red
+            
+            if currentColor == nil {
+                currentColor = color
+            }
+            
+            if color == currentColor {
+                // Continue the current segment
+                currentSegmentPoints.append(current)
+            } else {
+                // Start a new segment
+                if !currentSegmentPoints.isEmpty {
+                    segments.append(LineSegment(points: currentSegmentPoints, color: currentColor!))
+                }
+                currentSegmentPoints = [previous, current] // Include previous point to connect segments
+                currentColor = color
+            }
+        }
+        
+        // Add the last segment
+        if !currentSegmentPoints.isEmpty, let color = currentColor {
+            segments.append(LineSegment(points: currentSegmentPoints, color: color))
+        }
+        
+        lineSegments = segments
+    }
+    
     private func generateChartData() async {
         await MainActor.run { isLoading = true }
         
@@ -367,6 +403,7 @@ struct NicotineLevelView: View {
         
         await MainActor.run {
             self.chartData = data
+            self.createLineSegments(from: data)
             self.isLoading = false
         }
     }
