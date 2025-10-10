@@ -293,20 +293,21 @@ struct LogView: View {
             VStack {
                 Spacer()
                 
-                // Remove All Active Pouches button (shown when any pouches are active)
-                if !activePouches.isEmpty {
-                    removeAllActivePouchesButton
-                        .padding(.bottom, canStartTimer ? 8 : 16)
+                VStack(spacing: 8) {
+                    // Remove All Active Pouches button (shown when any pouches are active)
+                    if !activePouches.isEmpty {
+                        removeAllActivePouchesButton
+                    }
+                    
+                    // Start Timer button (shown when pouches are loaded)
+                    if canStartTimer {
+                        startTimerButton
+                    }
                 }
-                
-                // Start Timer button (shown when pouches are loaded)
-                if canStartTimer {
-                    startTimerButton
-                        .padding(.bottom, 16)
-                }
+                .padding(.horizontal)
+                .padding(.bottom, 16)
+                .background(Color(.systemBackground))
             }
-            .padding(.horizontal)
-            .background(Color(.systemBackground))
             
             // Sync overlay - only shows when syncing and iCloud is enabled
             if #available(iOS 16.1, *) {
