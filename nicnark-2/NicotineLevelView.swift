@@ -31,6 +31,7 @@ struct NicotineLevelView: View {
     @State private var isLoading = true
     @State private var refreshTrigger = false
     @State private var updateTimer: Timer?
+    @State private var lastDataGeneration = Date.distantPast
     
     private let logger = Logger(subsystem: "com.nicnark.nicnark-2", category: "NicotineLevelView")
     private let absorptionConstants = AbsorptionConstants.shared
@@ -74,21 +75,26 @@ struct NicotineLevelView: View {
         .onChange(of: recentLogs.count) { _, _ in
             Task {
                 await generateChartData()
-            }
-        }
-        .onChange(of: refreshTrigger) { _, _ in
-            Task {
-                await generateChartData()
+                lastDataGeneration = Date()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchRemoved"))) { _ in
-            refreshTrigger.toggle()
+            Task {
+                await generateChartData()
+                lastDataGeneration = Date()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchEdited"))) { _ in
-            refreshTrigger.toggle()
+            Task {
+                await generateChartData()
+                lastDataGeneration = Date()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchDeleted"))) { _ in
-            refreshTrigger.toggle()
+            Task {
+                await generateChartData()
+                lastDataGeneration = Date()
+            }
         }
     }
     
@@ -309,7 +315,16 @@ struct NicotineLevelView: View {
         
         updateTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
             Task { @MainActor in
-                await self.generateChartData()
+                // Only regenerate chart data every 15 seconds to avoid expensive recalculations
+                // This provides smooth visual updates while minimizing performance impact
+                let now = Date()
+                if now.timeIntervalSince(self.lastDataGeneration) >= 15 {
+                    await self.generateChartData()
+                    self.lastDataGeneration = now
+                } else {
+                    // Just trigger a view refresh without regenerating data
+                    self.refreshTrigger.toggle()
+                }
             }
         }
         
@@ -318,7 +333,7 @@ struct NicotineLevelView: View {
             RunLoop.main.add(timer, forMode: .common)
         }
         
-        logger.debug("Started live graph updates (1s interval)")
+        logger.debug("Started live graph updates (1s check, 15s data refresh)")
     }
     
     /**
