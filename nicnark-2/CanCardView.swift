@@ -101,11 +101,21 @@ struct CanCardView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             
+            // Middle: Show countdown timers if active pouches
+            if !activePouches.isEmpty {
+                VStack(spacing: 4) {
+                    ForEach(activePouches, id: \.self) { pouch in
+                        compactTimer(for: pouch)
+                    }
+                }
+                .padding(.horizontal, 8)
+            }
+            
             Spacer()
             
-            // Right side: Show timers if active pouches, otherwise show +/- controls
+            // Right side: Show Clear All button for 2+, single X for 1, or +/- controls
             if !activePouches.isEmpty {
-                // If 2+ active pouches, show bulk clear button; otherwise show individual timers
+                // If 2+ active pouches, show bulk clear button; otherwise show individual X button
                 if activePouches.count >= 2 {
                     // Show bulk clear button
                     Button(action: clearAllActivePouches) {
@@ -122,12 +132,14 @@ struct CanCardView: View {
                         }
                     }
                     .padding(.horizontal, 8)
-                } else {
-                    // Show individual timers
-                    VStack(spacing: 8) {
-                        ForEach(activePouches, id: \.self) { pouch in
-                            miniTimer(for: pouch)
-                        }
+                } else if let pouch = activePouches.first {
+                    // Show single X button
+                    Button(action: {
+                        removePouch(pouch)
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 32))
+                            .foregroundColor(.red)
                     }
                 }
             } else {
@@ -195,7 +207,41 @@ struct CanCardView: View {
         }
     }
     
-    // MARK: - Mini Timer View
+    // MARK: - Timer Views
+    
+    @ViewBuilder
+    func compactTimer(for pouch: PouchLog) -> some View {
+        let insertionTime = pouch.insertionTime ?? Date()
+        let elapsed = max(0, tick.timeIntervalSince(insertionTime))
+        let duration = TimeInterval(pouch.timerDuration * 60)
+        let remaining = max(0, duration - elapsed)
+        let progress = min(max(elapsed / duration, 0), 1)
+        
+        VStack(alignment: .leading, spacing: 2) {
+            // Timer display
+            Text(formatMinutesSeconds(remaining))
+                .font(.system(.caption, design: .monospaced))
+                .fontWeight(.semibold)
+                .foregroundColor(remaining > 0 ? .blue : .green)
+            
+            // Mini progress bar
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.2))
+                        .frame(height: 2)
+                        .cornerRadius(1)
+                    
+                    Rectangle()
+                        .fill(remaining > 0 ? Color.blue : Color.green)
+                        .frame(width: geometry.size.width * progress, height: 2)
+                        .cornerRadius(1)
+                }
+            }
+            .frame(height: 2)
+        }
+        .frame(width: 60)
+    }
     
     @ViewBuilder
     func miniTimer(for pouch: PouchLog) -> some View {
