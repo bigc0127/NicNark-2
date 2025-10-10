@@ -33,19 +33,34 @@ struct CanCardView: View {
         HStack(spacing: 12) {
             // Left: Can info
             VStack(alignment: .leading, spacing: 6) {
-                // Brand/Flavor
-                if let flavor = can.flavor, !flavor.isEmpty {
-                    Text(flavor)
-                        .font(.headline)
-                        .lineLimit(1)
-                    Text(can.brand ?? "Unknown")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                } else {
-                    Text(can.brand ?? "Unknown")
-                        .font(.headline)
-                        .lineLimit(1)
+                // Brand/Flavor with Maps tap for low inventory
+                HStack(spacing: 4) {
+                    if let flavor = can.flavor, !flavor.isEmpty {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(flavor)
+                                .font(.headline)
+                                .lineLimit(1)
+                            Text(can.brand ?? "Unknown")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
+                    } else {
+                        Text(can.brand ?? "Unknown")
+                            .font(.headline)
+                            .lineLimit(1)
+                    }
+                    
+                    // Show map pin icon when inventory is low
+                    if can.pouchCount <= Int16(NotificationSettings.shared.canLowInventoryThreshold) {
+                        Image(systemName: "map.fill")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    handleCanNameTap()
                 }
                 
                 // Strength badge
@@ -86,14 +101,43 @@ struct CanCardView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             
+            // Middle: Show countdown timer if active pouches (single timer for all pouches from same can)
+            if !activePouches.isEmpty, let firstPouch = activePouches.first {
+                VStack(spacing: 4) {
+                    compactTimer(for: firstPouch, count: activePouches.count)
+                }
+                .padding(.horizontal, 8)
+            }
+            
             Spacer()
             
-            // Right side: Show timers if active pouches, otherwise show +/- controls
+            // Right side: Show Clear All button for 2+, single X for 1, or +/- controls
             if !activePouches.isEmpty {
-                // Show active timers for this can
-                VStack(spacing: 8) {
-                    ForEach(activePouches, id: \.self) { pouch in
-                        miniTimer(for: pouch)
+                // If 2+ active pouches, show bulk clear button; otherwise show individual X button
+                if activePouches.count >= 2 {
+                    // Show bulk clear button
+                    Button(action: clearAllActivePouches) {
+                        VStack(spacing: 4) {
+                            Image(systemName: "trash.circle.fill")
+                                .font(.system(size: 32))
+                                .foregroundColor(.red)
+                            Text("Clear All")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                            Text("(\(activePouches.count) active)")
+                                .font(.caption2)
+                                .foregroundColor(.red)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                } else if let pouch = activePouches.first {
+                    // Show single X button
+                    Button(action: {
+                        removePouch(pouch)
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 32))
+                            .foregroundColor(.red)
                     }
                 }
             } else {
@@ -161,7 +205,50 @@ struct CanCardView: View {
         }
     }
     
-    // MARK: - Mini Timer View
+    // MARK: - Timer Views
+    
+    @ViewBuilder
+    func compactTimer(for pouch: PouchLog, count: Int) -> some View {
+        let insertionTime = pouch.insertionTime ?? Date()
+        let elapsed = max(0, tick.timeIntervalSince(insertionTime))
+        let duration = TimeInterval(pouch.timerDuration * 60)
+        let remaining = max(0, duration - elapsed)
+        let progress = min(max(elapsed / duration, 0), 1)
+        
+        VStack(alignment: .leading, spacing: 2) {
+            // Timer display with count if > 1
+            HStack(spacing: 4) {
+                Text(formatMinutesSeconds(remaining))
+                    .font(.system(.caption, design: .monospaced))
+                    .fontWeight(.semibold)
+                    .foregroundColor(remaining > 0 ? .blue : .green)
+                
+                if count > 1 {
+                    Text("×\(count)")
+                        .font(.system(.caption2, design: .rounded))
+                        .fontWeight(.semibold)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            // Mini progress bar
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.2))
+                        .frame(height: 2)
+                        .cornerRadius(1)
+                    
+                    Rectangle()
+                        .fill(remaining > 0 ? Color.blue : Color.green)
+                        .frame(width: geometry.size.width * progress, height: 2)
+                        .cornerRadius(1)
+                }
+            }
+            .frame(height: 2)
+        }
+        .frame(width: 60)
+    }
     
     @ViewBuilder
     func miniTimer(for pouch: PouchLog) -> some View {
@@ -235,6 +322,34 @@ struct CanCardView: View {
     }
     
     // MARK: - Helper Functions
+    
+    private func handleCanNameTap() {
+        // Only open Maps if inventory is low
+        guard can.pouchCount <= Int16(NotificationSettings.shared.canLowInventoryThreshold) else {
+            print("ℹ️ Can has sufficient inventory (\(can.pouchCount) pouches), not opening Maps")
+            return
+        }
+        
+        // Open Maps with search for gas stations
+        if let url = URL(string: "maps://?q=gas+stations") {
+            UIApplication.shared.open(url, options: [:]) { success in
+                if success {
+                    print("📍 Opened Maps to search for gas stations (\(can.brand ?? "Unknown") is low: \(can.pouchCount) pouches)")
+                } else {
+                    print("❌ Failed to open Maps")
+                }
+            }
+        }
+    }
+    
+    private func clearAllActivePouches() {
+        // Remove all active pouches for this can
+        for pouch in activePouches {
+            removePouch(pouch)
+        }
+        
+        print("✅ Cleared \(activePouches.count) active pouches from \(can.brand ?? "Unknown")")
+    }
     
     private func formatMinutesSeconds(_ ti: TimeInterval) -> String {
         let minutes = Int(ti) / 60

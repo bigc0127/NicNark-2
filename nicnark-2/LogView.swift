@@ -92,7 +92,8 @@ struct LogView: View {
     // MARK: - Core Data Fetch Requests
     // @FetchRequest automatically fetches data and updates the UI when the data changes
     
-    /// Fetches all cans that still have pouches (pouchCount > 0) for the inventory display.
+    /// Fetches all cans that have pouches OR have active timers running.
+    /// This ensures cans with active pouches remain visible even when inventory reaches zero.
     /// Sorted by pouch count (fullest first), then by date added (newest first).
     /// This creates the horizontal scrollable can cards at the top of the screen.
     @FetchRequest(
@@ -101,7 +102,7 @@ struct LogView: View {
             NSSortDescriptor(keyPath: \Can.pouchCount, ascending: false),  // Fullest cans first
             NSSortDescriptor(keyPath: \Can.dateAdded, ascending: false)    // Then newest first
         ],
-        predicate: NSPredicate(format: "pouchCount > 0")  // Only cans with pouches remaining
+        predicate: NSPredicate(format: "pouchCount > 0 OR (ANY pouchLogs.removalTime == nil)")  // Show cans with pouches OR active timers
     ) private var activeCans: FetchedResults<Can>
 
     /// Fetches user-created custom dosage buttons (e.g., 4mg, 8mg, 12mg).
@@ -162,6 +163,11 @@ struct LogView: View {
             guard let canId = can.id, let count = loadedPouches[canId], count > 0 else { return total }
             return total + (can.strength * Double(count))
         }
+    }
+    
+    /// Estimated total nicotine absorption (30% of total nicotine)
+    private var estimatedTotalAbsorption: Double {
+        return totalNicotine * ABSORPTION_FRACTION
     }
     
     /// Whether the Start Timer button should be enabled
@@ -279,18 +285,28 @@ struct LogView: View {
                         .frame(height: 44)
                     }
                     .padding(.horizontal)
-                    .padding(.bottom, canStartTimer ? 100 : 16) // Space for Start Timer button if shown
+                    .padding(.bottom, calculateBottomPadding()) // Space for buttons at bottom
                 }
             }
             
-            // Start Timer button (shown when pouches are loaded)
-            if canStartTimer {
-                VStack {
-                    Spacer()
-                    startTimerButton
-                        .padding()
-                        .background(Color(.systemBackground))
+            // Bottom buttons overlay
+            VStack {
+                Spacer()
+                
+                VStack(spacing: 8) {
+                    // Remove All Active Pouches button (shown when any pouches are active)
+                    if !activePouches.isEmpty {
+                        removeAllActivePouchesButton
+                    }
+                    
+                    // Start Timer button (shown when pouches are loaded)
+                    if canStartTimer {
+                        startTimerButton
+                    }
                 }
+                .padding(.horizontal)
+                .padding(.bottom, 16)
+                .background(Color(.systemBackground))
             }
             
             // Sync overlay - only shows when syncing and iCloud is enabled
@@ -431,6 +447,23 @@ struct LogView: View {
 
     // MARK: - UI Components
     
+    var removeAllActivePouchesButton: some View {
+        Button(action: removeAllActivePouches) {
+            HStack {
+                Image(systemName: "xmark.circle.fill")
+                Text("Remove All Active Pouches")
+                    .fontWeight(.semibold)
+            }
+            .font(.headline)
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(Color.red)
+            .foregroundColor(.white)
+            .cornerRadius(12)
+            .shadow(radius: 4)
+        }
+    }
+    
     var startTimerButton: some View {
         Button(action: startTimerWithLoadedPouches) {
             VStack(spacing: 8) {
@@ -443,6 +476,10 @@ struct LogView: View {
                 
                 Text("\(totalLoadedPouches) pouch\(totalLoadedPouches == 1 ? "" : "es") • \(String(format: "%.1f", totalNicotine))mg")
                     .font(.caption)
+                
+                Text("Estimated absorption: \(String(format: "%.2f", estimatedTotalAbsorption)) mg")
+                    .font(.caption2)
+                    .foregroundColor(.white.opacity(0.9))
             }
             .frame(maxWidth: .infinity)
             .padding()
@@ -720,6 +757,21 @@ struct LogView: View {
         }
     }
 
+    func removeAllActivePouches() {
+        // Remove all active pouches
+        let allActivePouches = Array(activePouches)
+        
+        for pouch in allActivePouches {
+            removePouch(pouch)
+        }
+        
+        print("✅ Removed all \(allActivePouches.count) active pouches")
+        
+        // Haptic feedback
+        let generator = UINotificationFeedbackGenerator()
+        generator.notificationOccurred(.success)
+    }
+    
     func removePouch(_ pouch: PouchLog) {
         let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
         
@@ -890,6 +942,22 @@ struct LogView: View {
     }
     
     // MARK: – Helpers
+    
+    private func calculateBottomPadding() -> CGFloat {
+        var padding: CGFloat = 16
+        
+        // Add space for "Remove All Active Pouches" button if active pouches exist
+        if !activePouches.isEmpty {
+            padding += 70  // Button height + spacing
+        }
+        
+        // Add space for "Start Timer" button if loaded pouches exist
+        if canStartTimer {
+            padding += 90  // Button height + spacing
+        }
+        
+        return padding
+    }
     
     private func smartWidgetReload() {
         let now = Date()

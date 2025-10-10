@@ -21,6 +21,12 @@ private struct NicotinePoint: Identifiable, Hashable {
     }
 }
 
+private struct LineSegment: Identifiable {
+    let id = UUID()
+    let points: [NicotinePoint]
+    let color: Color
+}
+
 struct NicotineLevelView: View {
     // MARK: - Properties
     @Environment(\.managedObjectContext) private var viewContext
@@ -28,8 +34,11 @@ struct NicotineLevelView: View {
     
     @State private var selectedPoint: NicotinePoint?
     @State private var chartData: [NicotinePoint] = []
+    @State private var lineSegments: [LineSegment] = []
     @State private var isLoading = true
     @State private var refreshTrigger = false
+    @State private var updateTimer: Timer?
+    @State private var lastDataGeneration = Date.distantPast
     
     private let logger = Logger(subsystem: "com.nicnark.nicnark-2", category: "NicotineLevelView")
     private let absorptionConstants = AbsorptionConstants.shared
@@ -65,25 +74,34 @@ struct NicotineLevelView: View {
             Task {
                 await generateChartData()
             }
+            startLiveUpdates()
+        }
+        .onDisappear {
+            stopLiveUpdates()
         }
         .onChange(of: recentLogs.count) { _, _ in
             Task {
                 await generateChartData()
-            }
-        }
-        .onChange(of: refreshTrigger) { _, _ in
-            Task {
-                await generateChartData()
+                lastDataGeneration = Date()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchRemoved"))) { _ in
-            refreshTrigger.toggle()
+            Task {
+                await generateChartData()
+                lastDataGeneration = Date()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchEdited"))) { _ in
-            refreshTrigger.toggle()
+            Task {
+                await generateChartData()
+                lastDataGeneration = Date()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchDeleted"))) { _ in
-            refreshTrigger.toggle()
+            Task {
+                await generateChartData()
+                lastDataGeneration = Date()
+            }
         }
     }
     
@@ -105,33 +123,51 @@ struct NicotineLevelView: View {
     }
     
     private var chartView: some View {
-        Chart(chartData) { point in
-            LineMark(
-                x: .value("Time", point.time),
-                y: .value("Nicotine", point.level)
-            )
-            .interpolationMethod(.catmullRom)
-            .foregroundStyle(
-                .linearGradient(
-                    colors: [.blue.opacity(0.8), .blue],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
-            .lineStyle(StrokeStyle(lineWidth: 3))
+        Chart {
+            // Draw each colored segment as a series
+            ForEach(lineSegments) { segment in
+                ForEach(segment.points) { point in
+                    LineMark(
+                        x: .value("Time", point.time),
+                        y: .value("Nicotine", point.level),
+                        series: .value("Segment", segment.id.uuidString)
+                    )
+                    .foregroundStyle(segment.color)
+                    .lineStyle(StrokeStyle(lineWidth: 3))
+                    .interpolationMethod(.linear)
+                }
+            }
             
-            AreaMark(
-                x: .value("Time", point.time),
-                y: .value("Nicotine", point.level)
-            )
-            .interpolationMethod(.catmullRom)
-            .foregroundStyle(
-                .linearGradient(
-                    colors: [.blue.opacity(0.2), .blue.opacity(0.05)],
-                    startPoint: .top,
-                    endPoint: .bottom
+            // Area under the curve (subtle background)
+            ForEach(chartData) { point in
+                AreaMark(
+                    x: .value("Time", point.time),
+                    y: .value("Nicotine", point.level)
                 )
-            )
+                .interpolationMethod(.catmullRom)
+                .foregroundStyle(
+                    .linearGradient(
+                        colors: [.gray.opacity(0.15), .gray.opacity(0.03)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+            }
+            
+            // Endpoint indicator (dot at the end)
+            if let lastPoint = chartData.last,
+               chartData.count >= 2 {
+                let secondToLast = chartData[chartData.count - 2]
+                let isIncreasing = lastPoint.level > secondToLast.level
+                let endpointColor: Color = isIncreasing ? .green : .red
+                
+                PointMark(
+                    x: .value("Time", lastPoint.time),
+                    y: .value("Nicotine", lastPoint.level)
+                )
+                .foregroundStyle(endpointColor)
+                .symbolSize(150)
+            }
             
             if let selectedPoint = selectedPoint {
                 RuleMark(x: .value("Selected", selectedPoint.time))
@@ -263,7 +299,93 @@ struct NicotineLevelView: View {
         }
     }
     
+    // MARK: - Live Update Timer Management
+    
+    /**
+     * Starts the live update timer that refreshes the graph every second.
+     * This ensures the nicotine level graph updates in real-time while the user is viewing it.
+     * The timer is registered on the common run loop to ensure updates continue during scrolling.
+     */
+    private func startLiveUpdates() {
+        // Prevent duplicate timers
+        guard updateTimer == nil else { return }
+        
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            Task { @MainActor in
+                // Only regenerate chart data every 15 seconds to avoid expensive recalculations
+                // This provides smooth visual updates while minimizing performance impact
+                let now = Date()
+                if now.timeIntervalSince(self.lastDataGeneration) >= 15 {
+                    await self.generateChartData()
+                    self.lastDataGeneration = now
+                } else {
+                    // Just trigger a view refresh without regenerating data
+                    self.refreshTrigger.toggle()
+                }
+            }
+        }
+        
+        // Register on common run loop to keep updating during scrolling
+        if let timer = updateTimer {
+            RunLoop.main.add(timer, forMode: .common)
+        }
+        
+        logger.debug("Started live graph updates (1s check, 15s data refresh)")
+    }
+    
+    /**
+     * Stops the live update timer.
+     * Called when the view disappears to conserve battery and resources.
+     */
+    private func stopLiveUpdates() {
+        updateTimer?.invalidate()
+        updateTimer = nil
+        logger.debug("Stopped live graph updates")
+    }
+    
     // MARK: - Data Generation
+    
+    private func createLineSegments(from points: [NicotinePoint]) {
+        guard points.count >= 2 else {
+            lineSegments = []
+            return
+        }
+        
+        var segments: [LineSegment] = []
+        var currentSegmentPoints: [NicotinePoint] = [points[0]]
+        var currentColor: Color? = nil
+        
+        for index in 1..<points.count {
+            let current = points[index]
+            let previous = points[index - 1]
+            let isIncreasing = current.level > previous.level
+            let color: Color = isIncreasing ? .green : .red
+            
+            if currentColor == nil {
+                currentColor = color
+            }
+            
+            if color == currentColor {
+                // Continue the current segment
+                currentSegmentPoints.append(current)
+            } else {
+                // Start a new segment
+                if !currentSegmentPoints.isEmpty {
+                    segments.append(LineSegment(points: currentSegmentPoints, color: currentColor!))
+                }
+                currentSegmentPoints = [previous, current] // Include previous point to connect segments
+                currentColor = color
+            }
+        }
+        
+        // Add the last segment
+        if !currentSegmentPoints.isEmpty, let color = currentColor {
+            segments.append(LineSegment(points: currentSegmentPoints, color: color))
+        }
+        
+        lineSegments = segments
+    }
+    
     private func generateChartData() async {
         await MainActor.run { isLoading = true }
         
@@ -281,6 +403,7 @@ struct NicotineLevelView: View {
         
         await MainActor.run {
             self.chartData = data
+            self.createLineSegments(from: data)
             self.isLoading = false
         }
     }
