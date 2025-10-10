@@ -33,19 +33,34 @@ struct CanCardView: View {
         HStack(spacing: 12) {
             // Left: Can info
             VStack(alignment: .leading, spacing: 6) {
-                // Brand/Flavor
-                if let flavor = can.flavor, !flavor.isEmpty {
-                    Text(flavor)
-                        .font(.headline)
-                        .lineLimit(1)
-                    Text(can.brand ?? "Unknown")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                } else {
-                    Text(can.brand ?? "Unknown")
-                        .font(.headline)
-                        .lineLimit(1)
+                // Brand/Flavor with Maps tap for low inventory
+                HStack(spacing: 4) {
+                    if let flavor = can.flavor, !flavor.isEmpty {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(flavor)
+                                .font(.headline)
+                                .lineLimit(1)
+                            Text(can.brand ?? "Unknown")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
+                    } else {
+                        Text(can.brand ?? "Unknown")
+                            .font(.headline)
+                            .lineLimit(1)
+                    }
+                    
+                    // Show map pin icon when inventory is low
+                    if can.pouchCount <= Int16(NotificationSettings.shared.canLowInventoryThreshold) {
+                        Image(systemName: "map.fill")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    handleCanNameTap()
                 }
                 
                 // Strength badge
@@ -90,10 +105,38 @@ struct CanCardView: View {
             
             // Right side: Show timers if active pouches, otherwise show +/- controls
             if !activePouches.isEmpty {
-                // Show active timers for this can
-                VStack(spacing: 8) {
-                    ForEach(activePouches, id: \.self) { pouch in
-                        miniTimer(for: pouch)
+                // Check how many timers are expired
+                let expiredCount = activePouches.filter { pouch in
+                    guard let insertionTime = pouch.insertionTime else { return false }
+                    let duration = TimeInterval(pouch.timerDuration * 60)
+                    let elapsed = max(0, tick.timeIntervalSince(insertionTime))
+                    let remaining = max(0, duration - elapsed)
+                    return remaining == 0
+                }.count
+                
+                // If 2+ expired, show bulk clear button; otherwise show individual timers
+                if expiredCount >= 2 {
+                    // Show bulk clear button
+                    Button(action: clearAllExpiredPouches) {
+                        VStack(spacing: 4) {
+                            Image(systemName: "trash.circle.fill")
+                                .font(.system(size: 32))
+                                .foregroundColor(.green)
+                            Text("Clear All")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                            Text("(\(expiredCount) expired)")
+                                .font(.caption2)
+                                .foregroundColor(.green)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                } else {
+                    // Show individual timers
+                    VStack(spacing: 8) {
+                        ForEach(activePouches, id: \.self) { pouch in
+                            miniTimer(for: pouch)
+                        }
                     }
                 }
             } else {
@@ -235,6 +278,44 @@ struct CanCardView: View {
     }
     
     // MARK: - Helper Functions
+    
+    private func handleCanNameTap() {
+        // Only open Maps if inventory is low
+        guard can.pouchCount <= Int16(NotificationSettings.shared.canLowInventoryThreshold) else {
+            print("ℹ️ Can has sufficient inventory (\(can.pouchCount) pouches), not opening Maps")
+            return
+        }
+        
+        // Open Maps with search for gas stations
+        if let url = URL(string: "maps://?q=gas+stations") {
+            UIApplication.shared.open(url, options: [:]) { success in
+                if success {
+                    print("📍 Opened Maps to search for gas stations (\(can.brand ?? "Unknown") is low: \(can.pouchCount) pouches)")
+                } else {
+                    print("❌ Failed to open Maps")
+                }
+            }
+        }
+    }
+    
+    private func clearAllExpiredPouches() {
+        let now = Date()
+        
+        // Find all expired pouches for this can
+        let expiredPouches = activePouches.filter { pouch in
+            guard let insertionTime = pouch.insertionTime else { return false }
+            let duration = TimeInterval(pouch.timerDuration * 60)
+            let elapsed = now.timeIntervalSince(insertionTime)
+            return elapsed >= duration
+        }
+        
+        // Remove each expired pouch
+        for pouch in expiredPouches {
+            removePouch(pouch)
+        }
+        
+        print("✅ Cleared \(expiredPouches.count) expired pouches from \(can.brand ?? "Unknown")")
+    }
     
     private func formatMinutesSeconds(_ ti: TimeInterval) -> String {
         let minutes = Int(ti) / 60

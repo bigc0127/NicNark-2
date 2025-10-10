@@ -92,7 +92,8 @@ struct LogView: View {
     // MARK: - Core Data Fetch Requests
     // @FetchRequest automatically fetches data and updates the UI when the data changes
     
-    /// Fetches all cans that still have pouches (pouchCount > 0) for the inventory display.
+    /// Fetches all cans that have pouches OR have active timers running.
+    /// This ensures cans with active pouches remain visible even when inventory reaches zero.
     /// Sorted by pouch count (fullest first), then by date added (newest first).
     /// This creates the horizontal scrollable can cards at the top of the screen.
     @FetchRequest(
@@ -101,7 +102,7 @@ struct LogView: View {
             NSSortDescriptor(keyPath: \Can.pouchCount, ascending: false),  // Fullest cans first
             NSSortDescriptor(keyPath: \Can.dateAdded, ascending: false)    // Then newest first
         ],
-        predicate: NSPredicate(format: "pouchCount > 0")  // Only cans with pouches remaining
+        predicate: NSPredicate(format: "pouchCount > 0 OR (ANY pouchLogs.removalTime == nil)")  // Show cans with pouches OR active timers
     ) private var activeCans: FetchedResults<Can>
 
     /// Fetches user-created custom dosage buttons (e.g., 4mg, 8mg, 12mg).
@@ -162,6 +163,11 @@ struct LogView: View {
             guard let canId = can.id, let count = loadedPouches[canId], count > 0 else { return total }
             return total + (can.strength * Double(count))
         }
+    }
+    
+    /// Estimated total nicotine absorption (30% of total nicotine)
+    private var estimatedTotalAbsorption: Double {
+        return totalNicotine * ABSORPTION_FRACTION
     }
     
     /// Whether the Start Timer button should be enabled
@@ -443,6 +449,10 @@ struct LogView: View {
                 
                 Text("\(totalLoadedPouches) pouch\(totalLoadedPouches == 1 ? "" : "es") • \(String(format: "%.1f", totalNicotine))mg")
                     .font(.caption)
+                
+                Text("Estimated absorption: \(String(format: "%.2f", estimatedTotalAbsorption)) mg")
+                    .font(.caption2)
+                    .foregroundColor(.white.opacity(0.9))
             }
             .frame(maxWidth: .infinity)
             .padding()

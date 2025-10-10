@@ -30,6 +30,7 @@ struct NicotineLevelView: View {
     @State private var chartData: [NicotinePoint] = []
     @State private var isLoading = true
     @State private var refreshTrigger = false
+    @State private var updateTimer: Timer?
     
     private let logger = Logger(subsystem: "com.nicnark.nicnark-2", category: "NicotineLevelView")
     private let absorptionConstants = AbsorptionConstants.shared
@@ -65,6 +66,10 @@ struct NicotineLevelView: View {
             Task {
                 await generateChartData()
             }
+            startLiveUpdates()
+        }
+        .onDisappear {
+            stopLiveUpdates()
         }
         .onChange(of: recentLogs.count) { _, _ in
             Task {
@@ -105,33 +110,61 @@ struct NicotineLevelView: View {
     }
     
     private var chartView: some View {
-        Chart(chartData) { point in
-            LineMark(
-                x: .value("Time", point.time),
-                y: .value("Nicotine", point.level)
-            )
-            .interpolationMethod(.catmullRom)
-            .foregroundStyle(
-                .linearGradient(
-                    colors: [.blue.opacity(0.8), .blue],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
-            .lineStyle(StrokeStyle(lineWidth: 3))
+        Chart {
+            // Draw colored line segments based on whether level is increasing or decreasing
+            ForEach(Array(chartData.enumerated()), id: \.offset) { index, point in
+                if index < chartData.count - 1 {
+                    let nextPoint = chartData[index + 1]
+                    let isIncreasing = nextPoint.level > point.level
+                    let segmentColor: Color = isIncreasing ? .green : .red
+                    
+                    // Line segment
+                    LineMark(
+                        x: .value("Time", point.time),
+                        y: .value("Nicotine", point.level)
+                    )
+                    .foregroundStyle(segmentColor)
+                    .lineStyle(StrokeStyle(lineWidth: 3))
+                    
+                    LineMark(
+                        x: .value("Time", nextPoint.time),
+                        y: .value("Nicotine", nextPoint.level)
+                    )
+                    .foregroundStyle(segmentColor)
+                    .lineStyle(StrokeStyle(lineWidth: 3))
+                }
+            }
             
-            AreaMark(
-                x: .value("Time", point.time),
-                y: .value("Nicotine", point.level)
-            )
-            .interpolationMethod(.catmullRom)
-            .foregroundStyle(
-                .linearGradient(
-                    colors: [.blue.opacity(0.2), .blue.opacity(0.05)],
-                    startPoint: .top,
-                    endPoint: .bottom
+            // Area under the curve (subtle background)
+            ForEach(chartData) { point in
+                AreaMark(
+                    x: .value("Time", point.time),
+                    y: .value("Nicotine", point.level)
                 )
-            )
+                .interpolationMethod(.catmullRom)
+                .foregroundStyle(
+                    .linearGradient(
+                        colors: [.gray.opacity(0.15), .gray.opacity(0.03)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+            }
+            
+            // Endpoint indicator (dot at the end)
+            if let lastPoint = chartData.last,
+               chartData.count >= 2 {
+                let secondToLast = chartData[chartData.count - 2]
+                let isIncreasing = lastPoint.level > secondToLast.level
+                let endpointColor: Color = isIncreasing ? .green : .red
+                
+                PointMark(
+                    x: .value("Time", lastPoint.time),
+                    y: .value("Nicotine", lastPoint.level)
+                )
+                .foregroundStyle(endpointColor)
+                .symbolSize(150)
+            }
             
             if let selectedPoint = selectedPoint {
                 RuleMark(x: .value("Selected", selectedPoint.time))
@@ -261,6 +294,41 @@ struct NicotineLevelView: View {
         case 6..<10: return "Very High"
         default: return "Extreme"
         }
+    }
+    
+    // MARK: - Live Update Timer Management
+    
+    /**
+     * Starts the live update timer that refreshes the graph every second.
+     * This ensures the nicotine level graph updates in real-time while the user is viewing it.
+     * The timer is registered on the common run loop to ensure updates continue during scrolling.
+     */
+    private func startLiveUpdates() {
+        // Prevent duplicate timers
+        guard updateTimer == nil else { return }
+        
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            Task { @MainActor in
+                await self.generateChartData()
+            }
+        }
+        
+        // Register on common run loop to keep updating during scrolling
+        if let timer = updateTimer {
+            RunLoop.main.add(timer, forMode: .common)
+        }
+        
+        logger.debug("Started live graph updates (1s interval)")
+    }
+    
+    /**
+     * Stops the live update timer.
+     * Called when the view disappears to conserve battery and resources.
+     */
+    private func stopLiveUpdates() {
+        updateTimer?.invalidate()
+        updateTimer = nil
+        logger.debug("Stopped live graph updates")
     }
     
     // MARK: - Data Generation

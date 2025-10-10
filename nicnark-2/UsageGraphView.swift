@@ -312,6 +312,7 @@ struct UsageGraphView: View {
     @State private var showingEditSheet = false                            // Controls edit sheet presentation
     @State private var selectedPouchForEdit: PouchLog?                     // Pouch being edited
     @State private var nicotineInfo: (current: Double, prediction: String?, estimatedAfterCurrent: Double?) = (0.0, nil, nil)  // Current level, prediction, and estimated after current pouch
+    @State private var nextPouchTime: Date?                                // Recommended time for next pouch
 
     init(streakDays: Int = 0) {
         self.streakDays = streakDays
@@ -642,6 +643,14 @@ struct UsageGraphView: View {
                                     .foregroundColor(.orange)
                             }
                         }
+                        
+                        // Show next recommended pouch time
+                        if let nextTime = nextPouchTime {
+                            Text("Next pouch recommended: \(formattedTime(nextTime))")
+                                .font(.caption2)
+                                .foregroundColor(.blue)
+                                .padding(.top, 2)
+                        }
                     }
                 }
                 
@@ -655,6 +664,72 @@ struct UsageGraphView: View {
             }
             .onChange(of: refreshTrigger) { _, _ in
                 updateNicotineInfo()
+                calculateNextPouchTime()
+            }
+            .onAppear {
+                calculateNextPouchTime()
+            }
+        }
+    }
+    
+    // MARK: - Helper Functions
+    
+    /**
+     * Formats a Date as a time string (e.g., "3:45 PM")
+     */
+    private func formattedTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        return formatter.string(from: date)
+    }
+    
+    /**
+     * Calculates the recommended time for the next pouch based on reminder settings.
+     * 
+     * For time-based reminders:
+     * - Calculates last pouch removal time + configured interval
+     * 
+     * For nicotine-level-based reminders:
+     * - Projects when nicotine level will fall below the target range
+     * - Uses NicotineCalculator to predict future levels
+     */
+    private func calculateNextPouchTime() {
+        guard notificationSettings.reminderType != .disabled else {
+            nextPouchTime = nil
+            return
+        }
+        
+        if notificationSettings.reminderType == .timeBased {
+            // Time-based: last pouch + interval
+            if let lastRemoved = vm.events
+                .filter({ $0.removedAt < Date() })
+                .max(by: { $0.removedAt < $1.removedAt })?.removedAt {
+                let interval = notificationSettings.getEffectiveReminderInterval()
+                nextPouchTime = lastRemoved.addingTimeInterval(interval)
+            } else {
+                // No previous pouches, suggest now
+                nextPouchTime = Date()
+            }
+        } else {
+            // Nicotine-level-based: project when level drops below range
+            Task {
+                let calculator = NicotineCalculator()
+                let projection = await calculator.projectNicotineLevels(
+                    context: viewContext,
+                    settings: notificationSettings,
+                    duration: 10 * 3600  // Look ahead 10 hours
+                )
+                
+                await MainActor.run {
+                    if let crossing = projection.lowBoundaryCrossing, crossing > Date() {
+                        nextPouchTime = crossing
+                    } else if projection.currentLevel < notificationSettings.nicotineRangeLow {
+                        // Already below range, suggest now
+                        nextPouchTime = Date()
+                    } else {
+                        nextPouchTime = nil
+                    }
+                }
             }
         }
     }
