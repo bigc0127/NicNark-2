@@ -117,24 +117,27 @@ struct NicotineLevelView: View {
     
     private var chartView: some View {
         Chart {
-            // Draw colored line segments based on whether level is increasing or decreasing
-            ForEach(Array(chartData.enumerated()), id: \.offset) { index, point in
-                if index < chartData.count - 1 {
-                    let nextPoint = chartData[index + 1]
-                    let isIncreasing = nextPoint.level > point.level
+            // Draw the main line with segments colored by trend
+            ForEach(Array(chartData.indices), id: \.self) { index in
+                if index > 0 {
+                    let currentPoint = chartData[index]
+                    let previousPoint = chartData[index - 1]
+                    
+                    // Color based on if this segment is going up or down
+                    let isIncreasing = currentPoint.level > previousPoint.level
                     let segmentColor: Color = isIncreasing ? .green : .red
                     
-                    // Line segment
+                    // Draw line segment from previous to current point
                     LineMark(
-                        x: .value("Time", point.time),
-                        y: .value("Nicotine", point.level)
+                        x: .value("Time", previousPoint.time),
+                        y: .value("Nicotine", previousPoint.level)
                     )
                     .foregroundStyle(segmentColor)
                     .lineStyle(StrokeStyle(lineWidth: 3))
                     
                     LineMark(
-                        x: .value("Time", nextPoint.time),
-                        y: .value("Nicotine", nextPoint.level)
+                        x: .value("Time", currentPoint.time),
+                        y: .value("Nicotine", currentPoint.level)
                     )
                     .foregroundStyle(segmentColor)
                     .lineStyle(StrokeStyle(lineWidth: 3))

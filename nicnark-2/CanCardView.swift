@@ -112,13 +112,13 @@ struct CanCardView: View {
                         VStack(spacing: 4) {
                             Image(systemName: "trash.circle.fill")
                                 .font(.system(size: 32))
-                                .foregroundColor(.green)
+                                .foregroundColor(.red)
                             Text("Clear All")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                             Text("(\(activePouches.count) active)")
                                 .font(.caption2)
-                                .foregroundColor(.green)
+                                .foregroundColor(.red)
                         }
                     }
                     .padding(.horizontal, 8)
