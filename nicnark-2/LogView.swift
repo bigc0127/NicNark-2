@@ -285,19 +285,28 @@ struct LogView: View {
                         .frame(height: 44)
                     }
                     .padding(.horizontal)
-                    .padding(.bottom, canStartTimer ? 100 : 16) // Space for Start Timer button if shown
+                    .padding(.bottom, calculateBottomPadding()) // Space for buttons at bottom
                 }
             }
             
-            // Start Timer button (shown when pouches are loaded)
-            if canStartTimer {
-                VStack {
-                    Spacer()
+            // Bottom buttons overlay
+            VStack {
+                Spacer()
+                
+                // Remove All Active Pouches button (shown when any pouches are active)
+                if !activePouches.isEmpty {
+                    removeAllActivePouchesButton
+                        .padding(.bottom, canStartTimer ? 8 : 16)
+                }
+                
+                // Start Timer button (shown when pouches are loaded)
+                if canStartTimer {
                     startTimerButton
-                        .padding()
-                        .background(Color(.systemBackground))
+                        .padding(.bottom, 16)
                 }
             }
+            .padding(.horizontal)
+            .background(Color(.systemBackground))
             
             // Sync overlay - only shows when syncing and iCloud is enabled
             if #available(iOS 16.1, *) {
@@ -436,6 +445,23 @@ struct LogView: View {
     }
 
     // MARK: - UI Components
+    
+    var removeAllActivePouchesButton: some View {
+        Button(action: removeAllActivePouches) {
+            HStack {
+                Image(systemName: "xmark.circle.fill")
+                Text("Remove All Active Pouches")
+                    .fontWeight(.semibold)
+            }
+            .font(.headline)
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(Color.red)
+            .foregroundColor(.white)
+            .cornerRadius(12)
+            .shadow(radius: 4)
+        }
+    }
     
     var startTimerButton: some View {
         Button(action: startTimerWithLoadedPouches) {
@@ -730,6 +756,21 @@ struct LogView: View {
         }
     }
 
+    func removeAllActivePouches() {
+        // Remove all active pouches
+        let allActivePouches = Array(activePouches)
+        
+        for pouch in allActivePouches {
+            removePouch(pouch)
+        }
+        
+        print("✅ Removed all \(allActivePouches.count) active pouches")
+        
+        // Haptic feedback
+        let generator = UINotificationFeedbackGenerator()
+        generator.notificationOccurred(.success)
+    }
+    
     func removePouch(_ pouch: PouchLog) {
         let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
         
@@ -900,6 +941,22 @@ struct LogView: View {
     }
     
     // MARK: – Helpers
+    
+    private func calculateBottomPadding() -> CGFloat {
+        var padding: CGFloat = 16
+        
+        // Add space for "Remove All Active Pouches" button if active pouches exist
+        if !activePouches.isEmpty {
+            padding += 70  // Button height + spacing
+        }
+        
+        // Add space for "Start Timer" button if loaded pouches exist
+        if canStartTimer {
+            padding += 90  // Button height + spacing
+        }
+        
+        return padding
+    }
     
     private func smartWidgetReload() {
         let now = Date()

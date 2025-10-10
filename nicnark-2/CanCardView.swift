@@ -105,19 +105,10 @@ struct CanCardView: View {
             
             // Right side: Show timers if active pouches, otherwise show +/- controls
             if !activePouches.isEmpty {
-                // Check how many timers are expired
-                let expiredCount = activePouches.filter { pouch in
-                    guard let insertionTime = pouch.insertionTime else { return false }
-                    let duration = TimeInterval(pouch.timerDuration * 60)
-                    let elapsed = max(0, tick.timeIntervalSince(insertionTime))
-                    let remaining = max(0, duration - elapsed)
-                    return remaining == 0
-                }.count
-                
-                // If 2+ expired, show bulk clear button; otherwise show individual timers
-                if expiredCount >= 2 {
+                // If 2+ active pouches, show bulk clear button; otherwise show individual timers
+                if activePouches.count >= 2 {
                     // Show bulk clear button
-                    Button(action: clearAllExpiredPouches) {
+                    Button(action: clearAllActivePouches) {
                         VStack(spacing: 4) {
                             Image(systemName: "trash.circle.fill")
                                 .font(.system(size: 32))
@@ -125,7 +116,7 @@ struct CanCardView: View {
                             Text("Clear All")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
-                            Text("(\(expiredCount) expired)")
+                            Text("(\(activePouches.count) active)")
                                 .font(.caption2)
                                 .foregroundColor(.green)
                         }
@@ -298,23 +289,13 @@ struct CanCardView: View {
         }
     }
     
-    private func clearAllExpiredPouches() {
-        let now = Date()
-        
-        // Find all expired pouches for this can
-        let expiredPouches = activePouches.filter { pouch in
-            guard let insertionTime = pouch.insertionTime else { return false }
-            let duration = TimeInterval(pouch.timerDuration * 60)
-            let elapsed = now.timeIntervalSince(insertionTime)
-            return elapsed >= duration
-        }
-        
-        // Remove each expired pouch
-        for pouch in expiredPouches {
+    private func clearAllActivePouches() {
+        // Remove all active pouches for this can
+        for pouch in activePouches {
             removePouch(pouch)
         }
         
-        print("✅ Cleared \(expiredPouches.count) expired pouches from \(can.brand ?? "Unknown")")
+        print("✅ Cleared \(activePouches.count) active pouches from \(can.brand ?? "Unknown")")
     }
     
     private func formatMinutesSeconds(_ ti: TimeInterval) -> String {
