@@ -101,12 +101,10 @@ struct CanCardView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             
-            // Middle: Show countdown timers if active pouches
-            if !activePouches.isEmpty {
+            // Middle: Show countdown timer if active pouches (single timer for all pouches from same can)
+            if !activePouches.isEmpty, let firstPouch = activePouches.first {
                 VStack(spacing: 4) {
-                    ForEach(activePouches, id: \.self) { pouch in
-                        compactTimer(for: pouch)
-                    }
+                    compactTimer(for: firstPouch, count: activePouches.count)
                 }
                 .padding(.horizontal, 8)
             }
@@ -210,7 +208,7 @@ struct CanCardView: View {
     // MARK: - Timer Views
     
     @ViewBuilder
-    func compactTimer(for pouch: PouchLog) -> some View {
+    func compactTimer(for pouch: PouchLog, count: Int) -> some View {
         let insertionTime = pouch.insertionTime ?? Date()
         let elapsed = max(0, tick.timeIntervalSince(insertionTime))
         let duration = TimeInterval(pouch.timerDuration * 60)
@@ -218,11 +216,20 @@ struct CanCardView: View {
         let progress = min(max(elapsed / duration, 0), 1)
         
         VStack(alignment: .leading, spacing: 2) {
-            // Timer display
-            Text(formatMinutesSeconds(remaining))
-                .font(.system(.caption, design: .monospaced))
-                .fontWeight(.semibold)
-                .foregroundColor(remaining > 0 ? .blue : .green)
+            // Timer display with count if > 1
+            HStack(spacing: 4) {
+                Text(formatMinutesSeconds(remaining))
+                    .font(.system(.caption, design: .monospaced))
+                    .fontWeight(.semibold)
+                    .foregroundColor(remaining > 0 ? .blue : .green)
+                
+                if count > 1 {
+                    Text("×\(count)")
+                        .font(.system(.caption2, design: .rounded))
+                        .fontWeight(.semibold)
+                        .foregroundColor(.secondary)
+                }
+            }
             
             // Mini progress bar
             GeometryReader { geometry in
