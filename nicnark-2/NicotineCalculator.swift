@@ -159,6 +159,22 @@ class NicotineCalculator {
     
     /// Calculates a single pouch's contribution to nicotine level at a specific time
     ///
+    /// This implements a **two-phase nicotine model**:
+    ///
+    /// **Phase 1 - Absorption (while pouch is in mouth):**
+    /// - Linear absorption up to 30% of total nicotine content
+    /// - Formula: absorbed(t) = D × A × (t / FULL_RELEASE_TIME)
+    ///   where D = dose (mg), A = 0.30 (30%), t = time in mouth
+    /// - Absorption completes at FULL_RELEASE_TIME (30, 45, or 60 minutes)
+    ///
+    /// **Phase 2 - Decay (after pouch removal):**
+    /// - Exponential decay with 2-hour half-life
+    /// - Formula: N_i(t) = absorbed × 0.5^((t-t_i)/T_1/2)
+    ///   where t-t_i = time since removal, T_1/2 = 120 minutes
+    /// - See AbsorptionConstants.calculateDecayedNicotine for exact implementation
+    ///
+    /// **Total nicotine level** = sum of all pouches' individual contributions
+    ///
     /// - Parameters:
     ///   - pouch: The pouch log entry
     ///   - timestamp: Point in time to calculate contribution for
@@ -176,6 +192,7 @@ class NicotineCalculator {
         
         if timestamp <= removalTime {
             // ABSORPTION PHASE: Pouch is still in mouth at this timestamp
+            // Linear absorption: D × A × (elapsed / FULL_RELEASE_TIME)
             let timeInMouth = timestamp.timeIntervalSince(insertionTime)
             return absorptionConstants.calculateCurrentNicotineLevel(
                 nicotineContent: nicotineContent,
@@ -183,12 +200,14 @@ class NicotineCalculator {
             )
         } else {
             // DECAY PHASE: Pouch was removed before this timestamp
+            // First calculate total absorbed during usage
             let actualTimeInMouth = removalTime.timeIntervalSince(insertionTime)
             let totalAbsorbed = absorptionConstants.calculateAbsorbedNicotine(
                 nicotineContent: nicotineContent,
                 useTime: actualTimeInMouth
             )
             
+            // Then apply exponential decay: absorbed × 0.5^(time_since_removal / 120min)
             let timeSinceRemoval = timestamp.timeIntervalSince(removalTime)
             return absorptionConstants.calculateDecayedNicotine(
                 initialLevel: totalAbsorbed,

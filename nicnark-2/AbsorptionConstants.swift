@@ -66,13 +66,21 @@ public struct AbsorptionConstants {
     /**
      * calculateAbsorbedNicotine: Main calculation for how much nicotine has been absorbed
      * 
-     * This uses a linear absorption model:
-     * - Absorption increases steadily over 30 minutes
-     * - Maximum 30% of the pouch content gets absorbed
-     * - Example: 6mg pouch after 15 minutes = 6 * 0.30 * (15/30) = 0.9mg absorbed
+     * This uses a linear absorption model for the active pouch phase:
+     * - Absorption increases steadily from 0% to 30% over FULL_RELEASE_TIME
+     * - Maximum 30% of the pouch content gets absorbed (ABSORPTION_FRACTION)
+     * 
+     * Formula: absorbed(t) = D × A × min(t / FULL_RELEASE_TIME, 1.0)
+     * Where:
+     * - D = nicotine dose/content of pouch (mg)
+     * - A = absorption fraction (0.30 = 30%)
+     * - t = time pouch has been in mouth (seconds)
+     * - FULL_RELEASE_TIME = configurable duration (30, 45, or 60 minutes)
+     * 
+     * Example: 6mg pouch after 15 minutes (with 30min FULL_RELEASE_TIME)
+     *   = 6 × 0.30 × (15/30) = 6 × 0.30 × 0.5 = 0.9mg absorbed
      * 
      * @param nicotineContent: Total nicotine in the pouch (e.g., 6mg)
-
      * @param useTime: How long the pouch has been in mouth (in seconds)
      * @return: Amount of nicotine absorbed into bloodstream (in mg)
      */
@@ -131,7 +139,17 @@ public struct AbsorptionConstants {
      * - After 4 hours: ~25% remains
      * - After 6 hours: ~12.5% remains
      * 
-     * Formula: level = initial * e^(-ln(2) * time / half_life)
+     * Formula: N_i(t) = D_i × A × 0.5^((t-t_i)/T_1/2)
+     * Where:
+     * - N_i(t) = remaining absorbed nicotine (mg) from pouch i at time t
+     * - D_i = nicotine dose of pouch i (mg)
+     * - A = absorption fraction (0.30 for 30%)
+     * - t - t_i = elapsed time since pouch removal (in seconds)
+     * - T_1/2 = nicotine half-life (120 minutes = 7200 seconds)
+     * 
+     * Note: This formula using pow(0.5, x) is mathematically identical to
+     * the previous e^(-ln(2) * x) form, but matches the published scientific
+     * model more directly for clarity and verification.
      * 
      * @param initialLevel: Starting nicotine level when pouch was removed (in mg)
      * @param timeSinceRemoval: Time elapsed since pouch removal (in seconds)
@@ -139,9 +157,10 @@ public struct AbsorptionConstants {
      */
     @Sendable
     public func calculateDecayedNicotine(initialLevel: Double, timeSinceRemoval: TimeInterval) -> Double {
-        // Calculate decay factor using exponential decay formula
-        // e^(-ln(2) * t / half_life) = mathematical model for half-life decay
-        let decayFactor = exp(-log(2.0) * timeSinceRemoval / Self.nicotineHalfLife)
+        // Calculate decay factor using half-life formula: 0.5^(t / T_1/2)
+        // This directly models the exponential decay where nicotine level
+        // halves every 2 hours (7200 seconds)
+        let decayFactor = pow(0.5, timeSinceRemoval / Self.nicotineHalfLife)
         
         // Apply decay to the initial level
         return initialLevel * decayFactor

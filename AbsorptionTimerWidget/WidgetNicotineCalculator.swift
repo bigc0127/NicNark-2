@@ -114,8 +114,21 @@ class WidgetNicotineCalculator {
         return calculateAbsorbedNicotine(nicotineContent: nicotineContent, useTime: elapsedTime)
     }
     
+    /**
+     * Calculates nicotine decay after pouch removal using half-life formula.
+     * 
+     * Formula: N_i(t) = absorbed × 0.5^((t-t_i)/T_1/2)
+     * Where:
+     * - absorbed = initial nicotine level at removal (mg)
+     * - t - t_i = elapsed time since pouch removal (in seconds)
+     * - T_1/2 = nicotine half-life (7200 seconds = 2 hours)
+     * 
+     * This matches the formula in AbsorptionConstants.calculateDecayedNicotine
+     * to ensure widget and main app show identical levels.
+     */
     private func calculateDecayedNicotine(initialLevel: Double, timeSinceRemoval: TimeInterval) -> Double {
-        let decayFactor = exp(-log(2.0) * timeSinceRemoval / WIDGET_NICOTINE_HALF_LIFE)
+        // Using pow(0.5, x) form to match published scientific model
+        let decayFactor = pow(0.5, timeSinceRemoval / WIDGET_NICOTINE_HALF_LIFE)
         return initialLevel * decayFactor
     }
 }
