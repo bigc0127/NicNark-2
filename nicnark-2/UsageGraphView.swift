@@ -877,11 +877,13 @@ private struct HourRowView: View {
                             }
                         }
                     }
+                    .padding(.trailing, 12)  // Add trailing padding for scrolling
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)  // ScrollView takes full width
             }
+            .layoutPriority(1)  // Give VStack priority to expand
         }
         .padding(.vertical, 4)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var hourTitle: String {
