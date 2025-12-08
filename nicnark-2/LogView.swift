@@ -75,6 +75,7 @@ struct LogView: View {
     // MARK: - User Settings & Preferences
     @StateObject private var timerSettings = TimerSettings.shared  // Global timer settings (30min default, custom durations)
     @AppStorage("autoRemovePouches") private var autoRemovePouches = false    // Auto-remove pouches when timer ends
+    @AppStorage("autoRemoveDelayMinutes") private var autoRemoveDelayMinutes: Double = 0  // Delay before auto-removing (0 = immediate)
     @AppStorage("hideLegacyButtons") private var hideLegacyButtons = false    // Hide old-style quick buttons
     
     // MARK: - Can Inventory Management
@@ -893,10 +894,13 @@ struct LogView: View {
             // Auto-remove if enabled
             if autoRemovePouches {
                 Task { @MainActor in
-                    // Wait a moment for the user to see completion
-                    try? await Task.sleep(nanoseconds: 1 * NSEC_PER_SEC)
+                    // Apply user-configured delay (convert minutes to nanoseconds)
+                    let delayNanoseconds = UInt64(autoRemoveDelayMinutes * 60 * Double(NSEC_PER_SEC))
+                    // Always wait at least 1 second for the user to see completion
+                    let finalDelay = max(delayNanoseconds, NSEC_PER_SEC)
+                    try? await Task.sleep(nanoseconds: finalDelay)
                     removePouch(pouch)
-                    print("🔄 Auto-removed completed pouch")
+                    print("🔄 Auto-removed completed pouch after \(autoRemoveDelayMinutes) minute delay")
                 }
             }
         } else {
@@ -980,16 +984,18 @@ struct LogView: View {
         // Use the pouch's specific duration, not the app's default
         let actualDuration = TimeInterval(pouch.timerDuration * 60)  // Convert minutes to seconds
         let elapsed = Date().timeIntervalSince(insertionTime)
+        let delaySeconds = autoRemoveDelayMinutes * 60  // Convert delay to seconds
+        let totalDuration = actualDuration + delaySeconds
         let remaining = max(actualDuration - elapsed, 0)
         let isCompleted = remaining == 0
         
-        // Auto-remove if enabled and just completed
-        if isCompleted && autoRemovePouches && !LogView.pouchesBeingRemoved.contains(
+        // Auto-remove if enabled and delay period has passed
+        if autoRemovePouches && elapsed >= totalDuration && !LogView.pouchesBeingRemoved.contains(
             pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
         ) {
             Task { @MainActor in
                 removePouch(pouch)
-                print("🔄 Auto-removed completed pouch from timer check")
+                print("🔄 Auto-removed completed pouch from timer check after \(autoRemoveDelayMinutes) minute delay")
             }
         }
         
@@ -1015,7 +1021,7 @@ struct LogView: View {
 
     func cleanUpStale() {
         // Only clean up stale pouches if auto-remove is enabled
-        // AND the pouch has actually completed its timer duration
+        // AND the pouch has actually completed its timer duration + delay
         guard autoRemovePouches else { return }
         
         let request = PouchLog.fetchRequest()
@@ -1027,16 +1033,14 @@ struct LogView: View {
                 
                 // Use the pouch's specific timer duration (stored in minutes)
                 let pouchDurationSeconds = TimeInterval(pouch.timerDuration * 60)
+                let delaySeconds = autoRemoveDelayMinutes * 60
+                let totalDuration = pouchDurationSeconds + delaySeconds
                 let elapsed = Date().timeIntervalSince(insertionTime)
                 
-                // Only auto-remove if the timer has actually completed
+                // Only auto-remove if the timer + delay has completed
                 // Add 5 second grace period to avoid edge cases
-                if elapsed > (pouchDurationSeconds + 5) {
-                    print("🧹 Cleaning up completed pouch from \(elapsed / 60) minutes ago")
-                    removePouch(pouch)
-                } else if elapsed > pouchDurationSeconds {
-                    // Timer just completed, normal auto-remove
-                    print("⏰ Auto-removing just-completed pouch")
+                if elapsed > (totalDuration + 5) {
+                    print("🧹 Cleaning up completed pouch from \(elapsed / 60) minutes ago (after \(autoRemoveDelayMinutes) min delay)")
                     removePouch(pouch)
                 }
             }

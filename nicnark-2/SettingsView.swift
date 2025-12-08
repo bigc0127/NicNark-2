@@ -67,6 +67,7 @@ struct SettingsView: View {
     @StateObject private var syncManager = CloudKitSyncManager.shared      // CloudKit sync manager
     @StateObject private var timerSettings = TimerSettings.shared          // Timer duration settings
     @AppStorage("autoRemovePouches") private var autoRemovePouches = false
+    @AppStorage("autoRemoveDelayMinutes") private var autoRemoveDelayMinutes: Double = 0
     @AppStorage("hideLegacyButtons") private var hideLegacyButtons = false
     @AppStorage("priorityNotifications") private var priorityNotifications = false
     @State private var showingDeleteAlert = false
@@ -310,9 +311,29 @@ struct SettingsView: View {
             
             Toggle("Auto-Remove When Complete", isOn: $autoRemovePouches)
             
-            Text("Automatically remove pouches when the timer completes")
-                .font(.caption)
-                .foregroundColor(.secondary)
+            if autoRemovePouches {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Delay:")
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text(autoRemoveDelayText)
+                            .foregroundColor(.blue)
+                    }
+                    
+                    Slider(value: $autoRemoveDelayMinutes, in: 0...60, step: 5)
+                        .tint(.blue)
+                    
+                    Text("Remove pouches \(autoRemoveDelayMinutes > 0 ? "\(Int(autoRemoveDelayMinutes)) minutes after" : "immediately when") timer completes")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.leading)
+            } else {
+                Text("Automatically remove pouches when the timer completes")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
             
             Toggle("Hide Legacy Quick Add Buttons", isOn: $hideLegacyButtons)
             
@@ -700,6 +721,14 @@ struct SettingsView: View {
     }
 
     // MARK: - Computed Properties
+    
+    private var autoRemoveDelayText: String {
+        if autoRemoveDelayMinutes == 0 {
+            return "Immediate"
+        } else {
+            return "\(Int(autoRemoveDelayMinutes)) min"
+        }
+    }
     
     private var syncStatusIcon: String {
         if !syncManager.isCloudKitAvailable {

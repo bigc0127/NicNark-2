@@ -981,6 +981,7 @@ Image(systemName: "ellipsis")
             }
         }
         .padding(10)
+        .frame(width: 200)  // Fixed width to enable horizontal scrolling
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color(.secondarySystemBackground))

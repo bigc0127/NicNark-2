@@ -35,11 +35,9 @@ struct AbsorptionTimerWidgetLiveActivity: Widget {
                     Spacer()
                 }
 
-                let start = context.state.timerInterval.lowerBound
-                let end = context.state.timerInterval.upperBound
-                let total = max(1, end.timeIntervalSince(start))
-                let elapsed = min(max(0, Date().timeIntervalSince(start)), total)
-                let frac = elapsed / total
+                // Calculate progress based on total nicotine absorption across all pouches
+                let maxAbsorption = context.attributes.totalNicotine * 0.30 // 30% absorption rate
+                let frac = min(1.0, context.state.currentNicotineLevel / maxAbsorption)
                 ProgressView(value: frac, total: 1.0)
                     .progressViewStyle(LinearProgressViewStyle(tint: .blue))
                     .scaleEffect(y: 2)
@@ -74,11 +72,9 @@ struct AbsorptionTimerWidgetLiveActivity: Widget {
                 }
 
                 DynamicIslandExpandedRegion(.bottom) {
-                    let start = context.state.timerInterval.lowerBound
-                    let end = context.state.timerInterval.upperBound
-                    let total = max(1, end.timeIntervalSince(start))
-                    let elapsed = min(max(0, Date().timeIntervalSince(start)), total)
-                    let frac = elapsed / total
+                    // Calculate progress based on total nicotine absorption across all pouches
+                    let maxAbsorption = context.attributes.totalNicotine * 0.30 // 30% absorption rate
+                    let frac = min(1.0, context.state.currentNicotineLevel / maxAbsorption)
                     VStack(spacing: 6) {
                         ProgressView(value: frac, total: 1.0)
                             .progressViewStyle(LinearProgressViewStyle(tint: .blue))
