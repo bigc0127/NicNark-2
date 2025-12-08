@@ -966,22 +966,22 @@ private struct PouchCard: View {
 
             let timeString = Self.timeFormatter.string(from: event.removedAt)
             let absorbed = absorbedAtEvent()
-            HStack {
-                Text("\(timeString) • \(String(format: "%.3f", absorbed)) mg")
+            HStack(spacing: 4) {
+                Text("\(timeString)")
                     .font(.caption)
                     .foregroundColor(.secondary)
                 
-                Spacer()
-                
-Image(systemName: "ellipsis")
+                Text("•")
                     .font(.caption)
-                    .foregroundColor(.secondary.opacity(0.7))
-                    .scaleEffect(isPressed ? 1.2 : 1.0)
-                    .rotationEffect(.degrees(90))
+                    .foregroundColor(.secondary)
+                
+                Text(String(format: "%.3f mg", absorbed))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
         }
         .padding(10)
-        .frame(width: 200)  // Fixed width to enable horizontal scrolling
+        .frame(width: 150)  // Narrower fixed width for better fit
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color(.secondarySystemBackground))
