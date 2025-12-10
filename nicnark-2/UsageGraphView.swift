@@ -923,7 +923,6 @@ private struct PouchCard: View {
     let onEdit: () -> Void                         // Edit action handler
     
     @State private var isPressed = false           // Tracks press state for animation
-    @State private var longPressTimer: Timer?      // Timer for long press detection
 
     // Static formatter for time display (reused for performance)
     private static let timeFormatter: DateFormatter = {
@@ -1003,41 +1002,19 @@ private struct PouchCard: View {
             let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
             impactFeedback.impactOccurred()
         }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in
-                    if !isPressed {
-                        withAnimation(.easeInOut(duration: 0.1)) {
-                            isPressed = true
-                        }
-                        
-                        // Start long press timer
-                        longPressTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { _ in
-                            // Trigger long press action
-                            print("🎯 Long press triggered for pouch: \(event.name)")
-                            onEdit()
-                            
-                            // Haptic feedback
-                            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-                            impactFeedback.impactOccurred()
-                        }
-                    }
-                }
-                .onEnded { _ in
-                    withAnimation(.easeInOut(duration: 0.1)) {
-                        isPressed = false
-                    }
-                    
-                    // Cancel long press timer if it's still running
-                    longPressTimer?.invalidate()
-                    longPressTimer = nil
-                }
-        )
-        .onDisappear {
-            // Clean up timer when view disappears
-            longPressTimer?.invalidate()
-            longPressTimer = nil
-        }
+        .onLongPressGesture(minimumDuration: 0.8, pressing: { isPressing in
+            withAnimation(.easeInOut(duration: 0.1)) {
+                self.isPressed = isPressing
+            }
+        }, perform: {
+            // Trigger long press action
+            print("🎯 Long press triggered for pouch: \(event.name)")
+            onEdit()
+            
+            // Haptic feedback
+            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+            impactFeedback.impactOccurred()
+        })
     }
 }
 
