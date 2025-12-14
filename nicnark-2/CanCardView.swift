@@ -19,6 +19,7 @@ struct CanCardView: View {
     @Environment(\.managedObjectContext) private var viewContext
     @StateObject private var canManager = CanManager.shared
     @State private var tick = Date()  // For timer updates
+    @State private var timer: Timer?  // Timer instance for real-time updates
     
     init(can: Can, loadedCount: Int = 0, activePouches: [PouchLog] = [], onIncrement: @escaping () -> Void, onDecrement: @escaping () -> Void, onEdit: (() -> Void)? = nil) {
         self.can = can
@@ -190,18 +191,14 @@ struct CanCardView: View {
             }
         }
         .onAppear {
-            // Update timer every second for active pouches
-            if !activePouches.isEmpty {
-                let timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-                    tick = Date()
-                }
-                RunLoop.current.add(timer, forMode: .common)
-            }
+            startTimerIfNeeded()
         }
-        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
-            if !activePouches.isEmpty {
-                tick = Date()
-            }
+        .onDisappear {
+            stopTimer()
+        }
+        .onChange(of: activePouches.count) { _, _ in
+            // Restart timer when active pouches change
+            startTimerIfNeeded()
         }
     }
     
@@ -382,6 +379,34 @@ struct CanCardView: View {
         
         // Update widgets
         WidgetCenter.shared.reloadAllTimelines()
+    }
+    
+    // MARK: - Timer Management
+    
+    private func startTimerIfNeeded() {
+        // Only start timer if there are active pouches
+        guard !activePouches.isEmpty else {
+            stopTimer()
+            return
+        }
+        
+        // Stop existing timer to avoid duplicates
+        stopTimer()
+        
+        // Create and start new timer
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            tick = Date()
+        }
+        
+        // Add to run loop for proper execution
+        if let timer = timer {
+            RunLoop.main.add(timer, forMode: .common)
+        }
+    }
+    
+    private func stopTimer() {
+        timer?.invalidate()
+        timer = nil
     }
 }
 

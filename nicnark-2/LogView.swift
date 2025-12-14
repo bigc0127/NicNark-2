@@ -89,6 +89,7 @@ struct LogView: View {
     @State private var canToEdit: Can?                                // Can being edited
     @State private var showingDuplicateCanAlert = false               // Alert when scanning duplicate barcodes
     @State private var duplicateCanForAlert: Can?                     // The duplicate can found
+    @State private var selectedBrand: String? = nil                   // Currently selected brand filter
     
     // MARK: - Core Data Fetch Requests
     // @FetchRequest automatically fetches data and updates the UI when the data changes
@@ -200,6 +201,20 @@ struct LogView: View {
         
         return LogService.calculateWeightedDuration(pouches: pouchData)
     }
+    
+    /// Unique brand names from active cans for filtering
+    private var uniqueBrands: [String] {
+        let brands = activeCans.compactMap { $0.brand }.filter { !$0.isEmpty }
+        return Array(Set(brands)).sorted()
+    }
+    
+    /// Filtered cans based on selected brand
+    private var filteredCans: [Can] {
+        if let brand = selectedBrand {
+            return activeCans.filter { $0.brand == brand }
+        }
+        return Array(activeCans)
+    }
 
     var body: some View {
         ZStack {
@@ -210,9 +225,47 @@ struct LogView: View {
                         .font(.headline)
                         .padding(.top, 16)
                     
+                    // Brand filter row
+                    if !uniqueBrands.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 12) {
+                                // "All" button
+                                Button(action: {
+                                    selectedBrand = nil
+                                }) {
+                                    Text("All")
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 8)
+                                        .background(selectedBrand == nil ? Color.blue : Color(.secondarySystemBackground))
+                                        .foregroundColor(selectedBrand == nil ? .white : .primary)
+                                        .cornerRadius(20)
+                                }
+                                
+                                // Brand buttons
+                                ForEach(uniqueBrands, id: \.self) { brand in
+                                    Button(action: {
+                                        selectedBrand = brand
+                                    }) {
+                                        Text(brand)
+                                            .font(.subheadline)
+                                            .fontWeight(.semibold)
+                                            .padding(.horizontal, 16)
+                                            .padding(.vertical, 8)
+                                            .background(selectedBrand == brand ? Color.blue : Color(.secondarySystemBackground))
+                                            .foregroundColor(selectedBrand == brand ? .white : .primary)
+                                            .cornerRadius(20)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal)
+                        }
+                    }
+                    
                     // Vertical scrolling can inventory
                     if !activeCans.isEmpty {
-                        ForEach(activeCans, id: \.self) { can in
+                        ForEach(filteredCans, id: \.self) { can in
                             if let canId = can.id {
                                 // Get active pouches for this specific can
                                 let canActivePouches = activePouches.filter { pouch in
@@ -295,6 +348,13 @@ struct LogView: View {
                 Spacer()
                 
                 VStack(spacing: 8) {
+                    // Active pouches countdown display
+                    if !activePouches.isEmpty {
+                        ForEach(activePouches.prefix(3), id: \.self) { pouch in
+                            compactCountdownPane(for: pouch)
+                        }
+                    }
+                    
                     // Remove All Active Pouches button (shown when any pouches are active)
                     if !activePouches.isEmpty {
                         removeAllActivePouchesButton
@@ -528,6 +588,69 @@ struct LogView: View {
     }
 
     // MARK: – Countdown Display
+    
+    @ViewBuilder
+    func compactCountdownPane(for pouch: PouchLog) -> some View {
+        let insertionTime = pouch.insertionTime ?? tick
+        let elapsed = max(0, tick.timeIntervalSince(insertionTime))
+        let actualDuration = TimeInterval(pouch.timerDuration * 60)
+        let remaining = max(min(actualDuration - elapsed, actualDuration), 0)
+        let progress = min(max(elapsed / actualDuration, 0), 1)
+        let isCompleted = remaining == 0
+
+        let currentAbsorption = AbsorptionConstants.shared
+            .calculateCurrentNicotineLevel(nicotineContent: pouch.nicotineAmount, elapsedTime: elapsed)
+        let maxPossibleAbsorption = AbsorptionConstants.shared
+            .calculateAbsorbedNicotine(nicotineContent: pouch.nicotineAmount, useTime: actualDuration)
+        let absorptionProgress = maxPossibleAbsorption > 0 ? currentAbsorption / maxPossibleAbsorption : 0
+
+        HStack(spacing: 12) {
+            VStack(spacing: 8) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let brand = pouch.can?.brand {
+                            Text(brand)
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                        }
+                        Text("\(String(format: "%.1f", pouch.nicotineAmount))mg")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    Spacer()
+                    
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(isCompleted ? "Complete!" : formatMinutesSeconds(remaining))
+                            .font(.system(size: 16, weight: .bold, design: .monospaced))
+                            .foregroundColor(isCompleted ? .green : .blue)
+                        
+                        Text("\(String(format: "%.3f", currentAbsorption))mg (\(Int(absorptionProgress * 100))%)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                ProgressView(value: progress)
+                    .scaleEffect(y: 1.2)
+            }
+            
+            // Remove button
+            Button(action: {
+                removePouch(pouch)
+            }) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 24))
+                    .foregroundColor(.red)
+            }
+            .buttonStyle(PlainButtonStyle())
+            .disabled(shouldDisableRemoveButton)
+            .opacity(shouldDisableRemoveButton ? 0.5 : 1.0)
+        }
+        .padding(12)
+        .background(Color(.secondarySystemBackground))
+        .cornerRadius(10)
+    }
 
     @ViewBuilder
     func countdownPane(for pouch: PouchLog) -> some View {
