@@ -931,7 +931,12 @@ struct LogView: View {
             // NOTE: We do NOT restore the pouch to the can here.
             // Pouches are only restored when deleted from usage log, not when marked as complete.
             
-            try? ctx.save()
+            do {
+                try ctx.save()
+            } catch {
+                print("❌ Failed to save pouch removal: \(error.localizedDescription)")
+                print("❌ Full error: \(error)")
+            }
             
             // Cancel notifications
             NotificationManager.cancelAlert(id: pouchId)

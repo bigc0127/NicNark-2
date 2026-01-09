@@ -85,6 +85,15 @@ struct PersistenceController {
             storeDescription.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
             storeDescription.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
             
+            #if os(iOS)
+            // Keep the SQLite store accessible while the device is locked.
+            // This is important for background tasks, Live Activities, and widgets.
+            storeDescription.setOption(
+                FileProtectionType.completeUntilFirstUserAuthentication as NSObject,
+                forKey: NSPersistentStoreFileProtectionKey
+            )
+            #endif
+            
             print("📱 CloudKit store configured with App Group for widget access")
         }
 
@@ -107,6 +116,12 @@ print("📍 Store URL: \(storeDescription.url?.absoluteString ?? "Unknown")")
                 if let cloudKitOptions = storeDescription.cloudKitContainerOptions {
                     print("☁️ CloudKit sync enabled for container: \(cloudKitOptions.containerIdentifier)")
                 }
+                
+                #if os(iOS)
+                if let url = storeDescription.url {
+                    Self.ensureSQLiteStoreIsAccessibleWhileLocked(storeURL: url)
+                }
+                #endif
                 
                 // Ensure CloudKit schema exists in development env so sync can begin
                 #if DEBUG
@@ -142,6 +157,29 @@ print("📍 Store URL: \(storeDescription.url?.absoluteString ?? "Unknown")")
             await Self.checkCloudKitStatus()
         }
     }
+
+    #if os(iOS)
+    private static func ensureSQLiteStoreIsAccessibleWhileLocked(storeURL: URL) {
+        let fm = FileManager.default
+        let protection = FileProtectionType.completeUntilFirstUserAuthentication
+
+        // Core Data SQLite stores can have sidecar files.
+        let paths = [
+            storeURL.path,
+            storeURL.path + "-wal",
+            storeURL.path + "-shm",
+            storeURL.path + "-journal"
+        ]
+
+        for path in paths where fm.fileExists(atPath: path) {
+            do {
+                try fm.setAttributes([.protectionKey: protection], ofItemAtPath: path)
+            } catch {
+                Self.logger.warning("⚠️ Failed to set file protection on \(path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+    #endif
 
 /// Saves pending changes on the main view context, if any.
     /// Errors are logged in DEBUG builds instead of crashing the app.

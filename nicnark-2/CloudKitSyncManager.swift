@@ -703,25 +703,30 @@ class CloudKitSyncManager: ObservableObject {
         // 6. Test a save operation
         diagnostics.append("🧪 TESTING SAVE OPERATION:")
         let testContainer = PersistenceController.shared.container
-        let testContext = testContainer.newBackgroundContext()
         
-        await testContext.perform {
-            do {
-                // Create a test entity
-                let testButton = CustomButton(context: testContext)
-                testButton.nicotineAmount = 999.99 // Unique test value
-                
-                try testContext.save()
-                diagnostics.append("✅ Test save successful")
-                
-                // Clean up test data
-                testContext.delete(testButton)
-                try testContext.save()
-                diagnostics.append("✅ Test cleanup successful")
-                
-            } catch {
-                diagnostics.append("❌ Test save failed: \(error.localizedDescription)")
-                diagnostics.append("❌ Full error: \(error)")
+        if testContainer.persistentStoreCoordinator.persistentStores.isEmpty {
+            diagnostics.append("❌ Core Data store is not loaded (device may be locked). Skipping save test.")
+        } else {
+            let testContext = testContainer.newBackgroundContext()
+            
+            await testContext.perform {
+                do {
+                    // Create a test entity
+                    let testButton = CustomButton(context: testContext)
+                    testButton.nicotineAmount = 999.99 // Unique test value
+                    
+                    try testContext.save()
+                    diagnostics.append("✅ Test save successful")
+                    
+                    // Clean up test data
+                    testContext.delete(testButton)
+                    try testContext.save()
+                    diagnostics.append("✅ Test cleanup successful")
+                    
+                } catch {
+                    diagnostics.append("❌ Test save failed: \(error.localizedDescription)")
+                    diagnostics.append("❌ Full error: \(error)")
+                }
             }
         }
         
@@ -738,6 +743,11 @@ class CloudKitSyncManager: ObservableObject {
         
         // Create a test entry to trigger sync
         let container = PersistenceController.shared.container
+        guard !container.persistentStoreCoordinator.persistentStores.isEmpty else {
+            logger.error("❌ Core Data store is not loaded (device may be locked). Aborting test sync.")
+            return
+        }
+        
         let context = container.newBackgroundContext()
         
         await context.perform {
