@@ -27,6 +27,13 @@ private struct LineSegment: Identifiable {
     let color: Color
 }
 
+private struct PredictionPoint: Identifiable {
+    let id = UUID()
+    let time: Date
+    let level: Double
+    let label: String
+}
+
 struct NicotineLevelView: View {
     // MARK: - Properties
     @Environment(\.managedObjectContext) private var viewContext
@@ -35,6 +42,8 @@ struct NicotineLevelView: View {
     @State private var selectedPoint: NicotinePoint?
     @State private var chartData: [NicotinePoint] = []
     @State private var lineSegments: [LineSegment] = []
+    @State private var predictionData: [NicotinePoint] = []
+    @State private var futurePredictions: [PredictionPoint] = []
     @State private var isLoading = true
     @State private var refreshTrigger = false
     @State private var updateTimer: Timer?
@@ -56,19 +65,25 @@ struct NicotineLevelView: View {
     }
     
     var body: some View {
-        VStack(spacing: 16) {
-            headerView
-            
-            if isLoading {
-                ProgressView("Generating chart data...")
-                    .frame(height: 320)
-            } else {
-                chartView
+        ScrollView {
+            VStack(spacing: 16) {
+                headerView
+                
+                if isLoading {
+                    ProgressView("Generating chart data...")
+                        .frame(height: 320)
+                } else {
+                    chartView
+                }
+                
+                selectedPointInfo
+                
+                if !futurePredictions.isEmpty {
+                    predictionListView
+                }
             }
-            
-            selectedPointInfo
+            .padding()
         }
-        .padding()
         .navigationTitle("Nicotine Levels")
         .onAppear {
             Task {
@@ -134,6 +149,19 @@ struct NicotineLevelView: View {
                     )
                     .foregroundStyle(segment.color)
                     .lineStyle(StrokeStyle(lineWidth: 3))
+                    .interpolationMethod(.linear)
+                }
+            }
+            
+            // Prediction line (dashed, semi-transparent)
+            if !predictionData.isEmpty {
+                ForEach(predictionData) { point in
+                    LineMark(
+                        x: .value("Time", point.time),
+                        y: .value("Nicotine", point.level)
+                    )
+                    .foregroundStyle(.blue.opacity(0.6))
+                    .lineStyle(StrokeStyle(lineWidth: 2, dash: [5, 3]))
                     .interpolationMethod(.linear)
                 }
             }
@@ -267,6 +295,50 @@ struct NicotineLevelView: View {
         }
     }
     
+    private var predictionListView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "clock.arrow.circlepath")
+                    .foregroundColor(.blue)
+                Text("Predicted Levels")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+            }
+            
+            VStack(spacing: 8) {
+                ForEach(futurePredictions) { prediction in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(prediction.label)
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            Text(prediction.time, format: .dateTime.hour().minute())
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        Spacer()
+                        
+                        HStack(spacing: 8) {
+                            Text("\(prediction.level, specifier: "%.3f") mg")
+                                .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                                .foregroundColor(levelColor(for: prediction.level))
+                            
+                            Circle()
+                                .fill(levelColor(for: prediction.level))
+                                .frame(width: 10, height: 10)
+                        }
+                    }
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 12)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(8)
+                }
+            }
+        }
+        .padding(.top, 8)
+    }
+    
     // MARK: - Chart Interaction
     private func handleChartInteraction(at location: CGPoint, proxy: ChartProxy, geometry: GeometryProxy) {
         guard let timeValue: Date = proxy.value(atX: location.x) else { return }
@@ -389,12 +461,15 @@ struct NicotineLevelView: View {
     private func generateChartData() async {
         await MainActor.run { isLoading = true }
         
-        let data = await withTaskGroup(of: [NicotinePoint].self) { group in
+        let (historicalData, futureData, predictions) = await withTaskGroup(of: (historical: [NicotinePoint], future: [NicotinePoint], predictions: [PredictionPoint]).self) { group in
             group.addTask {
-                await self.calculateNicotineDataPoints()
+                let historical = await self.calculateNicotineDataPoints()
+                let future = await self.calculateFuturePredictions()
+                let predictions = await self.calculatePredictionPoints()
+                return (historical: historical, future: future, predictions: predictions)
             }
             
-            var result: [NicotinePoint] = []
+            var result: (historical: [NicotinePoint], future: [NicotinePoint], predictions: [PredictionPoint]) = ([], [], [])
             for await taskResult in group {
                 result = taskResult
             }
@@ -402,8 +477,10 @@ struct NicotineLevelView: View {
         }
         
         await MainActor.run {
-            self.chartData = data
-            self.createLineSegments(from: data)
+            self.chartData = historicalData
+            self.predictionData = futureData
+            self.futurePredictions = predictions
+            self.createLineSegments(from: historicalData)
             self.isLoading = false
         }
     }
@@ -429,6 +506,58 @@ struct NicotineLevelView: View {
             points.append(NicotinePoint(time: timePoint, level: max(0, level)))
         }
         return points
+    }
+    
+    private func calculateFuturePredictions() async -> [NicotinePoint] {
+        let now = Date()
+        let endTime = Calendar.current.date(byAdding: .hour, value: 12, to: now) ?? now
+        
+        // Create time points every 15 minutes for the next 12 hours
+        var timePoints: [Date] = []
+        var currentTime = now
+        
+        while currentTime <= endTime {
+            timePoints.append(currentTime)
+            currentTime = currentTime.addingTimeInterval(15 * 60) // 15 minutes
+        }
+        
+        // Calculate predicted nicotine level at each future time point
+        let calculator = NicotineCalculator()
+        var points: [NicotinePoint] = []
+        for timePoint in timePoints {
+            let level = await calculator.calculateTotalNicotineLevel(context: viewContext, at: timePoint)
+            points.append(NicotinePoint(time: timePoint, level: max(0, level)))
+        }
+        return points
+    }
+    
+    private func calculatePredictionPoints() async -> [PredictionPoint] {
+        let now = Date()
+        let calculator = NicotineCalculator()
+        
+        // Define prediction intervals
+        let intervals: [(minutes: Int, label: String)] = [
+            (30, "30 minutes"),
+            (60, "1 hour"),
+            (120, "2 hours"),
+            (240, "4 hours"),
+            (360, "6 hours"),
+            (720, "12 hours")
+        ]
+        
+        var predictions: [PredictionPoint] = []
+        
+        for interval in intervals {
+            let futureTime = now.addingTimeInterval(TimeInterval(interval.minutes * 60))
+            let level = await calculator.calculateTotalNicotineLevel(context: viewContext, at: futureTime)
+            predictions.append(PredictionPoint(
+                time: futureTime,
+                level: max(0, level),
+                label: interval.label
+            ))
+        }
+        
+        return predictions
     }
     
     // Removed unused local calculation functions - now using centralized NicotineCalculator
