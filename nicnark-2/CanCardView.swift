@@ -102,47 +102,10 @@ struct CanCardView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             
-            // Middle: Show countdown timer if active pouches (single timer for all pouches from same can)
-            if !activePouches.isEmpty, let firstPouch = activePouches.first {
-                VStack(spacing: 4) {
-                    compactTimer(for: firstPouch, count: activePouches.count)
-                }
-                .padding(.horizontal, 8)
-            }
-            
             Spacer()
             
-            // Right side: Show Clear All button for 2+, single X for 1, or +/- controls
-            if !activePouches.isEmpty {
-                // If 2+ active pouches, show bulk clear button; otherwise show individual X button
-                if activePouches.count >= 2 {
-                    // Show bulk clear button
-                    Button(action: clearAllActivePouches) {
-                        VStack(spacing: 4) {
-                            Image(systemName: "trash.circle.fill")
-                                .font(.system(size: 32))
-                                .foregroundColor(.red)
-                            Text("Clear All")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                            Text("(\(activePouches.count) active)")
-                                .font(.caption2)
-                                .foregroundColor(.red)
-                        }
-                    }
-                    .padding(.horizontal, 8)
-                } else if let pouch = activePouches.first {
-                    // Show single X button
-                    Button(action: {
-                        removePouch(pouch)
-                    }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 32))
-                            .foregroundColor(.red)
-                    }
-                }
-            } else {
-                // Show +/- controls when no active pouches
+            // Right side: Always show +/- controls (timers will be displayed at bottom)
+            VStack(spacing: 4) {
                 HStack(spacing: 12) {
                     // Minus button
                     Button(action: onDecrement) {
@@ -166,6 +129,14 @@ struct CanCardView: View {
                             .foregroundColor(can.pouchCount > 0 ? .green : .gray)
                     }
                     .disabled(can.pouchCount == 0)
+                }
+                
+                // Active pouches indicator
+                if !activePouches.isEmpty {
+                    Text("\(activePouches.count) active")
+                        .font(.caption2)
+                        .foregroundColor(.orange)
+                        .fontWeight(.semibold)
                 }
             }
         }

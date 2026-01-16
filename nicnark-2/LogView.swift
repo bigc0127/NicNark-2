@@ -133,6 +133,7 @@ struct LogView: View {
     @State private var tick = Date()               // Current timestamp, updated by timer for real-time calculations
     @State private var lastWidgetUpdate = Date()   // Throttle widget updates (expensive operation)
     @State private var lastLiveActivityUpdate = Date() // Throttle Live Activity updates (battery optimization)
+    @State private var timersExpanded = true       // Toggle between expanded and collapsed timer view
 
     // MARK: - Timer Management
     /// Timer for updating Live Activities and widgets (runs less frequently to save battery)
@@ -350,8 +351,28 @@ struct LogView: View {
                 VStack(spacing: 8) {
                     // Active pouches countdown display
                     if !activePouches.isEmpty {
-                        ForEach(activePouches.prefix(3), id: \.self) { pouch in
-                            compactCountdownPane(for: pouch)
+                        // Toggle button at top
+                        Button(action: {
+                            withAnimation {
+                                timersExpanded.toggle()
+                            }
+                        }) {
+                            HStack {
+                                Image(systemName: timersExpanded ? "chevron.down" : "chevron.up")
+                                Text(timersExpanded ? "Collapse" : "Expand \(activePouches.count) Timer\(activePouches.count == 1 ? "" : "s")")
+                                    .font(.caption)
+                            }
+                            .foregroundColor(.blue)
+                        }
+                        
+                        if timersExpanded {
+                            // Show all timers
+                            ForEach(activePouches, id: \.self) { pouch in
+                                compactCountdownPane(for: pouch)
+                            }
+                        } else {
+                            // Show collapsed summary
+                            collapsedTimerSummary
                         }
                     }
                     
@@ -507,6 +528,75 @@ struct LogView: View {
     }
 
     // MARK: - UI Components
+    
+    var collapsedTimerSummary: some View {
+        let longestPouch = activePouches.max(by: { pouch1, pouch2 in
+            let remaining1 = calculateRemaining(for: pouch1)
+            let remaining2 = calculateRemaining(for: pouch2)
+            return remaining1 < remaining2
+        })
+        
+        let totalNicotine = activePouches.reduce(0.0) { $0 + $1.nicotineAmount }
+        let totalAbsorbed = activePouches.reduce(0.0) { total, pouch in
+            let elapsed = tick.timeIntervalSince(pouch.insertionTime ?? Date())
+            let absorbed = AbsorptionConstants.shared.calculateCurrentNicotineLevel(
+                nicotineContent: pouch.nicotineAmount,
+                elapsedTime: elapsed
+            )
+            return total + absorbed
+        }
+        
+        if let pouch = longestPouch {
+            let remaining = calculateRemaining(for: pouch)
+            let actualDuration = TimeInterval(pouch.timerDuration * 60)
+            let elapsed = max(0, tick.timeIntervalSince(pouch.insertionTime ?? Date()))
+            let progress = min(max(elapsed / actualDuration, 0), 1)
+            let isCompleted = remaining == 0
+            
+            return AnyView(
+                HStack(spacing: 12) {
+                    VStack(spacing: 8) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("\(activePouches.count) Active Pouch\(activePouches.count == 1 ? "" : "es")")
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                Text("\(String(format: "%.1f", totalNicotine))mg total • \(String(format: "%.3f", totalAbsorbed))mg absorbed")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            Spacer()
+                            
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(isCompleted ? "Complete!" : formatMinutesSeconds(remaining))
+                                    .font(.system(size: 16, weight: .bold, design: .monospaced))
+                                    .foregroundColor(isCompleted ? .green : .blue)
+                                Text("Longest Timer")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        
+                        ProgressView(value: progress)
+                            .scaleEffect(y: 1.2)
+                    }
+                }
+                .padding(12)
+                .background(Color(.secondarySystemBackground))
+                .cornerRadius(10)
+            )
+        } else {
+            return AnyView(EmptyView())
+        }
+    }
+    
+    private func calculateRemaining(for pouch: PouchLog) -> TimeInterval {
+        let insertionTime = pouch.insertionTime ?? tick
+        let elapsed = max(0, tick.timeIntervalSince(insertionTime))
+        let actualDuration = TimeInterval(pouch.timerDuration * 60)
+        return max(min(actualDuration - elapsed, actualDuration), 0)
+    }
     
     var removeAllActivePouchesButton: some View {
         Button(action: removeAllActivePouches) {
@@ -809,7 +899,10 @@ struct LogView: View {
             )
             
             // Start Live Activity timer
+            // Update tick immediately to prevent UI freeze
+            tick = Date()
             startLiveTimerIfNeeded()
+            startOptimizedTimer()
             updateWidgetPersistenceHelper()
             
             // Refresh can list
@@ -919,11 +1012,6 @@ struct LogView: View {
                 await LiveActivityManager.endLiveActivity(for: pouchId)
             }
             
-            // Stop timers immediately to prevent any further updates
-            liveTimer?.invalidate()
-            liveTimer = nil
-            stopOptimizedTimer()
-            
             // Now mark as removed in Core Data
             let removalTime = Date.now
             pouch.removalTime = removalTime
@@ -948,6 +1036,14 @@ struct LogView: View {
             updateWidgetPersistenceHelperForRemoval(pouch: pouch, removalTime: removalTime)
             
             WidgetCenter.shared.reloadAllTimelines()
+            
+            // Restart timers if there are still active pouches
+            if !self.activePouches.isEmpty {
+                // Update tick immediately to prevent UI freeze
+                self.tick = Date()
+                self.startLiveTimerIfNeeded()
+                self.startOptimizedTimer()
+            }
         }
         // Note: PouchRemoved notification is only posted by NotificationManager for external removals
     }
