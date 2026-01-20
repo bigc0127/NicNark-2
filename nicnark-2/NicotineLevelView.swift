@@ -34,6 +34,20 @@ private struct PredictionPoint: Identifiable {
     let label: String
 }
 
+private struct AbsorptionRateData: Identifiable {
+    let id = UUID()
+    let time: Date
+    let pouches: [PouchAbsorptionInfo]
+    let effectiveRate: Double // mg/min at this time (sum of active pouches)
+}
+
+private struct PouchAbsorptionInfo {
+    let pouchId: UUID
+    let nicotineAmount: Double
+    let absorptionRate: Double // mg/minute
+    let absorptionPercent: Double // 0.0 to 1.0
+}
+
 struct NicotineLevelView: View {
     // MARK: - Properties
     @Environment(\.managedObjectContext) private var viewContext
@@ -44,6 +58,8 @@ struct NicotineLevelView: View {
     @State private var lineSegments: [LineSegment] = []
     @State private var predictionData: [NicotinePoint] = []
     @State private var futurePredictions: [PredictionPoint] = []
+    @State private var absorptionRates: [AbsorptionRateData] = []
+    @State private var selectedAbsorptionData: AbsorptionRateData?
     @State private var isLoading = true
     @State private var refreshTrigger = false
     @State private var updateTimer: Timer?
@@ -77,6 +93,11 @@ struct NicotineLevelView: View {
                 }
                 
                 selectedPointInfo
+                
+                // Always show absorption rate when there's an active pouch
+                if let absorption = selectedAbsorptionData, !absorption.pouches.isEmpty {
+                    absorptionRateView(absorption)
+                }
                 
                 if !futurePredictions.isEmpty {
                     predictionListView
@@ -295,6 +316,86 @@ struct NicotineLevelView: View {
         }
     }
     
+    @ViewBuilder
+    private func absorptionRateView(_ absorption: AbsorptionRateData) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .foregroundColor(.blue)
+                Text("Absorption Rate")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+            }
+            
+            // Effective total absorption rate
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Effective Total")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    Text(String(format: "%.4f mg/min", absorption.effectiveRate))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+                
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(String(format: "%.2f mg/hour", absorption.effectiveRate * 60))
+                        .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.blue)
+                    Text("at this moment")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 12)
+            .background(Color(.systemGray6))
+            .cornerRadius(8)
+            
+            // Per-pouch absorption rates
+            if !absorption.pouches.isEmpty {
+                Text("Per-Pouch Rates")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.secondary)
+                    .padding(.top, 4)
+                
+                VStack(spacing: 6) {
+                    ForEach(absorption.pouches, id: \.pouchId) { pouch in
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(String(format: "%.0f mg", pouch.nicotineAmount))
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                Text(String(format: "%.1f%% absorbed", pouch.absorptionPercent * 100))
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            Spacer()
+                            
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(String(format: "%.4f mg/min", pouch.absorptionRate))
+                                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                                    .foregroundColor(.blue)
+                                Text(String(format: "%.2f mg/h", pouch.absorptionRate * 60))
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 10)
+                        .background(Color(.systemGray6))
+                        .cornerRadius(6)
+                    }
+                }
+            }
+        }
+        .padding(.top, 4)
+    }
+    
     private var predictionListView: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -348,6 +449,15 @@ struct NicotineLevelView: View {
         }
         
         selectedPoint = closestPoint
+        
+        // Update absorption data selection to match the nearest time
+        if let time = closestPoint?.time {
+            selectedAbsorptionData = absorptionRates.min { a, b in
+                abs(a.time.timeIntervalSince(time)) < abs(b.time.timeIntervalSince(time))
+            }
+        } else {
+            selectedAbsorptionData = nil
+        }
     }
     
     // MARK: - Level Helpers
@@ -461,15 +571,16 @@ struct NicotineLevelView: View {
     private func generateChartData() async {
         await MainActor.run { isLoading = true }
         
-        let (historicalData, futureData, predictions) = await withTaskGroup(of: (historical: [NicotinePoint], future: [NicotinePoint], predictions: [PredictionPoint]).self) { group in
+        let (historicalData, futureData, predictions, absorptionData) = await withTaskGroup(of: (historical: [NicotinePoint], future: [NicotinePoint], predictions: [PredictionPoint], absorption: [AbsorptionRateData]).self) { group in
             group.addTask {
                 let historical = await self.calculateNicotineDataPoints()
                 let future = await self.calculateFuturePredictions()
                 let predictions = await self.calculatePredictionPoints()
-                return (historical: historical, future: future, predictions: predictions)
+                let absorption = await self.calculateAbsorptionRates()
+                return (historical: historical, future: future, predictions: predictions, absorption: absorption)
             }
             
-            var result: (historical: [NicotinePoint], future: [NicotinePoint], predictions: [PredictionPoint]) = ([], [], [])
+            var result: (historical: [NicotinePoint], future: [NicotinePoint], predictions: [PredictionPoint], absorption: [AbsorptionRateData]) = ([], [], [], [])
             for await taskResult in group {
                 result = taskResult
             }
@@ -480,8 +591,12 @@ struct NicotineLevelView: View {
             self.chartData = historicalData
             self.predictionData = futureData
             self.futurePredictions = predictions
+            self.absorptionRates = absorptionData
             self.createLineSegments(from: historicalData)
             self.isLoading = false
+            
+            // Automatically select current absorption data if there's an active pouch
+            self.selectCurrentAbsorptionData()
         }
     }
     
@@ -558,6 +673,134 @@ struct NicotineLevelView: View {
         }
         
         return predictions
+    }
+    
+    private func calculateAbsorptionRates() async -> [AbsorptionRateData] {
+        let now = Date()
+        let startTime = Calendar.current.date(byAdding: .hour, value: -24, to: now) ?? now
+        
+        // Create time points every 15 minutes
+        var timePoints: [Date] = []
+        var currentTime = startTime
+        
+        while currentTime <= now {
+            timePoints.append(currentTime)
+            currentTime = currentTime.addingTimeInterval(15 * 60) // 15 minutes
+        }
+        
+        // Calculate absorption rates at each time point
+        let request: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
+        let lookbackTime = startTime.addingTimeInterval(-10 * 3600) // 10 hours prior for decay calculations
+        request.predicate = NSPredicate(format: "insertionTime >= %@", lookbackTime as NSDate)
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \PouchLog.insertionTime, ascending: true)]
+        
+        var ratesData: [AbsorptionRateData] = []
+        
+        do {
+            let allPouches = try viewContext.fetch(request)
+            
+            for timePoint in timePoints {
+                var pouchRates: [PouchAbsorptionInfo] = []
+                var totalRate = 0.0
+                
+                for pouch in allPouches {
+                    guard let insertionTime = pouch.insertionTime, insertionTime <= timePoint else { continue }
+                    
+                    let removalTime = pouch.removalTime ?? insertionTime.addingTimeInterval(FULL_RELEASE_TIME)
+                    
+                    // Only consider pouches that are currently in absorption phase
+                    if timePoint <= removalTime {
+                        let timeInMouth = timePoint.timeIntervalSince(insertionTime)
+                        let absorptionRate = calculateInstantAbsorptionRate(
+                            nicotineContent: pouch.nicotineAmount,
+                            timeInMouth: timeInMouth
+                        )
+                        let absorptionPercent = min(timeInMouth / FULL_RELEASE_TIME, 1.0)
+                        
+                        let info = PouchAbsorptionInfo(
+                            pouchId: pouch.pouchId ?? UUID(),
+                            nicotineAmount: pouch.nicotineAmount,
+                            absorptionRate: absorptionRate,
+                            absorptionPercent: absorptionPercent
+                        )
+                        pouchRates.append(info)
+                        totalRate += absorptionRate
+                    }
+                }
+                
+                let rateData = AbsorptionRateData(
+                    time: timePoint,
+                    pouches: pouchRates,
+                    effectiveRate: totalRate
+                )
+                ratesData.append(rateData)
+            }
+        } catch {
+            logger.error("Failed to calculate absorption rates: \(error.localizedDescription)")
+        }
+        
+        return ratesData
+    }
+    
+    /// Calculate the instantaneous absorption rate (mg/minute) for a pouch at a specific time
+    private func calculateInstantAbsorptionRate(nicotineContent: Double, timeInMouth: TimeInterval) -> Double {
+        // Linear absorption model: Rate = (D × A) / FULL_RELEASE_TIME
+        // where D = dose, A = 0.30 (absorption fraction)
+        // This gives constant absorption rate throughout the absorption phase
+        let maxAbsorbed = nicotineContent * ABSORPTION_FRACTION
+        let absorptionRate = maxAbsorbed / FULL_RELEASE_TIME // mg per second
+        return absorptionRate * 60 // Convert to mg per minute
+    }
+    
+    /// Automatically selects the absorption data for the current time if there's an active pouch
+    private func selectCurrentAbsorptionData() {
+        let now = Date()
+        
+        // Find the absorption data closest to the current time
+        if let currentAbsorption = absorptionRates.min(by: { a, b in
+            abs(a.time.timeIntervalSince(now)) < abs(b.time.timeIntervalSince(now))
+        }) {
+            // If an active pouch exists, always show the absorption panel
+            if hasActivePouch(at: now) {
+                selectedAbsorptionData = currentAbsorption
+            } else if hasRecentlyDecayingPouch(at: now) {
+                // Optionally keep showing shortly after removal (quality-of-life)
+                selectedAbsorptionData = currentAbsorption
+            } else {
+                selectedAbsorptionData = nil
+            }
+        }
+    }
+    
+    /// Checks if there's currently an active pouch (in absorption phase)
+    private func hasActivePouch(at time: Date) -> Bool {
+        let request: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
+        request.predicate = NSPredicate(format: "removalTime == nil")
+        request.fetchLimit = 1
+        
+        do {
+            let activePouches = try viewContext.fetch(request)
+            return !activePouches.isEmpty
+        } catch {
+            logger.error("Failed to check for active pouches: \(error.localizedDescription)")
+            return false
+        }
+    }
+    
+    /// Checks if there's a pouch that was recently removed and still decaying
+    private func hasRecentlyDecayingPouch(at time: Date) -> Bool {
+        let oneHourAgo = time.addingTimeInterval(-3600)
+        let request: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
+        request.predicate = NSPredicate(format: "removalTime >= %@", oneHourAgo as NSDate)
+        request.fetchLimit = 1
+        
+        do {
+            let recentlyRemoved = try viewContext.fetch(request)
+            return !recentlyRemoved.isEmpty
+        } catch {
+            logger.error("Failed to check for recently removed pouches: \(error.localizedDescription)")
+            return false
+        }
     }
     
     // Removed unused local calculation functions - now using centralized NicotineCalculator

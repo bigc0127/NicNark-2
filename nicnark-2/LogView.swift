@@ -91,6 +91,10 @@ struct LogView: View {
     @State private var duplicateCanForAlert: Can?                     // The duplicate can found
     @State private var selectedBrand: String? = nil                   // Currently selected brand filter
     
+    // MARK: - Nicotine Level Information
+    @State private var currentNicotineLevel: Double = 0.0            // Current nicotine level in bloodstream
+    @State private var estimatedNicotineLevel: Double? = nil          // Estimated level after adding loaded pouches
+    
     // MARK: - Core Data Fetch Requests
     // @FetchRequest automatically fetches data and updates the UI when the data changes
     
@@ -460,6 +464,16 @@ struct LogView: View {
             if !activePouches.isEmpty {
                 startOptimizedTimer()
             }
+            // Update nicotine level display
+            updateNicotineLevels()
+        }
+        .onAppear {
+            // Update nicotine levels when view appears
+            updateNicotineLevels()
+        }
+        .onChange(of: loadedPouches) { _, _ in
+            // Update estimated nicotine level when loaded pouches change
+            updateNicotineLevels()
         }
         .sheet(isPresented: $showingAddCan) {
             CanDetailView(barcode: scannedBarcode)
@@ -631,6 +645,22 @@ struct LogView: View {
                 Text("Estimated absorption: \(String(format: "%.2f", estimatedTotalAbsorption)) mg")
                     .font(.caption2)
                     .foregroundColor(.white.opacity(0.9))
+                
+                // Show estimated nicotine level
+                if let estimatedLevel = estimatedNicotineLevel {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Text("Est. Level")
+                                .font(.caption2)
+                                .foregroundColor(.white.opacity(0.7))
+                            Spacer()
+                            Text(String(format: "%.3f mg", estimatedLevel))
+                                .font(.caption2)
+                                .fontWeight(.medium)
+                                .foregroundColor(.white.opacity(0.9))
+                        }
+                    }
+                }
             }
             .frame(maxWidth: .infinity)
             .padding()
@@ -1313,6 +1343,29 @@ struct LogView: View {
         // Wait for async calculation to complete (with timeout)
         _ = semaphore.wait(timeout: .now() + 0.5)
         return result
+    }
+    
+    // Updates nicotine level information for the Start Timer button
+    private func updateNicotineLevels() {
+        Task {
+            let calculator = NicotineCalculator()
+            
+            // Get current nicotine level
+            let currentLevel = await calculator.calculateTotalNicotineLevel(context: ctx)
+            
+            // Calculate estimated level after adding loaded pouches
+            let estimatedLevel: Double?
+            if totalLoadedPouches > 0 {
+                estimatedLevel = currentLevel + estimatedTotalAbsorption
+            } else {
+                estimatedLevel = nil
+            }
+            
+            await MainActor.run {
+                self.currentNicotineLevel = currentLevel
+                self.estimatedNicotineLevel = estimatedLevel
+            }
+        }
     }
     
     // MARK: - Sync Overlay
