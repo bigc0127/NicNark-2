@@ -752,23 +752,86 @@ struct NicotineLevelView: View {
         return absorptionRate * 60 // Convert to mg per minute
     }
     
-    /// Automatically selects the absorption data for the current time if there's an active pouch
+    /// Automatically selects the absorption data for the **current** time.
+    ///
+    /// Previously this used the pre-sampled `absorptionRates` array and chose the
+    /// data point closest to "now". Because those samples are spaced 15 minutes
+    /// apart, this could pick a snapshot from *before* a pouch was removed and
+    /// incorrectly show it as still actively absorbing.
+    ///
+    /// This implementation instead computes a fresh absorption snapshot exactly
+    /// at the current time using Core Data so that:
+    /// - Only pouches that are still in-mouth at `now` contribute to the
+    ///   effective and per-pouch absorption rates
+    /// - Recently removed/decaying pouches are excluded from the absorption
+    ///   rate panel (they are still represented in the nicotine level chart
+    ///   via `NicotineCalculator`).
     private func selectCurrentAbsorptionData() {
         let now = Date()
-        
-        // Find the absorption data closest to the current time
-        if let currentAbsorption = absorptionRates.min(by: { a, b in
-            abs(a.time.timeIntervalSince(now)) < abs(b.time.timeIntervalSince(now))
-        }) {
-            // If an active pouch exists, always show the absorption panel
-            if hasActivePouch(at: now) {
-                selectedAbsorptionData = currentAbsorption
-            } else if hasRecentlyDecayingPouch(at: now) {
-                // Optionally keep showing shortly after removal (quality-of-life)
-                selectedAbsorptionData = currentAbsorption
+
+        // If there are no active pouches and nothing was removed recently,
+        // hide the absorption panel altogether.
+        guard hasActivePouch(at: now) || hasRecentlyDecayingPouch(at: now) else {
+            selectedAbsorptionData = nil
+            return
+        }
+
+        let lookbackTime = now.addingTimeInterval(-10 * 3600) // 10 hours
+        let request: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
+        request.predicate = NSPredicate(format: "insertionTime >= %@", lookbackTime as NSDate)
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \PouchLog.insertionTime, ascending: true)]
+
+        do {
+            let pouches = try viewContext.fetch(request)
+
+            var pouchInfos: [PouchAbsorptionInfo] = []
+            var totalRate = 0.0
+
+            for pouch in pouches {
+                guard let insertionTime = pouch.insertionTime, insertionTime <= now else { continue }
+
+                // Treat a pouch as *actively absorbing* only while it is
+                // still in the mouth at `now`. Once `removalTime` has
+                // passed, its contribution moves into the decay phase and
+                // should no longer appear in the absorption-rate panel.
+                if let removalTime = pouch.removalTime, now >= removalTime {
+                    continue
+                }
+
+                let timeInMouth = now.timeIntervalSince(insertionTime)
+                guard timeInMouth > 0 else { continue }
+
+                let absorptionRate = calculateInstantAbsorptionRate(
+                    nicotineContent: pouch.nicotineAmount,
+                    timeInMouth: timeInMouth
+                )
+                let absorptionPercent = min(timeInMouth / FULL_RELEASE_TIME, 1.0)
+
+                let info = PouchAbsorptionInfo(
+                    pouchId: pouch.pouchId ?? UUID(),
+                    nicotineAmount: pouch.nicotineAmount,
+                    absorptionRate: absorptionRate,
+                    absorptionPercent: absorptionPercent
+                )
+
+                pouchInfos.append(info)
+                totalRate += absorptionRate
+            }
+
+            // Only show the panel when there is at least one active pouch
+            // contributing to absorption at this exact moment.
+            if !pouchInfos.isEmpty {
+                selectedAbsorptionData = AbsorptionRateData(
+                    time: now,
+                    pouches: pouchInfos,
+                    effectiveRate: totalRate
+                )
             } else {
                 selectedAbsorptionData = nil
             }
+        } catch {
+            logger.error("Failed to calculate current absorption snapshot: \(error.localizedDescription)")
+            selectedAbsorptionData = nil
         }
     }
     
