@@ -29,30 +29,6 @@
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES"
       shouldAutocreateTestPlan = "YES">
-      <Testables>
-         <TestableReference
-            skipped = "NO"
-            parallelizable = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "C8E7306F2E405AC900F0C29D"
-               BuildableName = "nicnark-2Tests.xctest"
-               BlueprintName = "nicnark-2Tests"
-               ReferencedContainer = "container:nicnark-2.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
-         <TestableReference
-            skipped = "NO"
-            parallelizable = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "C8E730792E405AC900F0C29D"
-               BuildableName = "nicnark-2UITests.xctest"
-               BlueprintName = "nicnark-2UITests"
-               ReferencedContainer = "container:nicnark-2.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
-      </Testables>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"

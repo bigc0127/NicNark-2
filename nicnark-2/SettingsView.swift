@@ -70,6 +70,11 @@ struct SettingsView: View {
     @AppStorage("autoRemoveDelayMinutes") private var autoRemoveDelayMinutes: Double = 0
     @AppStorage("hideLegacyButtons") private var hideLegacyButtons = false
     @AppStorage("priorityNotifications") private var priorityNotifications = false
+
+    // MARK: - Sleep Protection
+    @AppStorage(SleepProtectionKeys.enabled) private var sleepProtectionEnabled = false
+    @AppStorage(SleepProtectionKeys.bedtimeSecondsFromMidnight) private var sleepProtectionBedtimeSecondsFromMidnight: Int = 23 * 3600
+    @AppStorage(SleepProtectionKeys.targetMg) private var sleepProtectionTargetMg: Double = 1.3
     @State private var showingDeleteAlert = false
     @State private var showingTipThankYou = false
     @State private var isDeleting = false
@@ -102,6 +107,7 @@ struct SettingsView: View {
             inventorySection
             notificationSection
             timerSettingsSection
+            sleepProtectionSection
             exportSection
             appInfoSection
             cloudKitSyncSection
@@ -350,6 +356,44 @@ struct SettingsView: View {
             Text("Timer Settings")
         } footer: {
             Text("Priority notifications bypass Do Not Disturb and Focus modes. Legacy buttons can be deleted by long-pressing them.")
+        }
+    }
+
+    private var sleepProtectionSection: some View {
+        Section {
+            Toggle("Sleep Protection", isOn: $sleepProtectionEnabled)
+
+            if sleepProtectionEnabled {
+                DatePicker(
+                    "Bedtime",
+                    selection: Binding(
+                        get: {
+                            SleepProtectionHelper.dateForTimePicker(
+                                secondsFromMidnight: sleepProtectionBedtimeSecondsFromMidnight
+                            )
+                        },
+                        set: { newValue in
+                            sleepProtectionBedtimeSecondsFromMidnight = SleepProtectionHelper.secondsFromMidnight(for: newValue)
+                        }
+                    ),
+                    displayedComponents: .hourAndMinute
+                )
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Target Level")
+                        Spacer()
+                        Text("\(sleepProtectionTargetMg, specifier: "%.1f") mg")
+                            .foregroundColor(.secondary)
+                    }
+
+                    Slider(value: $sleepProtectionTargetMg, in: 0...5, step: 0.1)
+                }
+            }
+        } header: {
+            Text("Sleep Protection")
+        } footer: {
+            Text("Warns you if planned pouches are predicted to keep you above your target level at bedtime.")
         }
     }
     

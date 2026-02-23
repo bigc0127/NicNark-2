@@ -86,12 +86,21 @@ public struct AbsorptionConstants {
      */
     @Sendable
     public func calculateAbsorbedNicotine(nicotineContent: Double, useTime: TimeInterval) -> Double {
-        // Calculate what fraction of the 30-minute period has elapsed
-        let fractionalTime = useTime / FULL_RELEASE_TIME
-        
+        return calculateAbsorbedNicotine(nicotineContent: nicotineContent, useTime: useTime, fullReleaseTime: FULL_RELEASE_TIME)
+    }
+
+    /// Duration-aware variant of `calculateAbsorbedNicotine`.
+    /// Use this when a pouch has a custom absorption duration (e.g. per-can duration).
+    @Sendable
+    public func calculateAbsorbedNicotine(nicotineContent: Double, useTime: TimeInterval, fullReleaseTime: TimeInterval) -> Double {
+        let release = max(1, fullReleaseTime)
+
+        // Calculate what fraction of the absorption period has elapsed
+        let fractionalTime = useTime / release
+
         // Calculate absorption fraction (max 30%, scales with time)
         let absorbedFraction = min(ABSORPTION_FRACTION * fractionalTime, ABSORPTION_FRACTION)
-        
+
         // Return total nicotine multiplied by absorption fraction
         return nicotineContent * absorbedFraction
     }
@@ -111,6 +120,12 @@ public struct AbsorptionConstants {
         return calculateAbsorbedNicotine(nicotineContent: nicotineContent, useTime: elapsedTime)
     }
 
+    /// Duration-aware variant of `calculateCurrentNicotineLevel`.
+    @Sendable
+    public func calculateCurrentNicotineLevel(nicotineContent: Double, elapsedTime: TimeInterval, fullReleaseTime: TimeInterval) -> Double {
+        return calculateAbsorbedNicotine(nicotineContent: nicotineContent, useTime: elapsedTime, fullReleaseTime: fullReleaseTime)
+    }
+
     /**
      * calculateAbsorptionRate: Returns absorption progress as a percentage
      * 
@@ -126,8 +141,14 @@ public struct AbsorptionConstants {
      */
     @Sendable
     public func calculateAbsorptionRate(elapsedTime: TimeInterval) -> Double {
-        // Divide elapsed time by total time, cap at 100%
-        return min(elapsedTime / FULL_RELEASE_TIME, Self.maxAbsorptionRate)
+        return calculateAbsorptionRate(elapsedTime: elapsedTime, fullReleaseTime: FULL_RELEASE_TIME)
+    }
+
+    /// Duration-aware variant of `calculateAbsorptionRate`.
+    @Sendable
+    public func calculateAbsorptionRate(elapsedTime: TimeInterval, fullReleaseTime: TimeInterval) -> Double {
+        let release = max(1, fullReleaseTime)
+        return min(elapsedTime / release, Self.maxAbsorptionRate)
     }
 
     /**

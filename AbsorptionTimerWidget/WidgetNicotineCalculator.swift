@@ -80,21 +80,27 @@ class WidgetNicotineCalculator {
         insertionTime: Date
     ) -> Double {
         let nicotineContent = pouch.nicotineAmount
-        let removalTime = pouch.removalTime ?? insertionTime.addingTimeInterval(WIDGET_FULL_RELEASE_TIME)
+        let duration = pouch.timerDuration > 0
+            ? TimeInterval(pouch.timerDuration) * 60
+            : WIDGET_FULL_RELEASE_TIME
+        let modeledRemovalTime = insertionTime.addingTimeInterval(duration)
+        let removalTime = pouch.removalTime ?? modeledRemovalTime
         
         if timestamp <= removalTime {
             // Absorption phase
             let timeInMouth = timestamp.timeIntervalSince(insertionTime)
             return calculateCurrentNicotineLevel(
                 nicotineContent: nicotineContent,
-                elapsedTime: max(0, timeInMouth)
+                elapsedTime: max(0, timeInMouth),
+                fullReleaseTime: duration
             )
         } else {
             // Decay phase
             let actualTimeInMouth = removalTime.timeIntervalSince(insertionTime)
             let totalAbsorbed = calculateAbsorbedNicotine(
                 nicotineContent: nicotineContent,
-                useTime: actualTimeInMouth
+                useTime: actualTimeInMouth,
+                fullReleaseTime: duration
             )
             let timeSinceRemoval = timestamp.timeIntervalSince(removalTime)
             return calculateDecayedNicotine(
@@ -104,14 +110,15 @@ class WidgetNicotineCalculator {
         }
     }
     
-    private func calculateAbsorbedNicotine(nicotineContent: Double, useTime: TimeInterval) -> Double {
-        let fractionalTime = useTime / WIDGET_FULL_RELEASE_TIME
+    private func calculateAbsorbedNicotine(nicotineContent: Double, useTime: TimeInterval, fullReleaseTime: TimeInterval) -> Double {
+        let release = max(1, fullReleaseTime)
+        let fractionalTime = useTime / release
         let absorbedFraction = min(WIDGET_ABSORPTION_FRACTION * fractionalTime, WIDGET_ABSORPTION_FRACTION)
         return nicotineContent * absorbedFraction
     }
     
-    private func calculateCurrentNicotineLevel(nicotineContent: Double, elapsedTime: TimeInterval) -> Double {
-        return calculateAbsorbedNicotine(nicotineContent: nicotineContent, useTime: elapsedTime)
+    private func calculateCurrentNicotineLevel(nicotineContent: Double, elapsedTime: TimeInterval, fullReleaseTime: TimeInterval) -> Double {
+        return calculateAbsorbedNicotine(nicotineContent: nicotineContent, useTime: elapsedTime, fullReleaseTime: fullReleaseTime)
     }
     
     /**

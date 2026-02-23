@@ -77,6 +77,11 @@ struct LogView: View {
     @AppStorage("autoRemovePouches") private var autoRemovePouches = false    // Auto-remove pouches when timer ends
     @AppStorage("autoRemoveDelayMinutes") private var autoRemoveDelayMinutes: Double = 0  // Delay before auto-removing (0 = immediate)
     @AppStorage("hideLegacyButtons") private var hideLegacyButtons = false    // Hide old-style quick buttons
+
+    // MARK: - Sleep Protection
+    @AppStorage(SleepProtectionKeys.enabled) private var sleepProtectionEnabled = false
+    @AppStorage(SleepProtectionKeys.bedtimeSecondsFromMidnight) private var sleepProtectionBedtimeSecondsFromMidnight: Int = 23 * 3600
+    @AppStorage(SleepProtectionKeys.targetMg) private var sleepProtectionTargetMg: Double = 1.3
     
     // MARK: - Can Inventory Management
     @StateObject private var canManager = CanManager.shared           // Singleton for managing can inventory
@@ -94,6 +99,11 @@ struct LogView: View {
     // MARK: - Nicotine Level Information
     @State private var currentNicotineLevel: Double = 0.0            // Current nicotine level in bloodstream
     @State private var estimatedNicotineLevel: Double? = nil          // Estimated level after adding loaded pouches
+
+    // Sleep Protection evaluation (computed for currently-loaded pouches)
+    @State private var sleepProtectionBedtime: Date? = nil
+    @State private var sleepProtectionPredictedLevelAtBedtime: Double? = nil
+    @State private var isEvaluatingSleepProtection = false
     
     // MARK: - Core Data Fetch Requests
     // @FetchRequest automatically fetches data and updates the UI when the data changes
@@ -470,10 +480,21 @@ struct LogView: View {
         .onAppear {
             // Update nicotine levels when view appears
             updateNicotineLevels()
+            updateSleepProtectionEvaluation()
         }
         .onChange(of: loadedPouches) { _, _ in
             // Update estimated nicotine level when loaded pouches change
             updateNicotineLevels()
+            updateSleepProtectionEvaluation()
+        }
+        .onChange(of: sleepProtectionEnabled) { _, _ in
+            updateSleepProtectionEvaluation()
+        }
+        .onChange(of: sleepProtectionBedtimeSecondsFromMidnight) { _, _ in
+            updateSleepProtectionEvaluation()
+        }
+        .onChange(of: sleepProtectionTargetMg) { _, _ in
+            updateSleepProtectionEvaluation()
         }
         .sheet(isPresented: $showingAddCan) {
             CanDetailView(barcode: scannedBarcode)
@@ -552,10 +573,13 @@ struct LogView: View {
         
         let totalNicotine = activePouches.reduce(0.0) { $0 + $1.nicotineAmount }
         let totalAbsorbed = activePouches.reduce(0.0) { total, pouch in
-            let elapsed = tick.timeIntervalSince(pouch.insertionTime ?? Date())
+            let insertion = pouch.insertionTime ?? Date()
+            let elapsed = tick.timeIntervalSince(insertion)
+            let duration = pouch.timerDuration > 0 ? TimeInterval(pouch.timerDuration) * 60 : FULL_RELEASE_TIME
             let absorbed = AbsorptionConstants.shared.calculateCurrentNicotineLevel(
                 nicotineContent: pouch.nicotineAmount,
-                elapsedTime: elapsed
+                elapsedTime: elapsed,
+                fullReleaseTime: duration
             )
             return total + absorbed
         }
@@ -661,6 +685,10 @@ struct LogView: View {
                         }
                     }
                 }
+
+                if sleepProtectionEnabled && totalLoadedPouches > 0 {
+                    sleepProtectionStatusView
+                }
             }
             .frame(maxWidth: .infinity)
             .padding()
@@ -670,6 +698,78 @@ struct LogView: View {
             .shadow(radius: 4)
         }
         .disabled(!canStartTimer)
+    }
+
+    private var sleepProtectionStatusView: some View {
+        let bedtimeText: String = {
+            if let bedtime = sleepProtectionBedtime {
+                return bedtime.formatted(date: .omitted, time: .shortened)
+            }
+            return "Bedtime"
+        }()
+
+        if isEvaluatingSleepProtection {
+            return AnyView(
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                        .tint(.white.opacity(0.9))
+                    Text("Checking bedtime…")
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.85))
+                    Spacer()
+                    Text(bedtimeText)
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.7))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(Color.white.opacity(0.12))
+                .cornerRadius(10)
+            )
+        }
+
+        guard let predicted = sleepProtectionPredictedLevelAtBedtime,
+              let bedtime = sleepProtectionBedtime else {
+            return AnyView(EmptyView())
+        }
+
+        let isSafe = predicted <= sleepProtectionTargetMg
+        let title = isSafe ? "OK for bedtime" : "May interfere"
+        let icon = isSafe ? "moon.stars.fill" : "moon.zzz.fill"
+        let bannerColor = isSafe ? Color.green.opacity(0.22) : Color.orange.opacity(0.22)
+        let comparator = isSafe ? "≤" : ">"
+
+        return AnyView(
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Image(systemName: icon)
+                        .font(.caption)
+                    Text("Sleep Protection")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                    Spacer()
+                    Text(bedtime.formatted(date: .omitted, time: .shortened))
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.75))
+                }
+
+                HStack {
+                    Text(title)
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.9))
+                    Spacer()
+                    Text("\(predicted, specifier: "%.3f") \(comparator) \(sleepProtectionTargetMg, specifier: "%.1f") mg")
+                        .font(.caption2)
+                        .fontWeight(.medium)
+                        .foregroundColor(.white.opacity(0.9))
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(bannerColor)
+            .cornerRadius(10)
+        )
     }
 
     // LEGACY VIEW - No longer used in v2.1 (multi-pouch loading)
@@ -719,9 +819,17 @@ struct LogView: View {
         let isCompleted = remaining == 0
 
         let currentAbsorption = AbsorptionConstants.shared
-            .calculateCurrentNicotineLevel(nicotineContent: pouch.nicotineAmount, elapsedTime: elapsed)
+            .calculateCurrentNicotineLevel(
+                nicotineContent: pouch.nicotineAmount,
+                elapsedTime: elapsed,
+                fullReleaseTime: actualDuration
+            )
         let maxPossibleAbsorption = AbsorptionConstants.shared
-            .calculateAbsorbedNicotine(nicotineContent: pouch.nicotineAmount, useTime: actualDuration)
+            .calculateAbsorbedNicotine(
+                nicotineContent: pouch.nicotineAmount,
+                useTime: actualDuration,
+                fullReleaseTime: actualDuration
+            )
         let absorptionProgress = maxPossibleAbsorption > 0 ? currentAbsorption / maxPossibleAbsorption : 0
 
         HStack(spacing: 12) {
@@ -784,9 +892,17 @@ struct LogView: View {
         let isCompleted = remaining == 0
 
         let currentAbsorption = AbsorptionConstants.shared
-            .calculateCurrentNicotineLevel(nicotineContent: pouch.nicotineAmount, elapsedTime: elapsed)
+            .calculateCurrentNicotineLevel(
+                nicotineContent: pouch.nicotineAmount,
+                elapsedTime: elapsed,
+                fullReleaseTime: actualDuration
+            )
         let maxPossibleAbsorption = AbsorptionConstants.shared
-            .calculateAbsorbedNicotine(nicotineContent: pouch.nicotineAmount, useTime: actualDuration)
+            .calculateAbsorbedNicotine(
+                nicotineContent: pouch.nicotineAmount,
+                useTime: actualDuration,
+                fullReleaseTime: actualDuration
+            )
         let absorptionProgress = maxPossibleAbsorption > 0 ? currentAbsorption / maxPossibleAbsorption : 0
 
         VStack(spacing: 12) {
@@ -1005,77 +1121,50 @@ struct LogView: View {
     }
 
     func removeAllActivePouches() {
-        // Remove all active pouches
-        let allActivePouches = Array(activePouches)
-        
-        for pouch in allActivePouches {
-            removePouch(pouch)
-        }
-        
-        print("✅ Removed all \(allActivePouches.count) active pouches")
-        
-        // Haptic feedback
         let generator = UINotificationFeedbackGenerator()
-        generator.notificationOccurred(.success)
-    }
-    
-    func removePouch(_ pouch: PouchLog) {
-        let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
-        
-        // Idempotent guard: prevent duplicate removal operations
-        guard !LogView.pouchesBeingRemoved.contains(pouchId) else {
-            print("⚠️ Pouch removal already in progress for: \(pouchId)")
-            return
-        }
-        
-        // Mark as being removed
-        LogView.pouchesBeingRemoved.insert(pouchId)
-        defer {
-            LogView.pouchesBeingRemoved.remove(pouchId)
-        }
-        
-        // CRITICAL: End Live Activity FIRST before marking as removed in Core Data
-        // This prevents background tasks from seeing an inactive pouch and creating a new activity
+
         Task { @MainActor in
-            // End the Live Activity immediately
-            if #available(iOS 16.1, *) {
-                await LiveActivityManager.endLiveActivity(for: pouchId)
+            let removed = await PouchRemovalService.removeAllActivePouches(in: ctx)
+
+            if removed > 0 {
+                print("✅ Removed all \(removed) active pouches")
+                generator.notificationOccurred(.success)
             }
-            
-            // Now mark as removed in Core Data
-            let removalTime = Date.now
-            pouch.removalTime = removalTime
-            
-            // NOTE: We do NOT restore the pouch to the can here.
-            // Pouches are only restored when deleted from usage log, not when marked as complete.
-            
-            do {
-                try ctx.save()
-            } catch {
-                print("❌ Failed to save pouch removal: \(error.localizedDescription)")
-                print("❌ Full error: \(error)")
-            }
-            
-            // Cancel notifications
-            NotificationManager.cancelAlert(id: pouchId)
-            
+
             // Refresh can list to show updated counts
             canManager.fetchActiveCans(context: ctx)
-            
-            // Update widget persistence helper with the actual removal time
-            updateWidgetPersistenceHelperForRemoval(pouch: pouch, removalTime: removalTime)
-            
-            WidgetCenter.shared.reloadAllTimelines()
-            
-            // Restart timers if there are still active pouches
+
+            // Restart/stop timers depending on whether anything is still active
             if !self.activePouches.isEmpty {
-                // Update tick immediately to prevent UI freeze
                 self.tick = Date()
                 self.startLiveTimerIfNeeded()
                 self.startOptimizedTimer()
+            } else {
+                self.stopOptimizedTimer()
+                self.liveTimer?.invalidate()
+                self.liveTimer = nil
             }
         }
-        // Note: PouchRemoved notification is only posted by NotificationManager for external removals
+    }
+    
+    func removePouch(_ pouch: PouchLog) {
+        Task { @MainActor in
+            await PouchRemovalService.removePouch(pouch, in: ctx)
+
+            // Refresh can list to show updated counts
+            canManager.fetchActiveCans(context: ctx)
+
+            // Restart/stop timers depending on whether anything is still active
+            if !self.activePouches.isEmpty {
+                self.tick = Date()
+                self.startLiveTimerIfNeeded()
+                self.startOptimizedTimer()
+            } else {
+                self.stopOptimizedTimer()
+                self.liveTimer?.invalidate()
+                self.liveTimer = nil
+            }
+        }
     }
     
     func deleteCustomButton(_ button: CustomButton) {
@@ -1126,7 +1215,8 @@ struct LogView: View {
 
         let currentLevel = AbsorptionConstants.shared.calculateCurrentNicotineLevel(
             nicotineContent: pouch.nicotineAmount,
-            elapsedTime: elapsed
+            elapsedTime: elapsed,
+            fullReleaseTime: actualDuration
         )
 
         let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
@@ -1349,21 +1439,99 @@ struct LogView: View {
     private func updateNicotineLevels() {
         Task {
             let calculator = NicotineCalculator()
-            
-            // Get current nicotine level
-            let currentLevel = await calculator.calculateTotalNicotineLevel(context: ctx)
-            
-            // Calculate estimated level after adding loaded pouches
+            let now = Date.now
+
+            // Current nicotine level (active + decaying)
+            let currentLevel = await calculator.calculateTotalNicotineLevel(context: ctx, at: now)
+
+            // Estimate the level at the time when:
+            // - all currently-active pouches finish absorbing, AND
+            // - all currently-loaded (planned) pouches would finish absorbing if started now.
+            // This fixes the issue where estimates ignored the *remaining* absorption from pouches already in use.
             let estimatedLevel: Double?
             if totalLoadedPouches > 0 {
-                estimatedLevel = currentLevel + estimatedTotalAbsorption
+                let planned = plannedPouchesFromLoaded()
+                let plannedMaxDuration = planned.map(\.duration).max() ?? 0
+                var horizon = now.addingTimeInterval(plannedMaxDuration)
+
+                // Include current active pouches' completion times
+                let activeEndTimes: [Date] = activePouches.compactMap { pouch in
+                    guard let insertion = pouch.insertionTime else { return nil }
+                    let duration = pouch.timerDuration > 0 ? TimeInterval(pouch.timerDuration) * 60 : FULL_RELEASE_TIME
+                    return insertion.addingTimeInterval(duration)
+                }
+                if let maxActiveEnd = activeEndTimes.max(), maxActiveEnd > horizon {
+                    horizon = maxActiveEnd
+                }
+
+                let result = await SleepProtectionAnalyzer.predictTotalLevel(
+                    context: ctx,
+                    now: now,
+                    at: horizon,
+                    plannedPouches: planned
+                )
+
+                estimatedLevel = result.predictedLevel
             } else {
                 estimatedLevel = nil
             }
-            
+
             await MainActor.run {
                 self.currentNicotineLevel = currentLevel
                 self.estimatedNicotineLevel = estimatedLevel
+            }
+        }
+    }
+
+    // MARK: - Sleep Protection
+
+    private func plannedPouchesFromLoaded() -> [PlannedPouch] {
+        guard totalLoadedPouches > 0 else { return [] }
+
+        var planned: [PlannedPouch] = []
+
+        for can in activeCans {
+            guard let canId = can.id, let count = loadedPouches[canId], count > 0 else { continue }
+
+            let durationSeconds: TimeInterval
+            if can.duration > 0 {
+                durationSeconds = TimeInterval(can.duration * 60)
+            } else {
+                durationSeconds = FULL_RELEASE_TIME
+            }
+
+            for _ in 0..<count {
+                planned.append(PlannedPouch(nicotineAmount: can.strength, duration: durationSeconds))
+            }
+        }
+
+        return planned
+    }
+
+    private func updateSleepProtectionEvaluation() {
+        guard sleepProtectionEnabled, totalLoadedPouches > 0 else {
+            sleepProtectionBedtime = nil
+            sleepProtectionPredictedLevelAtBedtime = nil
+            isEvaluatingSleepProtection = false
+            return
+        }
+
+        isEvaluatingSleepProtection = true
+        let planned = plannedPouchesFromLoaded()
+        let now = Date.now
+
+        Task {
+            let result = await SleepProtectionAnalyzer.predictTotalLevelAtNextBedtime(
+                context: ctx,
+                now: now,
+                bedtimeSecondsFromMidnight: sleepProtectionBedtimeSecondsFromMidnight,
+                plannedPouches: planned
+            )
+
+            await MainActor.run {
+                self.sleepProtectionBedtime = result.bedtime
+                self.sleepProtectionPredictedLevelAtBedtime = result.predictedLevel
+                self.isEvaluatingSleepProtection = false
             }
         }
     }

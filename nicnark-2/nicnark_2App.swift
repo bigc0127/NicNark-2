@@ -62,6 +62,10 @@ struct nicnark_2App: App {
     init() {
         // Set up push notifications for pouch completion alerts
         NotificationManager.configure()
+
+        // Enable WatchConnectivity message handling for Apple Watch actions.
+        // (No-op on devices that don't support WCSession.)
+        WatchConnectivityBridge.shared.start()
         
         // MARK: - Background Task Registration
         // CRITICAL: Register background task handlers SYNCHRONOUSLY before app finishes launching

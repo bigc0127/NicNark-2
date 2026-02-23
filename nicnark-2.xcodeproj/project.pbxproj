@@ -20,20 +20,6 @@
 			remoteGlobalIDString = C8D96E3F2E40739E002AA8C9;
 			remoteInfo = AbsorptionTimerWidgetExtension;
 		};
-		C8E730712E405AC900F0C29D /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = C8E730542E405AC700F0C29D /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = C8E7305B2E405AC700F0C29D;
-			remoteInfo = "nicnark-2";
-		};
-		C8E7307B2E405AC900F0C29D /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = C8E730542E405AC700F0C29D /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = C8E7305B2E405AC700F0C29D;
-			remoteInfo = "nicnark-2";
-		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -62,8 +48,7 @@
 		C8D96E442E40739E002AA8C9 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		C8D96E682E40800B002AA8C9 /* AbsorptionTimerWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AbsorptionTimerWidgetExtension.entitlements; sourceTree = "<group>"; };
 		C8E7305C2E405AC700F0C29D /* nicnark-2.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "nicnark-2.app"; sourceTree = BUILT_PRODUCTS_DIR; };
-		C8E730702E405AC900F0C29D /* nicnark-2Tests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "nicnark-2Tests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
-		C8E7307A2E405AC900F0C29D /* nicnark-2UITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "nicnark-2UITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		C8EEDAA72F4CABB7007DCB44 /* Nicnark-2-watch.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.extensionkit-extension"; includeInIndex = 0; path = "Nicnark-2-watch.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -98,6 +83,13 @@
 			);
 			target = C8D96E3F2E40739E002AA8C9 /* AbsorptionTimerWidgetExtension */;
 		};
+		C8EEDAB02F4CABB7007DCB44 /* Exceptions for "Nicnark-2-watch" folder in "Nicnark-2-watch" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = C8EEDAA62F4CABB7007DCB44 /* Nicnark-2-watch */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -119,14 +111,12 @@
 			path = "nicnark-2";
 			sourceTree = "<group>";
 		};
-		C8E730732E405AC900F0C29D /* nicnark-2Tests */ = {
+		C8EEDAA82F4CABB7007DCB44 /* Nicnark-2-watch */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "nicnark-2Tests";
-			sourceTree = "<group>";
-		};
-		C8E7307D2E405AC900F0C29D /* nicnark-2UITests */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "nicnark-2UITests";
+			exceptions = (
+				C8EEDAB02F4CABB7007DCB44 /* Exceptions for "Nicnark-2-watch" folder in "Nicnark-2-watch" target */,
+			);
+			path = "Nicnark-2-watch";
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -144,12 +134,7 @@
 			files = (
 			);
 		};
-		C8E7306D2E405AC900F0C29D /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			files = (
-			);
-		};
-		C8E730772E405AC900F0C29D /* Frameworks */ = {
+		C8EEDAA42F4CABB7007DCB44 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
 			);
@@ -171,9 +156,8 @@
 			children = (
 				C8D96E682E40800B002AA8C9 /* AbsorptionTimerWidgetExtension.entitlements */,
 				C8E7305E2E405AC700F0C29D /* nicnark-2 */,
-				C8E730732E405AC900F0C29D /* nicnark-2Tests */,
-				C8E7307D2E405AC900F0C29D /* nicnark-2UITests */,
 				C8D96E462E40739E002AA8C9 /* AbsorptionTimerWidget */,
+				C8EEDAA82F4CABB7007DCB44 /* Nicnark-2-watch */,
 				C8D96E412E40739E002AA8C9 /* Frameworks */,
 				C8E7305D2E405AC700F0C29D /* Products */,
 			);
@@ -183,9 +167,8 @@
 			isa = PBXGroup;
 			children = (
 				C8E7305C2E405AC700F0C29D /* nicnark-2.app */,
-				C8E730702E405AC900F0C29D /* nicnark-2Tests.xctest */,
-				C8E7307A2E405AC900F0C29D /* nicnark-2UITests.xctest */,
 				C8D96E402E40739E002AA8C9 /* AbsorptionTimerWidgetExtension.appex */,
+				C8EEDAA72F4CABB7007DCB44 /* Nicnark-2-watch.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -234,47 +217,23 @@
 			productReference = C8E7305C2E405AC700F0C29D /* nicnark-2.app */;
 			productType = "com.apple.product-type.application";
 		};
-		C8E7306F2E405AC900F0C29D /* nicnark-2Tests */ = {
+		C8EEDAA62F4CABB7007DCB44 /* Nicnark-2-watch */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = C8E730882E405AC900F0C29D /* Build configuration list for PBXNativeTarget "nicnark-2Tests" */;
+			buildConfigurationList = C8EEDAB12F4CABB7007DCB44 /* Build configuration list for PBXNativeTarget "Nicnark-2-watch" */;
 			buildPhases = (
-				C8E7306C2E405AC900F0C29D /* Sources */,
-				C8E7306D2E405AC900F0C29D /* Frameworks */,
-				C8E7306E2E405AC900F0C29D /* Resources */,
+				C8EEDAA32F4CABB7007DCB44 /* Sources */,
+				C8EEDAA42F4CABB7007DCB44 /* Frameworks */,
+				C8EEDAA52F4CABB7007DCB44 /* Resources */,
 			);
 			buildRules = (
 			);
-			dependencies = (
-				C8E730722E405AC900F0C29D /* PBXTargetDependency */,
-			);
 			fileSystemSynchronizedGroups = (
-				C8E730732E405AC900F0C29D /* nicnark-2Tests */,
+				C8EEDAA82F4CABB7007DCB44 /* Nicnark-2-watch */,
 			);
-			name = "nicnark-2Tests";
-			productName = "nicnark-2Tests";
-			productReference = C8E730702E405AC900F0C29D /* nicnark-2Tests.xctest */;
-			productType = "com.apple.product-type.bundle.unit-test";
-		};
-		C8E730792E405AC900F0C29D /* nicnark-2UITests */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = C8E7308B2E405AC900F0C29D /* Build configuration list for PBXNativeTarget "nicnark-2UITests" */;
-			buildPhases = (
-				C8E730762E405AC900F0C29D /* Sources */,
-				C8E730772E405AC900F0C29D /* Frameworks */,
-				C8E730782E405AC900F0C29D /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				C8E7307C2E405AC900F0C29D /* PBXTargetDependency */,
-			);
-			fileSystemSynchronizedGroups = (
-				C8E7307D2E405AC900F0C29D /* nicnark-2UITests */,
-			);
-			name = "nicnark-2UITests";
-			productName = "nicnark-2UITests";
-			productReference = C8E7307A2E405AC900F0C29D /* nicnark-2UITests.xctest */;
-			productType = "com.apple.product-type.bundle.ui-testing";
+			name = "Nicnark-2-watch";
+			productName = "Nicnark-2-watch";
+			productReference = C8EEDAA72F4CABB7007DCB44 /* Nicnark-2-watch.appex */;
+			productType = "com.apple.product-type.extensionkit-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -283,7 +242,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2600;
+				LastSwiftUpdateCheck = 2620;
 				LastUpgradeCheck = 2600;
 				TargetAttributes = {
 					C8D96E3F2E40739E002AA8C9 = {
@@ -292,13 +251,8 @@
 					C8E7305B2E405AC700F0C29D = {
 						CreatedOnToolsVersion = 16.4;
 					};
-					C8E7306F2E405AC900F0C29D = {
-						CreatedOnToolsVersion = 16.4;
-						TestTargetID = C8E7305B2E405AC700F0C29D;
-					};
-					C8E730792E405AC900F0C29D = {
-						CreatedOnToolsVersion = 16.4;
-						TestTargetID = C8E7305B2E405AC700F0C29D;
+					C8EEDAA62F4CABB7007DCB44 = {
+						CreatedOnToolsVersion = 26.2;
 					};
 				};
 			};
@@ -317,9 +271,8 @@
 			projectRoot = "";
 			targets = (
 				C8E7305B2E405AC700F0C29D /* nicnark-2 */,
-				C8E7306F2E405AC900F0C29D /* nicnark-2Tests */,
-				C8E730792E405AC900F0C29D /* nicnark-2UITests */,
 				C8D96E3F2E40739E002AA8C9 /* AbsorptionTimerWidgetExtension */,
+				C8EEDAA62F4CABB7007DCB44 /* Nicnark-2-watch */,
 			);
 		};
 /* End PBXProject section */
@@ -335,12 +288,7 @@
 			files = (
 			);
 		};
-		C8E7306E2E405AC900F0C29D /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			files = (
-			);
-		};
-		C8E730782E405AC900F0C29D /* Resources */ = {
+		C8EEDAA52F4CABB7007DCB44 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			files = (
 			);
@@ -358,12 +306,7 @@
 			files = (
 			);
 		};
-		C8E7306C2E405AC900F0C29D /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			files = (
-			);
-		};
-		C8E730762E405AC900F0C29D /* Sources */ = {
+		C8EEDAA32F4CABB7007DCB44 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			files = (
 			);
@@ -375,16 +318,6 @@
 			isa = PBXTargetDependency;
 			target = C8D96E3F2E40739E002AA8C9 /* AbsorptionTimerWidgetExtension */;
 			targetProxy = C8D96E542E40739F002AA8C9 /* PBXContainerItemProxy */;
-		};
-		C8E730722E405AC900F0C29D /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = C8E7305B2E405AC700F0C29D /* nicnark-2 */;
-			targetProxy = C8E730712E405AC900F0C29D /* PBXContainerItemProxy */;
-		};
-		C8E7307C2E405AC900F0C29D /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = C8E7305B2E405AC700F0C29D /* nicnark-2 */;
-			targetProxy = C8E7307B2E405AC900F0C29D /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -648,75 +581,65 @@
 			};
 			name = Release;
 		};
-		C8E730892E405AC900F0C29D /* Debug configuration for PBXNativeTarget "nicnark-2Tests" */ = {
+		C8EEDAAE2F4CABB7007DCB44 /* Debug configuration for PBXNativeTarget "Nicnark-2-watch" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 88;
 				DEVELOPMENT_TEAM = 69LLXLJW63;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.4;
-				MARKETING_VERSION = 2.1;
-				PRODUCT_BUNDLE_IDENTIFIER = "ConnorNeedling.nicnark-2Tests";
+				INFOPLIST_FILE = "Nicnark-2-watch/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Nicnark-2-watch";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MARKETING_VERSION = 2.5;
+				PRODUCT_BUNDLE_IDENTIFIER = "ConnorNeedling.Nicnark-2-watch";
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_EMIT_LOC_STRINGS = NO;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/nicnark-2.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/nicnark-2";
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.2;
 			};
 			name = Debug;
 		};
-		C8E7308A2E405AC900F0C29D /* Release configuration for PBXNativeTarget "nicnark-2Tests" */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 69LLXLJW63;
-				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.4;
-				MARKETING_VERSION = 2.1;
-				PRODUCT_BUNDLE_IDENTIFIER = "ConnorNeedling.nicnark-2Tests";
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/nicnark-2.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/nicnark-2";
-			};
-			name = Release;
-		};
-		C8E7308C2E405AC900F0C29D /* Debug configuration for PBXNativeTarget "nicnark-2UITests" */ = {
+		C8EEDAAF2F4CABB7007DCB44 /* Release configuration for PBXNativeTarget "Nicnark-2-watch" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 88;
 				DEVELOPMENT_TEAM = 69LLXLJW63;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 2.1;
-				PRODUCT_BUNDLE_IDENTIFIER = "ConnorNeedling.nicnark-2UITests";
+				INFOPLIST_FILE = "Nicnark-2-watch/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Nicnark-2-watch";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MARKETING_VERSION = 2.5;
+				PRODUCT_BUNDLE_IDENTIFIER = "ConnorNeedling.Nicnark-2-watch";
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_EMIT_LOC_STRINGS = NO;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = "nicnark-2";
-			};
-			name = Debug;
-		};
-		C8E7308D2E405AC900F0C29D /* Release configuration for PBXNativeTarget "nicnark-2UITests" */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 69LLXLJW63;
-				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 2.1;
-				PRODUCT_BUNDLE_IDENTIFIER = "ConnorNeedling.nicnark-2UITests";
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = "nicnark-2";
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.2;
 			};
 			name = Release;
 		};
@@ -747,19 +670,11 @@
 			);
 			defaultConfigurationName = Debug;
 		};
-		C8E730882E405AC900F0C29D /* Build configuration list for PBXNativeTarget "nicnark-2Tests" */ = {
+		C8EEDAB12F4CABB7007DCB44 /* Build configuration list for PBXNativeTarget "Nicnark-2-watch" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				C8E730892E405AC900F0C29D /* Debug configuration for PBXNativeTarget "nicnark-2Tests" */,
-				C8E7308A2E405AC900F0C29D /* Release configuration for PBXNativeTarget "nicnark-2Tests" */,
-			);
-			defaultConfigurationName = Debug;
-		};
-		C8E7308B2E405AC900F0C29D /* Build configuration list for PBXNativeTarget "nicnark-2UITests" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				C8E7308C2E405AC900F0C29D /* Debug configuration for PBXNativeTarget "nicnark-2UITests" */,
-				C8E7308D2E405AC900F0C29D /* Release configuration for PBXNativeTarget "nicnark-2UITests" */,
+				C8EEDAAE2F4CABB7007DCB44 /* Debug configuration for PBXNativeTarget "Nicnark-2-watch" */,
+				C8EEDAAF2F4CABB7007DCB44 /* Release configuration for PBXNativeTarget "Nicnark-2-watch" */,
 			);
 			defaultConfigurationName = Debug;
 		};

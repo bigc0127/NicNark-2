@@ -651,7 +651,11 @@ actor BackgroundMaintainer {
         let clampedElapsed = min(elapsed, total)
         let progress = clampedElapsed / total
         let currentLevel = AbsorptionConstants.shared
-            .calculateCurrentNicotineLevel(nicotineContent: t.totalNicotine, elapsedTime: clampedElapsed)
+            .calculateCurrentNicotineLevel(
+                nicotineContent: t.totalNicotine,
+                elapsedTime: clampedElapsed,
+                fullReleaseTime: total
+            )
         let timer = t.startTime...t.endTime
         return (timer, progress, currentLevel)
     }
@@ -705,7 +709,11 @@ actor BackgroundMaintainer {
                 // Update the Live Activity with current state
                 let progress = min(max(elapsed / effectiveDuration, 0), 1)  // Use actual duration for progress
                 let currentLevel = AbsorptionConstants.shared
-                    .calculateCurrentNicotineLevel(nicotineContent: effectiveNicotineAmount, elapsedTime: elapsed)
+                    .calculateCurrentNicotineLevel(
+                        nicotineContent: effectiveNicotineAmount,
+                        elapsedTime: elapsed,
+                        fullReleaseTime: effectiveDuration
+                    )
                 let timer = effectiveStartTime...endTime
                 
                 log.info("📱 Updating Live Activity: progress=\(Int(progress * 100))%, level=\(String(format: "%.3f", currentLevel))mg")

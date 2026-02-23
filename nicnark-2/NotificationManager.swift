@@ -236,31 +236,22 @@ enum NotificationManager {
      */
     static func handlePouchRemovalAction(pouchId: String) {
         logger.info("Handling pouch removal: \(pouchId)")
-        
-        // Step 1: End Live Activity if iOS 16.1+ is available
+
+        // End Live Activity (if present) and cancel any pending completion notifications.
         if #available(iOS 16.1, *) {
             Task { @MainActor in
                 await LiveActivityManager.endLiveActivity(for: pouchId)
             }
         }
-        
-        // Step 2: Cancel any pending completion notifications
         cancelAlert(id: pouchId)
 
-        // Step 3: Notify the app UI and update widgets
+        // Persist removal in Core Data so the action works even when the app UI isn't open.
         Task { @MainActor in
-            // Tell the main app that this pouch was removed (UI will update)
-            NotificationCenter.default.post(
-                name: Notification.Name("PouchRemoved"),
-                object: nil,
-                userInfo: ["pouchId": pouchId]  // Include pouch ID for verification
-            )
-            
-            // Update home screen widgets to reflect the removal
-            WidgetCenter.shared.reloadTimelines(ofKind: widgetKind)
+            let ctx = PersistenceController.shared.container.viewContext
+            _ = await PouchRemovalService.removePouch(withId: pouchId, in: ctx)
         }
 
-        // Step 4: Clear notification badge
+        // Clear notification badge
         clearBadge()
     }
     
