@@ -737,7 +737,7 @@ struct LogView: View {
         let isSafe = predicted <= sleepProtectionTargetMg
         let title = isSafe ? "OK for bedtime" : "May interfere"
         let icon = isSafe ? "moon.stars.fill" : "moon.zzz.fill"
-        let bannerColor = isSafe ? Color.green.opacity(0.22) : Color.orange.opacity(0.22)
+        let bannerColor = isSafe ? Color.green.opacity(1.0) : Color.red.opacity(1.0)
         let comparator = isSafe ? "≤" : ">"
 
         return AnyView(
