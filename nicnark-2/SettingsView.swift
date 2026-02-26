@@ -66,6 +66,9 @@ struct SettingsView: View {
     @StateObject private var tipStore = TipStore()                         // In-app purchase manager
     @StateObject private var syncManager = CloudKitSyncManager.shared      // CloudKit sync manager
     @StateObject private var timerSettings = TimerSettings.shared          // Timer duration settings
+    #if canImport(WatchConnectivity)
+    @StateObject private var watchStatus = WatchStatusViewModel()
+    #endif
     @AppStorage("autoRemovePouches") private var autoRemovePouches = false
     @AppStorage("autoRemoveDelayMinutes") private var autoRemoveDelayMinutes: Double = 0
     @AppStorage("hideLegacyButtons") private var hideLegacyButtons = false
@@ -110,6 +113,9 @@ struct SettingsView: View {
             sleepProtectionSection
             exportSection
             appInfoSection
+            #if canImport(WatchConnectivity)
+            watchSection
+            #endif
             cloudKitSyncSection
             #if DEBUG
             if debugToolsVisible { developerSchemaSection }
@@ -119,6 +125,14 @@ struct SettingsView: View {
             aboutSection
         }
         .navigationTitle("Settings")
+        #if canImport(WatchConnectivity)
+        .onAppear {
+            watchStatus.start()
+        }
+        .onDisappear {
+            watchStatus.stop()
+        }
+        #endif
         .alert("Thank You! 🎉", isPresented: $showingTipThankYou) {
             Button("You're Welcome! ☕️") { }
         } message: {
@@ -480,6 +494,41 @@ struct SettingsView: View {
             Text("App Information")
         }
     }
+
+    #if canImport(WatchConnectivity)
+    private var watchSection: some View {
+        Section {
+            if !watchStatus.isSupported {
+                Label("WatchConnectivity not supported on this device", systemImage: "applewatch.slash")
+                    .foregroundColor(.secondary)
+            } else {
+                watchStatusRow(title: "Paired", isOn: watchStatus.isPaired)
+                watchStatusRow(title: "Watch app installed", isOn: watchStatus.isWatchAppInstalled)
+                watchStatusRow(title: "Reachable", isOn: watchStatus.isReachable)
+
+                Button("Refresh") {
+                    watchStatus.refresh()
+                }
+                .font(.caption)
+            }
+        } header: {
+            Text("Apple Watch")
+        } footer: {
+            Text("Reachable means your iPhone can talk to the Watch app right now. If it shows Not Reachable, open NicNark on iPhone and Apple Watch.")
+        }
+    }
+
+    private func watchStatusRow(title: String, isOn: Bool) -> some View {
+        HStack {
+            Image(systemName: isOn ? "checkmark.circle.fill" : "xmark.circle.fill")
+                .foregroundColor(isOn ? .green : .red)
+            Text(title)
+            Spacer()
+            Text(isOn ? "Yes" : "No")
+                .foregroundColor(.secondary)
+        }
+    }
+    #endif
     
     /**
      * CloudKit Synchronization Section
