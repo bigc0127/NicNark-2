@@ -10,6 +10,7 @@
 import SwiftUI    // For building the user interface
 import WidgetKit  // For managing home screen widgets
 import BackgroundTasks  // For background task scheduling
+import CoreData   // For viewContext access
 
 /**
  * @main: This attribute tells Swift this is the app's entry point (where execution begins)
@@ -34,19 +35,25 @@ struct nicnark_2App: App {
                 using: nil
             ) { task in
                 Task { @Sendable in
-                    if #available(iOS 16.1, *) {
-                        await BackgroundMaintainer.shared.handleRefresh(task as! BGAppRefreshTask)
+                    if #available(iOS 16.1, *),
+                       let refreshTask = task as? BGAppRefreshTask {
+                        await BackgroundMaintainer.shared.handleRefresh(refreshTask)
+                    } else {
+                        task.setTaskCompleted(success: false)
                     }
                 }
             }
-            
+
             BGTaskScheduler.shared.register(
                 forTaskWithIdentifier: "com.nicnark.nicnark-2.bg.process",
                 using: nil
             ) { task in
                 Task { @Sendable in
-                    if #available(iOS 16.1, *) {
-                        await BackgroundMaintainer.shared.handleProcess(task as! BGProcessingTask)
+                    if #available(iOS 16.1, *),
+                       let processTask = task as? BGProcessingTask {
+                        await BackgroundMaintainer.shared.handleProcess(processTask)
+                    } else {
+                        task.setTaskCompleted(success: false)
                     }
                 }
             }

@@ -49,7 +49,7 @@ protocol BarcodeScannerDelegate: AnyObject {
 class BarcodeScannerViewController: UIViewController {
     weak var delegate: BarcodeScannerDelegate?
     
-    private var captureSession: AVCaptureSession?
+    private nonisolated(unsafe) var captureSession: AVCaptureSession?
     private var previewLayer: AVCaptureVideoPreviewLayer?
     
     override func viewDidLoad() {

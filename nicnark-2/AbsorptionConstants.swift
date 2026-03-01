@@ -39,7 +39,7 @@ public var FULL_RELEASE_TIME: TimeInterval {
  * - Converting time periods to absorption percentages
  * - Providing consistent calculations across the entire app
  */
-public struct AbsorptionConstants {
+public struct AbsorptionConstants: Sendable {
     // MARK: - Singleton Pattern
     // Use .shared instead of creating new instances for better performance and consistency
     public static let shared = AbsorptionConstants()
@@ -84,14 +84,14 @@ public struct AbsorptionConstants {
      * @param useTime: How long the pouch has been in mouth (in seconds)
      * @return: Amount of nicotine absorbed into bloodstream (in mg)
      */
-    @Sendable
+
     public func calculateAbsorbedNicotine(nicotineContent: Double, useTime: TimeInterval) -> Double {
         return calculateAbsorbedNicotine(nicotineContent: nicotineContent, useTime: useTime, fullReleaseTime: FULL_RELEASE_TIME)
     }
 
     /// Duration-aware variant of `calculateAbsorbedNicotine`.
     /// Use this when a pouch has a custom absorption duration (e.g. per-can duration).
-    @Sendable
+
     public func calculateAbsorbedNicotine(nicotineContent: Double, useTime: TimeInterval, fullReleaseTime: TimeInterval) -> Double {
         let release = max(1, fullReleaseTime)
 
@@ -115,13 +115,13 @@ public struct AbsorptionConstants {
      * @param elapsedTime: How long the pouch has been in mouth (in seconds)
      * @return: Current nicotine level in bloodstream (in mg)
      */
-    @Sendable
+
     public func calculateCurrentNicotineLevel(nicotineContent: Double, elapsedTime: TimeInterval) -> Double {
         return calculateAbsorbedNicotine(nicotineContent: nicotineContent, useTime: elapsedTime)
     }
 
     /// Duration-aware variant of `calculateCurrentNicotineLevel`.
-    @Sendable
+
     public func calculateCurrentNicotineLevel(nicotineContent: Double, elapsedTime: TimeInterval, fullReleaseTime: TimeInterval) -> Double {
         return calculateAbsorbedNicotine(nicotineContent: nicotineContent, useTime: elapsedTime, fullReleaseTime: fullReleaseTime)
     }
@@ -139,13 +139,13 @@ public struct AbsorptionConstants {
      * @param elapsedTime: How long the pouch has been in mouth (in seconds)
      * @return: Completion percentage from 0.0 to 1.0
      */
-    @Sendable
+
     public func calculateAbsorptionRate(elapsedTime: TimeInterval) -> Double {
         return calculateAbsorptionRate(elapsedTime: elapsedTime, fullReleaseTime: FULL_RELEASE_TIME)
     }
 
     /// Duration-aware variant of `calculateAbsorptionRate`.
-    @Sendable
+
     public func calculateAbsorptionRate(elapsedTime: TimeInterval, fullReleaseTime: TimeInterval) -> Double {
         let release = max(1, fullReleaseTime)
         return min(elapsedTime / release, Self.maxAbsorptionRate)
@@ -176,7 +176,7 @@ public struct AbsorptionConstants {
      * @param timeSinceRemoval: Time elapsed since pouch removal (in seconds)
      * @return: Current nicotine level after decay (in mg)
      */
-    @Sendable
+
     public func calculateDecayedNicotine(initialLevel: Double, timeSinceRemoval: TimeInterval) -> Double {
         // Calculate decay factor using half-life formula: 0.5^(t / T_1/2)
         // This directly models the exponential decay where nicotine level

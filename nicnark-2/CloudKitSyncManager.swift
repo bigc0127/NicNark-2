@@ -30,6 +30,7 @@
 //
 
 import Foundation
+import Combine
 import CloudKit
 import CoreData
 import ActivityKit
@@ -433,54 +434,41 @@ class CloudKitSyncManager: ObservableObject {
     
     private func forceSchemaCreationWithTestData() async {
         logger.info("🔧 Forcing CloudKit schema creation with test data")
-        
-        let container = PersistenceController.shared.container
-        let context = container.newBackgroundContext()
-        
+
+        let context = PersistenceController.shared.container.viewContext
+
         // Step 1: Create and save test record
-        await context.perform {
-            do {
-                // Create a temporary PouchLog to force schema creation
-                let testPouch = PouchLog(context: context)
-                testPouch.pouchId = UUID()
-                testPouch.insertionTime = Date()
-                testPouch.nicotineAmount = 0.01 // Tiny amount to identify as test data
-                testPouch.removalTime = Date() // Already "removed" so it won't interfere
-                
-                // Save to Core Data - this should trigger CloudKit schema creation
-                try context.save()
-                self.logger.info("✅ Test record created to force CloudKit schema")
-                
-            } catch {
-                self.logger.error("❌ Failed to create test record for CloudKit schema: \(error.localizedDescription, privacy: .public)")
-            }
+        do {
+            let testPouch = PouchLog(context: context)
+            testPouch.pouchId = UUID()
+            testPouch.insertionTime = Date()
+            testPouch.nicotineAmount = 0.01 // Tiny amount to identify as test data
+            testPouch.removalTime = Date() // Already "removed" so it won't interfere
+            try context.save()
+            logger.info("✅ Test record created to force CloudKit schema")
+        } catch {
+            logger.error("❌ Failed to create test record for CloudKit schema: \(error.localizedDescription, privacy: .public)")
         }
-        
-        // Step 2: Wait for CloudKit to process (outside the context.perform)
+
+        // Step 2: Wait for CloudKit to process
         do {
             try await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
         } catch {
             logger.warning("⚠️ Task sleep interrupted: \(error.localizedDescription, privacy: .public)")
         }
-        
+
         // Step 3: Clean up the test data
-        await context.perform {
-            do {
-                // Find and delete the test record
-                let fetchRequest: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
-                fetchRequest.predicate = NSPredicate(format: "nicotineAmount == %f", 0.01)
-                
-                let testRecords = try context.fetch(fetchRequest)
-                for testRecord in testRecords {
-                    context.delete(testRecord)
-                }
-                
-                try context.save()
-                self.logger.info("✅ Test record(s) cleaned up after schema creation")
-                
-            } catch {
-                self.logger.error("❌ Failed to clean up test records: \(error.localizedDescription, privacy: .public)")
+        let fetchRequest = NSFetchRequest<PouchLog>(entityName: "PouchLog")
+        fetchRequest.predicate = NSPredicate(format: "nicotineAmount == %f", 0.01)
+        do {
+            let testRecords = try context.fetch(fetchRequest)
+            for testRecord in testRecords {
+                context.delete(testRecord)
             }
+            try context.save()
+            logger.info("✅ Test record(s) cleaned up after schema creation")
+        } catch {
+            logger.error("❌ Failed to clean up test records: \(error.localizedDescription, privacy: .public)")
         }
     }
     
@@ -488,34 +476,29 @@ class CloudKitSyncManager: ObservableObject {
     
     private func migrateExistingPouchLogsWithMissingUUIDs() async {
         logger.info("🔄 Starting UUID migration for existing PouchLog entries")
-        
-        let container = PersistenceController.shared.container
-        let context = container.newBackgroundContext()
-        
-        await context.perform {
-            let fetchRequest: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
-            fetchRequest.predicate = NSPredicate(format: "pouchId == nil")
-            
-            do {
-                let pouchesWithoutUUIDs = try context.fetch(fetchRequest)
-                
-                if pouchesWithoutUUIDs.isEmpty {
-                    self.logger.info("✅ All PouchLog entries already have UUIDs")
-                    return
-                }
-                
-                self.logger.info("🔧 Found \(pouchesWithoutUUIDs.count) PouchLog entries without UUIDs - migrating")
-                
-                for pouch in pouchesWithoutUUIDs {
-                    pouch.pouchId = UUID()
-                }
-                
-                try context.save()
-                self.logger.info("✅ Successfully migrated \(pouchesWithoutUUIDs.count) PouchLog entries with new UUIDs")
-                
-            } catch {
-                self.logger.error("❌ UUID migration failed: \(error.localizedDescription, privacy: .public)")
+
+        let context = PersistenceController.shared.container.viewContext
+        let fetchRequest = NSFetchRequest<PouchLog>(entityName: "PouchLog")
+        fetchRequest.predicate = NSPredicate(format: "pouchId == nil")
+
+        do {
+            let pouchesWithoutUUIDs = try context.fetch(fetchRequest)
+
+            if pouchesWithoutUUIDs.isEmpty {
+                logger.info("✅ All PouchLog entries already have UUIDs")
+                return
             }
+
+            logger.info("🔧 Found \(pouchesWithoutUUIDs.count) PouchLog entries without UUIDs - migrating")
+
+            for pouch in pouchesWithoutUUIDs {
+                pouch.pouchId = UUID()
+            }
+
+            try context.save()
+            logger.info("✅ Successfully migrated \(pouchesWithoutUUIDs.count) PouchLog entries with new UUIDs")
+        } catch {
+            logger.error("❌ UUID migration failed: \(error.localizedDescription, privacy: .public)")
         }
     }
     
@@ -651,39 +634,36 @@ class CloudKitSyncManager: ObservableObject {
         // 4. Data Counts and Sample Data
         diagnostics.append("📊 DATA ANALYSIS:")
         let context = coreDataContainer.viewContext
-        await context.perform {
-            do {
-                // PouchLog analysis
-                let pouchRequest: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
-                let allPouches = try context.fetch(pouchRequest)
-                diagnostics.append("Total PouchLogs: \(allPouches.count)")
-                
-                let activePouches = allPouches.filter { $0.removalTime == nil }
-                diagnostics.append("Active PouchLogs: \(activePouches.count)")
-                
-                if !allPouches.isEmpty {
-                    let latest = allPouches.max(by: { ($0.insertionTime ?? Date.distantPast) < ($1.insertionTime ?? Date.distantPast) })
-                    if let latest = latest {
-                        diagnostics.append("Latest PouchLog:")
-                        diagnostics.append("  UUID: \(latest.pouchId?.uuidString ?? "Missing UUID!")")
-                        diagnostics.append("  Amount: \(latest.nicotineAmount)mg")
-                        diagnostics.append("  Inserted: \(latest.insertionTime?.formatted(.dateTime) ?? "Unknown")")
-                        diagnostics.append("  Removed: \(latest.removalTime?.formatted(.dateTime) ?? "Still active")")
-                    }
+        do {
+            // PouchLog analysis
+            let pouchRequest = NSFetchRequest<PouchLog>(entityName: "PouchLog")
+            let allPouches = try context.fetch(pouchRequest)
+            diagnostics.append("Total PouchLogs: \(allPouches.count)")
+
+            let activePouches = allPouches.filter { $0.removalTime == nil }
+            diagnostics.append("Active PouchLogs: \(activePouches.count)")
+
+            if !allPouches.isEmpty {
+                let latest = allPouches.max(by: { ($0.insertionTime ?? Date.distantPast) < ($1.insertionTime ?? Date.distantPast) })
+                if let latest = latest {
+                    diagnostics.append("Latest PouchLog:")
+                    diagnostics.append("  UUID: \(latest.pouchId?.uuidString ?? "Missing UUID!")")
+                    diagnostics.append("  Amount: \(latest.nicotineAmount)mg")
+                    diagnostics.append("  Inserted: \(latest.insertionTime?.formatted(.dateTime) ?? "Unknown")")
+                    diagnostics.append("  Removed: \(latest.removalTime?.formatted(.dateTime) ?? "Still active")")
                 }
-                
-                // CustomButton analysis
-                let buttonRequest: NSFetchRequest<CustomButton> = CustomButton.fetchRequest()
-                let buttons = try context.fetch(buttonRequest)
-                diagnostics.append("CustomButtons: \(buttons.count)")
-                if !buttons.isEmpty {
-                    let amounts = buttons.map { "\($0.nicotineAmount)mg" }.joined(separator: ", ")
-                    diagnostics.append("Button amounts: [\(amounts)]")
-                }
-                
-            } catch {
-                diagnostics.append("❌ Data analysis error: \(error.localizedDescription)")
             }
+
+            // CustomButton analysis
+            let buttonRequest = NSFetchRequest<CustomButton>(entityName: "CustomButton")
+            let buttons = try context.fetch(buttonRequest)
+            diagnostics.append("CustomButtons: \(buttons.count)")
+            if !buttons.isEmpty {
+                let amounts = buttons.map { "\($0.nicotineAmount)mg" }.joined(separator: ", ")
+                diagnostics.append("Button amounts: [\(amounts)]")
+            }
+        } catch {
+            diagnostics.append("❌ Data analysis error: \(error.localizedDescription)")
         }
         diagnostics.append("")
         
@@ -703,30 +683,23 @@ class CloudKitSyncManager: ObservableObject {
         // 6. Test a save operation
         diagnostics.append("🧪 TESTING SAVE OPERATION:")
         let testContainer = PersistenceController.shared.container
-        
+
         if testContainer.persistentStoreCoordinator.persistentStores.isEmpty {
             diagnostics.append("❌ Core Data store is not loaded (device may be locked). Skipping save test.")
         } else {
-            let testContext = testContainer.newBackgroundContext()
-            
-            await testContext.perform {
-                do {
-                    // Create a test entity
-                    let testButton = CustomButton(context: testContext)
-                    testButton.nicotineAmount = 999.99 // Unique test value
-                    
-                    try testContext.save()
-                    diagnostics.append("✅ Test save successful")
-                    
-                    // Clean up test data
-                    testContext.delete(testButton)
-                    try testContext.save()
-                    diagnostics.append("✅ Test cleanup successful")
-                    
-                } catch {
-                    diagnostics.append("❌ Test save failed: \(error.localizedDescription)")
-                    diagnostics.append("❌ Full error: \(error)")
-                }
+            let testContext = testContainer.viewContext
+            do {
+                let testButton = CustomButton(context: testContext)
+                testButton.nicotineAmount = 999.99 // Unique test value
+                try testContext.save()
+                diagnostics.append("✅ Test save successful")
+
+                testContext.delete(testButton)
+                try testContext.save()
+                diagnostics.append("✅ Test cleanup successful")
+            } catch {
+                diagnostics.append("❌ Test save failed: \(error.localizedDescription)")
+                diagnostics.append("❌ Full error: \(error)")
             }
         }
         
@@ -740,46 +713,39 @@ class CloudKitSyncManager: ObservableObject {
     
     func testDataSync() async {
         logger.info("🧪 Starting CloudKit sync test")
-        
-        // Create a test entry to trigger sync
+
         let container = PersistenceController.shared.container
         guard !container.persistentStoreCoordinator.persistentStores.isEmpty else {
             logger.error("❌ Core Data store is not loaded (device may be locked). Aborting test sync.")
             return
         }
-        
-        let context = container.newBackgroundContext()
-        
-        await context.perform {
-            // Create a test custom button
-            let testButton = CustomButton(context: context)
-            testButton.nicotineAmount = 999.0 // Unique test value
-            
-            do {
-                try context.save()
-                self.logger.info("✅ Test data created and saved")
-            } catch {
-                self.logger.error("❌ Test data save failed: \(error.localizedDescription, privacy: .public)")
-            }
+
+        let context = container.viewContext
+
+        // Create a test custom button
+        let testButton = CustomButton(context: context)
+        testButton.nicotineAmount = 999.0 // Unique test value
+        do {
+            try context.save()
+            logger.info("✅ Test data created and saved")
+        } catch {
+            logger.error("❌ Test data save failed: \(error.localizedDescription, privacy: .public)")
         }
-        
+
         // Wait a moment then delete it
         try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
-        
-        await context.perform {
-            let fetchRequest: NSFetchRequest<CustomButton> = CustomButton.fetchRequest()
-            fetchRequest.predicate = NSPredicate(format: "nicotineAmount == %f", 999.0)
-            
-            do {
-                let testButtons = try context.fetch(fetchRequest)
-                for button in testButtons {
-                    context.delete(button)
-                }
-                try context.save()
-                self.logger.info("✅ Test data cleaned up")
-            } catch {
-                self.logger.error("❌ Test data cleanup failed: \(error.localizedDescription, privacy: .public)")
+
+        let fetchRequest = NSFetchRequest<CustomButton>(entityName: "CustomButton")
+        fetchRequest.predicate = NSPredicate(format: "nicotineAmount == %f", 999.0)
+        do {
+            let testButtons = try context.fetch(fetchRequest)
+            for button in testButtons {
+                context.delete(button)
             }
+            try context.save()
+            logger.info("✅ Test data cleaned up")
+        } catch {
+            logger.error("❌ Test data cleanup failed: \(error.localizedDescription, privacy: .public)")
         }
     }
     

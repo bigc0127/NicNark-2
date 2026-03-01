@@ -21,20 +21,6 @@
                ReferencedContainer = "container:nicnark-2.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "YES"
-            buildForRunning = "YES"
-            buildForProfiling = "YES"
-            buildForArchiving = "YES"
-            buildForAnalyzing = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "C8E7BAB72F50B2CD00182F5E"
-               BuildableName = "Nicnark-2 Watch App.app"
-               BlueprintName = "Nicnark-2 Watch App"
-               ReferencedContainer = "container:nicnark-2.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction

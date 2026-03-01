@@ -132,9 +132,8 @@ struct ContentView: View {
             // Check if we need to show the first-run disclaimer
             if !UserDefaults.standard.hasShownFirstRunDisclaimer {
                 // Delay slightly to ensure UI is ready
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    showingFirstRunDisclaimer = true
-                }
+                try? await Task.sleep(for: .seconds(0.5))
+                showingFirstRunDisclaimer = true
             }
             
             // Configure TipKit for in-app tips and tutorials

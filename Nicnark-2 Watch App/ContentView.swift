@@ -12,7 +12,7 @@ import Charts
 
 // MARK: - Models
 
-struct WatchCanSummary: Identifiable, Hashable {
+struct WatchCanSummary: Identifiable, Hashable, Sendable {
     let id: String
     let brand: String
     let flavor: String
@@ -33,7 +33,7 @@ struct WatchCanSummary: Identifiable, Hashable {
     }
 }
 
-struct WatchActivePouchSummary: Identifiable, Hashable {
+struct WatchActivePouchSummary: Identifiable, Hashable, Sendable {
     let id: String
     let mg: Double
     let brand: String
@@ -55,7 +55,7 @@ struct WatchActivePouchSummary: Identifiable, Hashable {
     }
 }
 
-struct WatchNicotinePoint: Identifiable, Hashable {
+struct WatchNicotinePoint: Identifiable, Hashable, Sendable {
     let time: Date
     let level: Double
 
@@ -273,17 +273,20 @@ final class WatchDashboardViewModel: NSObject, ObservableObject {
 
 extension WatchDashboardViewModel: WCSessionDelegate {
     nonisolated func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
+        let reachable = session.isReachable
+        let errMsg = error?.localizedDescription
         Task { @MainActor in
-            updateReachability(from: session)
-            if let error {
-                errorMessage = error.localizedDescription
+            isReachable = reachable
+            if let errMsg {
+                errorMessage = errMsg
             }
         }
     }
 
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
+        let reachable = session.isReachable
         Task { @MainActor in
-            updateReachability(from: session)
+            isReachable = reachable
         }
     }
 }

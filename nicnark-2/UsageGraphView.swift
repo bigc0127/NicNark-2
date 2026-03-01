@@ -18,6 +18,7 @@
 //
 
 import SwiftUI
+import Combine
 import CoreData
 
 // MARK: - Data Models
@@ -100,7 +101,7 @@ final class UsageGraphViewModel: ObservableObject {
     @Published private(set) var activeElapsedPhrase: String = "00:00"  // MM:SS format for active timer
 
     // MARK: - Private Properties
-    private var timer: Timer?                          // Updates time displays every 2 minutes
+    private nonisolated(unsafe) var timer: Timer?      // Updates time displays every 2 minutes
     private let calendar = Calendar.current            // For date calculations
 
     // Provides access to Core Data context for timer updates without tight coupling

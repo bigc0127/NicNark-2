@@ -39,16 +39,24 @@ extension WatchConnectivityBridge: WCSessionDelegate {
         didReceiveMessage message: [String: Any],
         replyHandler: @escaping ([String: Any]) -> Void
     ) {
+        // WC dictionaries contain only plist-safe types; wrapping for safe actor-boundary crossing.
+        struct Transfer: @unchecked Sendable {
+            let message: [String: Any]
+            let handler: ([String: Any]) -> Void
+        }
+        let t = Transfer(message: message, handler: replyHandler)
         Task { @MainActor in
-            let response = await handleRequest(message)
-            replyHandler(response)
+            let response = await handleRequest(t.message)
+            t.handler(response)
         }
     }
 
     nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any]) {
         // For queued actions when the iPhone isn't reachable. (No reply possible.)
+        struct Transfer: @unchecked Sendable { let userInfo: [String: Any] }
+        let t = Transfer(userInfo: userInfo)
         Task { @MainActor in
-            _ = await handleRequest(userInfo, expectsReply: false)
+            _ = await handleRequest(t.userInfo, expectsReply: false)
         }
     }
 

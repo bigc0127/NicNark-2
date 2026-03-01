@@ -30,7 +30,7 @@ import os.log            // System logging
  */
 enum NotificationManager {
     /// Logger for debugging notification-related issues
-    private static let logger = Logger(subsystem: "com.nicnark.nicnark-2", category: "NotificationManager")
+    private nonisolated static let logger = Logger(subsystem: "com.nicnark.nicnark-2", category: "NotificationManager")
     /// Widget identifier for targeting widget updates
     private static let widgetKind = "AbsorptionTimerWidget"
 

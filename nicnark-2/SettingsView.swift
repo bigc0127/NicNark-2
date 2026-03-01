@@ -980,29 +980,23 @@ struct SettingsView: View {
     }
     
     private func deleteAllCoreDataEntities() async {
-        await withCheckedContinuation { continuation in
-            viewContext.perform {
-                let entityNames = ["PouchLog", "CustomButton"]
-                
-                for entityName in entityNames {
-                    let fetchRequest = NSFetchRequest<NSFetchRequestResult>(entityName: entityName)
-                    let deleteRequest = NSBatchDeleteRequest(fetchRequest: fetchRequest)
-                    
-                    do {
-                        try self.viewContext.execute(deleteRequest)
-                    } catch {
-                        self.logger.error("Failed to delete \(entityName): \(error.localizedDescription)")
-                    }
-                }
-                
-                do {
-                    try self.viewContext.save()
-                } catch {
-                    self.logger.error("Failed to save context after deletion: \(error.localizedDescription)")
-                }
-                
-                continuation.resume()
+        let entityNames = ["PouchLog", "CustomButton"]
+
+        for entityName in entityNames {
+            let fetchRequest = NSFetchRequest<NSFetchRequestResult>(entityName: entityName)
+            let deleteRequest = NSBatchDeleteRequest(fetchRequest: fetchRequest)
+
+            do {
+                try viewContext.execute(deleteRequest)
+            } catch {
+                logger.error("Failed to delete \(entityName): \(error.localizedDescription)")
             }
+        }
+
+        do {
+            try viewContext.save()
+        } catch {
+            logger.error("Failed to save context after deletion: \(error.localizedDescription)")
         }
     }
 }

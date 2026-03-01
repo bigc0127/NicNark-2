@@ -47,6 +47,8 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         default:
             // Handle legacy pouch removal action
             if response.actionIdentifier == "REMOVE_POUCH_ACTION" {
+                struct C: @unchecked Sendable { let c: () -> Void }
+                let t = C(c: completion)
                 Task { @MainActor in
                     NotificationManager.handlePouchRemovalAction(pouchId: id)
 
@@ -56,7 +58,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
                         // Use a transient manager instance just to flip the published property.
                         LiveActivityManager().hasActiveNotification = (count > 0)
                     }
-                    completion()
+                    t.c()
                 }
             } else {
                 completion()
@@ -66,77 +68,66 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     
     // MARK: - Category Handlers
     
-    private func handleCanInventoryNotification(response: UNNotificationResponse, completion: @escaping () -> Void) {
+    private nonisolated func handleCanInventoryNotification(response: UNNotificationResponse, completion: @escaping () -> Void) {
         if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
-            // User tapped notification - open app to can management
+            struct C: @unchecked Sendable { let c: () -> Void }
+            let t = C(c: completion)
             Task { @MainActor in
-                // Post notification to navigate to can management
-                NotificationCenter.default.post(
-                    name: Notification.Name("NavigateToCanManagement"),
-                    object: nil
-                )
-                completion()
+                NotificationCenter.default.post(name: Notification.Name("NavigateToCanManagement"), object: nil)
+                t.c()
             }
         } else {
             completion()
         }
     }
-    
-    private func handleUsageReminderNotification(response: UNNotificationResponse, completion: @escaping () -> Void) {
+
+    private nonisolated func handleUsageReminderNotification(response: UNNotificationResponse, completion: @escaping () -> Void) {
         if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
-            // User tapped notification - could open quick log dialog
+            struct C: @unchecked Sendable { let c: () -> Void }
+            let t = C(c: completion)
             Task { @MainActor in
-                NotificationCenter.default.post(
-                    name: Notification.Name("ShowQuickLog"),
-                    object: nil
-                )
-                completion()
+                NotificationCenter.default.post(name: Notification.Name("ShowQuickLog"), object: nil)
+                t.c()
             }
         } else {
             completion()
         }
     }
-    
-    private func handleNicotineLevelNotification(response: UNNotificationResponse, completion: @escaping () -> Void) {
+
+    private nonisolated func handleNicotineLevelNotification(response: UNNotificationResponse, completion: @escaping () -> Void) {
         if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
-            // User tapped notification - show nicotine levels view
+            struct C: @unchecked Sendable { let c: () -> Void }
+            let t = C(c: completion)
             Task { @MainActor in
-                NotificationCenter.default.post(
-                    name: Notification.Name("NavigateToNicotineLevels"),
-                    object: nil
-                )
-                completion()
+                NotificationCenter.default.post(name: Notification.Name("NavigateToNicotineLevels"), object: nil)
+                t.c()
             }
         } else {
             completion()
         }
     }
-    
-    private func handleDailySummaryNotification(response: UNNotificationResponse, completion: @escaping () -> Void) {
+
+    private nonisolated func handleDailySummaryNotification(response: UNNotificationResponse, completion: @escaping () -> Void) {
         if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
-            // User tapped notification - show usage stats
+            let userInfo = response.notification.request.content.userInfo
+            struct Transfer: @unchecked Sendable { let userInfo: [AnyHashable: Any]; let c: () -> Void }
+            let t = Transfer(userInfo: userInfo, c: completion)
             Task { @MainActor in
-                NotificationCenter.default.post(
-                    name: Notification.Name("NavigateToUsageStats"),
-                    object: nil,
-                    userInfo: response.notification.request.content.userInfo
-                )
-                completion()
+                NotificationCenter.default.post(name: Notification.Name("NavigateToUsageStats"), object: nil, userInfo: t.userInfo)
+                t.c()
             }
         } else {
             completion()
         }
     }
-    
-    private func handleUsageInsightsNotification(response: UNNotificationResponse, completion: @escaping () -> Void) {
+
+    private nonisolated func handleUsageInsightsNotification(response: UNNotificationResponse, completion: @escaping () -> Void) {
         if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
-            // User tapped notification - show usage graph
+            struct C: @unchecked Sendable { let c: () -> Void }
+            let t = C(c: completion)
             Task { @MainActor in
-                NotificationCenter.default.post(
-                    name: Notification.Name("NavigateToUsageGraph"),
-                    object: nil
-                )
-                completion()
+                NotificationCenter.default.post(name: Notification.Name("NavigateToUsageGraph"), object: nil)
+                t.c()
             }
         } else {
             completion()

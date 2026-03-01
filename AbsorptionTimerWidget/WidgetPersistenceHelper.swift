@@ -156,7 +156,7 @@ public final class WidgetPersistenceHelper {
         description.setOption(true as NSNumber, forKey: NSReadOnlyPersistentStoreOption)
         
         // Set merge policy to handle CloudKit conflicts
-        container.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+        container.viewContext.mergePolicy = NSMergePolicy.mergeByPropertyObjectTrump
         container.viewContext.automaticallyMergesChangesFromParent = true
         
         container.persistentStoreDescriptions = [description]

@@ -24,7 +24,7 @@ struct PersistenceController {
     /// Shared singleton instance used by the running app.
     static let shared = PersistenceController()
     /// Logger for CloudKit-related messages.
-    private static let logger = Logger(subsystem: "com.nicnark.nicnark-2", category: "CloudKit")
+    nonisolated static let logger = Logger(subsystem: "com.nicnark.nicnark-2", category: "CloudKit")
 
 @MainActor
     /// An in-memory PersistenceController for SwiftUI previews and tests.
@@ -137,7 +137,7 @@ print("📍 Store URL: \(storeDescription.url?.absoluteString ?? "Unknown")")
 
         // Context configuration
         container.viewContext.automaticallyMergesChangesFromParent = true
-        container.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+        container.viewContext.mergePolicy = NSMergePolicy.mergeByPropertyObjectTrump
 
         // Listen for remote changes (CloudKit merges)
         NotificationCenter.default.addObserver(

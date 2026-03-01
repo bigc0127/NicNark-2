@@ -366,7 +366,7 @@ struct CanCardView: View {
         
         // Create and start new timer
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-            tick = Date()
+            Task { @MainActor in tick = Date() }
         }
         
         // Add to run loop for proper execution

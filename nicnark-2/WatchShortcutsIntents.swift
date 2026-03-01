@@ -5,8 +5,8 @@ import CoreData
 // MARK: - Entities
 
 struct ActivePouchEntity: AppEntity, Identifiable, Hashable {
-    static var typeDisplayRepresentation: TypeDisplayRepresentation = "Active Pouch"
-    static var defaultQuery: ActivePouchQuery = ActivePouchQuery()
+    static let typeDisplayRepresentation: TypeDisplayRepresentation = "Active Pouch"
+    static let defaultQuery: ActivePouchQuery = ActivePouchQuery()
 
     let id: String
     let mg: Double
@@ -38,33 +38,35 @@ struct ActivePouchQuery: EntityQuery {
     }
 
     private func allActive() async throws -> [ActivePouchEntity] {
-        let ctx = PersistenceController.shared.container.viewContext
+        return try await MainActor.run {
+            let ctx = PersistenceController.shared.container.viewContext
 
-        let request: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
-        request.predicate = NSPredicate(format: "removalTime == nil")
-        request.sortDescriptors = [NSSortDescriptor(keyPath: \PouchLog.insertionTime, ascending: false)]
+            let request: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
+            request.predicate = NSPredicate(format: "removalTime == nil")
+            request.sortDescriptors = [NSSortDescriptor(keyPath: \PouchLog.insertionTime, ascending: false)]
 
-        let now = Date.now
-        let active = try ctx.fetch(request)
+            let now = Date.now
+            let active = try ctx.fetch(request)
 
-        return active.compactMap { pouch in
-            guard let insertion = pouch.insertionTime else { return nil }
-            let id = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
-            let duration = pouch.timerDuration > 0 ? TimeInterval(pouch.timerDuration) * 60 : FULL_RELEASE_TIME
-            let remaining = max(0, insertion.addingTimeInterval(duration).timeIntervalSince(now))
+            return active.compactMap { pouch in
+                guard let insertion = pouch.insertionTime else { return nil }
+                let id = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
+                let duration = pouch.timerDuration > 0 ? TimeInterval(pouch.timerDuration) * 60 : FULL_RELEASE_TIME
+                let remaining = max(0, insertion.addingTimeInterval(duration).timeIntervalSince(now))
 
-            return ActivePouchEntity(
-                id: id,
-                mg: pouch.nicotineAmount,
-                brand: pouch.can?.brand ?? "",
-                flavor: pouch.can?.flavor ?? "",
-                remainingSeconds: remaining
-            )
+                return ActivePouchEntity(
+                    id: id,
+                    mg: pouch.nicotineAmount,
+                    brand: pouch.can?.brand ?? "",
+                    flavor: pouch.can?.flavor ?? "",
+                    remainingSeconds: remaining
+                )
+            }
         }
     }
 }
 
-private func formatRemaining(_ seconds: Double) -> String {
+private nonisolated func formatRemaining(_ seconds: Double) -> String {
     let s = max(0, Int(seconds.rounded()))
     let m = s / 60
     let r = s % 60
@@ -74,9 +76,10 @@ private func formatRemaining(_ seconds: Double) -> String {
 // MARK: - Intents
 
 struct GetCurrentNicotineLevelIntent: AppIntent {
-    static var title: LocalizedStringResource = "Get Nicotine Level"
-    static var description = IntentDescription("Gets your current nicotine level.")
+    static let title: LocalizedStringResource = "Get Nicotine Level"
+    static let description = IntentDescription("Gets your current nicotine level.")
 
+    @MainActor
     func perform() async throws -> some IntentResult {
         let ctx = PersistenceController.shared.container.viewContext
         let level = await NicotineCalculator().calculateTotalNicotineLevel(context: ctx)
@@ -85,9 +88,10 @@ struct GetCurrentNicotineLevelIntent: AppIntent {
 }
 
 struct RemoveAllActivePouchesIntent: AppIntent {
-    static var title: LocalizedStringResource = "Remove All Active Pouches"
-    static var description = IntentDescription("Removes all active pouches.")
+    static let title: LocalizedStringResource = "Remove All Active Pouches"
+    static let description = IntentDescription("Removes all active pouches.")
 
+    @MainActor
     func perform() async throws -> some IntentResult {
         let ctx = PersistenceController.shared.container.viewContext
         let removed = await PouchRemovalService.removeAllActivePouches(in: ctx)
@@ -96,12 +100,13 @@ struct RemoveAllActivePouchesIntent: AppIntent {
 }
 
 struct RemoveSpecificActivePouchIntent: AppIntent {
-    static var title: LocalizedStringResource = "Remove a Specific Pouch"
-    static var description = IntentDescription("Choose an active pouch to remove.")
+    static let title: LocalizedStringResource = "Remove a Specific Pouch"
+    static let description = IntentDescription("Choose an active pouch to remove.")
 
     @Parameter(title: "Pouch")
     var pouch: ActivePouchEntity
 
+    @MainActor
     func perform() async throws -> some IntentResult {
         let ctx = PersistenceController.shared.container.viewContext
         let ok = await PouchRemovalService.removePouch(withId: pouch.id, in: ctx)

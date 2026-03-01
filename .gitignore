@@ -134,3 +134,4 @@ AuthKey_*.p8
 
 # App-specific ignores
 # Add any app-specific files you want to ignore here
+Errors/

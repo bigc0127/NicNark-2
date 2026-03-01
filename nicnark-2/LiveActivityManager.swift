@@ -19,7 +19,8 @@
 //
 
 @preconcurrency import BackgroundTasks  // Background processing for activity updates
-import ActivityKit      // iOS 16.1+ Live Activities framework
+@preconcurrency import ActivityKit      // iOS 16.1+ Live Activities framework
+import Combine
 import Foundation
 import SwiftUI
 import CoreData        // Database access for pouch verification
@@ -408,7 +409,7 @@ class LiveActivityManager: ObservableObject {
             state: newState,
             staleDate: Calendar.current.date(byAdding: .minute, value: 5, to: now) // Longer stale date for better reliability
         )
-        
+
         await activity.update(content)
         
         // Update widget snapshot and reload timelines (throttled by system)
@@ -524,7 +525,8 @@ class LiveActivityManager: ObservableObject {
 // MARK: - BackgroundMaintainer: BGTaskScheduler-based local updates
 
 @available(iOS 16.1, *)
-actor BackgroundMaintainer {
+@MainActor
+class BackgroundMaintainer {
     static let shared = BackgroundMaintainer()
     private let refreshId = "com.nicnark.nicnark-2.bg.refresh"
     private let processId = "com.nicnark.nicnark-2.bg.process"
@@ -541,60 +543,48 @@ actor BackgroundMaintainer {
     
     func scheduleRegular() async {
         await registerIfNeeded()
-        
-        await MainActor.run {
-            // Cancel existing tasks to prevent conflicts
-            BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: refreshId)
-            BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: processId)
-            
-            // More frequent refresh for Live Activity updates - every 3 minutes
-            let refresh = BGAppRefreshTaskRequest(identifier: refreshId)
-            refresh.earliestBeginDate = Date(timeIntervalSinceNow: 3 * 60) // 3 minutes - more frequent for better reliability
-            do {
-                try BGTaskScheduler.shared.submit(refresh)
-                log.info("Scheduled regular refresh in 3 minutes")
-            } catch {
-                log.error("Submit refresh failed: \(error.localizedDescription, privacy: .public)")
-            }
+        // Cancel existing tasks to prevent conflicts
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: refreshId)
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: processId)
+        // More frequent refresh for Live Activity updates - every 3 minutes
+        let refresh = BGAppRefreshTaskRequest(identifier: refreshId)
+        refresh.earliestBeginDate = Date(timeIntervalSinceNow: 3 * 60)
+        do {
+            try BGTaskScheduler.shared.submit(refresh)
+            log.info("Scheduled regular refresh in 3 minutes")
+        } catch {
+            log.error("Submit refresh failed: \(error.localizedDescription, privacy: .public)")
         }
     }
-    
+
     func scheduleSoon() async {
         await registerIfNeeded()
-        
-        await MainActor.run {
-            // Cancel existing tasks to prevent conflicts
-            BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: refreshId)
-            BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: processId)
-            
-            let refresh = BGAppRefreshTaskRequest(identifier: refreshId)
-            refresh.earliestBeginDate = Date(timeIntervalSinceNow: 30) // 30 seconds - faster initial response
-            do {
-                try BGTaskScheduler.shared.submit(refresh)
-                log.info("Scheduled immediate refresh in 30 seconds")
-            } catch {
-                log.error("Submit 'soon' refresh failed: \(error.localizedDescription, privacy: .public)")
-            }
+        // Cancel existing tasks to prevent conflicts
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: refreshId)
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: processId)
+        let refresh = BGAppRefreshTaskRequest(identifier: refreshId)
+        refresh.earliestBeginDate = Date(timeIntervalSinceNow: 30) // 30 seconds - faster initial response
+        do {
+            try BGTaskScheduler.shared.submit(refresh)
+            log.info("Scheduled immediate refresh in 30 seconds")
+        } catch {
+            log.error("Submit 'soon' refresh failed: \(error.localizedDescription, privacy: .public)")
         }
     }
-    
+
     // New function for very frequent updates when Live Activities are active
     func scheduleFrequent() async {
         await registerIfNeeded()
-        
-        await MainActor.run {
-            // Cancel existing tasks to prevent conflicts
-            BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: refreshId)
-            BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: processId)
-            
-            let refresh = BGAppRefreshTaskRequest(identifier: refreshId)
-            refresh.earliestBeginDate = Date(timeIntervalSinceNow: 90) // 1.5 minutes for active Live Activities - more frequent
-            do {
-                try BGTaskScheduler.shared.submit(refresh)
-                log.info("Scheduled frequent refresh in 1.5 minutes for Live Activity")
-            } catch {
-                log.error("Submit frequent refresh failed: \(error.localizedDescription, privacy: .public)")
-            }
+        // Cancel existing tasks to prevent conflicts
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: refreshId)
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: processId)
+        let refresh = BGAppRefreshTaskRequest(identifier: refreshId)
+        refresh.earliestBeginDate = Date(timeIntervalSinceNow: 90) // 1.5 minutes for active Live Activities
+        do {
+            try BGTaskScheduler.shared.submit(refresh)
+            log.info("Scheduled frequent refresh in 1.5 minutes for Live Activity")
+        } catch {
+            log.error("Submit frequent refresh failed: \(error.localizedDescription, privacy: .public)")
         }
     }
     
@@ -687,7 +677,7 @@ actor BackgroundMaintainer {
             }
             
             // Get actual pouch data to ensure we have the latest state
-            guard let actualPouchData = await getActualPouchData(for: t.pouchId) else {
+            guard let actualPouchData = getActualPouchData(for: t.pouchId) else {
                 log.warning("Could not fetch pouch data for: \(t.pouchId, privacy: .public)")
                 continue
             }
@@ -730,54 +720,25 @@ actor BackgroundMaintainer {
         log.info("✅ Background update complete at \(DateFormatter.localizedString(from: now, dateStyle: .none, timeStyle: .medium), privacy: .public)")
     }
     
-    // Synchronous helper for immediate checks (used in startLiveActivity)
-    func getActualPouchDataSync(for pouchId: String) -> (startTime: Date, nicotineAmount: Double, isActive: Bool, duration: TimeInterval)? {
+    private func getActualPouchData(for pouchId: String) -> (startTime: Date, nicotineAmount: Double, isActive: Bool, duration: TimeInterval)? {
         let context = PersistenceController.shared.container.viewContext
-        
+
         if let uuid = UUID(uuidString: pouchId) {
-            let fetch: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
+            let fetch = NSFetchRequest<PouchLog>(entityName: "PouchLog")
             fetch.predicate = NSPredicate(format: "pouchId == %@", uuid as CVarArg)
             fetch.fetchLimit = 1
             do {
                 if let pouchLog = try context.fetch(fetch).first, let startTime = pouchLog.insertionTime {
                     let isActive = pouchLog.removalTime == nil
-                    // Get the pouch's specific duration (stored in minutes, convert to seconds)
                     let duration = TimeInterval(pouchLog.timerDuration * 60)
                     return (startTime: startTime, nicotineAmount: pouchLog.nicotineAmount, isActive: isActive, duration: duration)
+                } else {
+                    log.warning("UUID lookup failed or missing insertionTime for pouchId: \(uuid.uuidString, privacy: .public)")
                 }
             } catch {
-                log.warning("Sync fetch error: \(error.localizedDescription, privacy: .public)")
+                log.warning("UUID fetch error: \(error.localizedDescription, privacy: .public)")
             }
         }
         return nil
     }
-    
-    private func getActualPouchData(for pouchId: String) async -> (startTime: Date, nicotineAmount: Double, isActive: Bool, duration: TimeInterval)? {
-        return await MainActor.run {
-            let context = PersistenceController.shared.container.viewContext
-            
-            // 1) Prefer stable UUID-based lookup to avoid Core Data URI pitfalls
-            if let uuid = UUID(uuidString: pouchId) {
-                let fetch: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
-                fetch.predicate = NSPredicate(format: "pouchId == %@", uuid as CVarArg)
-                fetch.fetchLimit = 1
-                do {
-                    if let pouchLog = try context.fetch(fetch).first, let startTime = pouchLog.insertionTime {
-                        let isActive = pouchLog.removalTime == nil // Only active if not removed
-                        // Get the pouch's specific duration (stored in minutes, convert to seconds)
-                        let duration = TimeInterval(pouchLog.timerDuration * 60)
-                        return (startTime: startTime, nicotineAmount: pouchLog.nicotineAmount, isActive: isActive, duration: duration)
-                    } else {
-                        log.warning("UUID lookup failed or missing insertionTime for pouchId: \(uuid.uuidString, privacy: .public)")
-                    }
-                } catch {
-                    log.warning("UUID fetch error: \(error.localizedDescription, privacy: .public)")
-                }
-            }
-            
-            // 2) Legacy fallback: skip resolving Core Data URI to avoid iOS 18+ instability
-            // Returning nil simply uses the currently tracked activity times.
-        return nil
-    }
-}
 }

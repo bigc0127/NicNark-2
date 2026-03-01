@@ -595,9 +595,10 @@ private func levelColor(for level: Double) -> Color {
 // MARK: - Widget Refresh Intent
 @available(iOS 17.0, *)
 struct RefreshWidgetIntent: AppIntent {
-    static var title: LocalizedStringResource = "Refresh Widget"
-    static var description = IntentDescription("Force refresh the widget data")
-    
+    static let title: LocalizedStringResource = "Refresh Widget"
+    static let description = IntentDescription("Force refresh the widget data")
+
+    @MainActor
     func perform() async throws -> some IntentResult {
         let helper = WidgetPersistenceHelper()
         
