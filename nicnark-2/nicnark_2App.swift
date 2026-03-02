@@ -34,7 +34,7 @@ struct nicnark_2App: App {
                 forTaskWithIdentifier: "com.nicnark.nicnark-2.bg.refresh",
                 using: nil
             ) { task in
-                Task { @Sendable in
+                Task { @MainActor in
                     if #available(iOS 16.1, *),
                        let refreshTask = task as? BGAppRefreshTask {
                         await BackgroundMaintainer.shared.handleRefresh(refreshTask)
@@ -48,7 +48,7 @@ struct nicnark_2App: App {
                 forTaskWithIdentifier: "com.nicnark.nicnark-2.bg.process",
                 using: nil
             ) { task in
-                Task { @Sendable in
+                Task { @MainActor in
                     if #available(iOS 16.1, *),
                        let processTask = task as? BGProcessingTask {
                         await BackgroundMaintainer.shared.handleProcess(processTask)

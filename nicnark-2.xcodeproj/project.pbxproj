@@ -10,6 +10,7 @@
 		C80893512E66271400E7423E /* AbsorptionTimerWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C8D96E402E40739E002AA8C9 /* AbsorptionTimerWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C84224212E4FCBE5003E73E3 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C8D96E442E40739E002AA8C9 /* SwiftUI.framework */; };
 		C84224242E4FCBE7003E73E3 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C8D96E422E40739E002AA8C9 /* WidgetKit.framework */; };
+		C8EDA63D2F54F01900E308C5 /* Nicnark-2 Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = C8E7BAB82F50B2CD00182F5E /* Nicnark-2 Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -19,6 +20,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = C8D96E3F2E40739E002AA8C9;
 			remoteInfo = AbsorptionTimerWidgetExtension;
+		};
+		C8EDA63E2F54F01900E308C5 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C8E730542E405AC700F0C29D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C8E7BAB72F50B2CD00182F5E;
+			remoteInfo = "Nicnark-2 Watch App";
 		};
 		C8FF00032F50BECD00182F5E /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -38,6 +46,15 @@
 				C80893512E66271400E7423E /* AbsorptionTimerWidgetExtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
+		};
+		C8EDA6402F54F01900E308C5 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolder = Product;
+			files = (
+				C8EDA63D2F54F01900E308C5 /* Nicnark-2 Watch App.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
 		};
 /* End PBXCopyFilesBuildPhase section */
 
@@ -191,12 +208,14 @@
 				C8E730592E405AC700F0C29D /* Frameworks */,
 				C8E7305A2E405AC700F0C29D /* Resources */,
 				C8D96E572E40739F002AA8C9 /* Embed Foundation Extensions */,
+				C8EDA6402F54F01900E308C5 /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				C8D96E552E40739F002AA8C9 /* PBXTargetDependency */,
 				C8FF00042F50BECD00182F5E /* PBXTargetDependency */,
+				C8EDA63F2F54F01900E308C5 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				C8E7305E2E405AC700F0C29D /* nicnark-2 */,
@@ -308,6 +327,11 @@
 			target = C8D96E3F2E40739E002AA8C9 /* AbsorptionTimerWidgetExtension */;
 			targetProxy = C8D96E542E40739F002AA8C9 /* PBXContainerItemProxy */;
 		};
+		C8EDA63F2F54F01900E308C5 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C8E7BAB72F50B2CD00182F5E /* Nicnark-2 Watch App */;
+			targetProxy = C8EDA63E2F54F01900E308C5 /* PBXContainerItemProxy */;
+		};
 		C8FF00042F50BECD00182F5E /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = C8E7BAB72F50B2CD00182F5E /* Nicnark-2 Watch App */;
@@ -321,10 +345,10 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = NO;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
 				ASSETCATALOG_FILTER_FOR_DEVICE_MODEL = "";
 				ASSETCATALOG_FILTER_FOR_DEVICE_OS_VERSION = "";
 				ASSETCATALOG_FILTER_FOR_THINNING_DEVICE_CONFIGURATION = "";
-				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
 				CODE_SIGN_ENTITLEMENTS = AbsorptionTimerWidgetExtension.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
@@ -598,8 +622,8 @@
 		C8E7BAC12F50B2CE00182F5E /* Debug configuration for PBXNativeTarget "Nicnark-2 Watch App" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = NO;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = NO;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_FILTER_FOR_DEVICE_MODEL = "";
 				ASSETCATALOG_FILTER_FOR_DEVICE_OS_VERSION = "";
@@ -634,8 +658,8 @@
 		C8E7BAC22F50B2CE00182F5E /* Release configuration for PBXNativeTarget "Nicnark-2 Watch App" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = NO;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = NO;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
