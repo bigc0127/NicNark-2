@@ -27,19 +27,21 @@ struct nicnark_2App: App {
     
     // MARK: - Background Task Registration
     // Register background task handlers synchronously to avoid crashes
-    private func registerBackgroundTasks() {
+    private nonisolated func registerBackgroundTasks() {
         #if os(iOS)
         if #available(iOS 13.0, *) {
             BGTaskScheduler.shared.register(
                 forTaskWithIdentifier: "com.nicnark.nicnark-2.bg.refresh",
                 using: nil
             ) { task in
+                struct Transfer: @unchecked Sendable { let task: BGTask }
+                let transfer = Transfer(task: task)
                 Task { @MainActor in
                     if #available(iOS 16.1, *),
-                       let refreshTask = task as? BGAppRefreshTask {
+                       let refreshTask = transfer.task as? BGAppRefreshTask {
                         await BackgroundMaintainer.shared.handleRefresh(refreshTask)
                     } else {
-                        task.setTaskCompleted(success: false)
+                        transfer.task.setTaskCompleted(success: false)
                     }
                 }
             }
@@ -48,12 +50,14 @@ struct nicnark_2App: App {
                 forTaskWithIdentifier: "com.nicnark.nicnark-2.bg.process",
                 using: nil
             ) { task in
+                struct Transfer: @unchecked Sendable { let task: BGTask }
+                let transfer = Transfer(task: task)
                 Task { @MainActor in
                     if #available(iOS 16.1, *),
-                       let processTask = task as? BGProcessingTask {
+                       let processTask = transfer.task as? BGProcessingTask {
                         await BackgroundMaintainer.shared.handleProcess(processTask)
                     } else {
-                        task.setTaskCompleted(success: false)
+                        transfer.task.setTaskCompleted(success: false)
                     }
                 }
             }
