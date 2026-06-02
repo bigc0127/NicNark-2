@@ -50,9 +50,6 @@
             ReferencedContainer = "container:nicnark-2.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
-      <StoreKitConfigurationFileReference
-         identifier = "../../nicnark-2/StoreKitConfiguration.storekit/Configuration.storekit/Configuration.storekit">
-      </StoreKitConfigurationFileReference>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"

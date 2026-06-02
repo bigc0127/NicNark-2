@@ -16,7 +16,7 @@ struct ContentView: View {
     
     // MARK: - State Properties
     // @StateObject creates and manages an observable object (like a view model)
-    @StateObject private var liveActivityManager = LiveActivityManager()  // Manages Live Activities
+    @StateObject private var liveActivityManager = LiveActivityManager.shared  // Manages Live Activities (shared singleton)
     @StateObject private var syncManager = CloudKitSyncManager.shared  // Manages CloudKit sync
     
     // @State creates local state that the view owns and can modify
@@ -99,30 +99,10 @@ struct ContentView: View {
             FirstRunDisclaimerView(isPresented: $showingFirstRunDisclaimer)
         }
         
-        // MARK: - URL Scheme Handling
-        // Handle custom URL schemes like "nicnark2://log?mg=6" (from shortcuts, web links, etc.)
-        .onOpenURL { url in
-            print("📱 Received URL: \(url)")  // Debug logging
-            
-            // DispatchQueue.main.async ensures UI updates happen on the main thread
-            // (iOS requires all UI updates to happen on the main thread)
-            DispatchQueue.main.async {
-                // LogPouchRouter parses the URL and logs the pouch if valid
-                let success = LogPouchRouter.handle(
-                    url: url,
-                    ctx: viewContext  // Pass database context for saving
-                )
-                
-                if success {
-                    print("📱 Successfully handled URL: \(url)")
-                    // Update all home screen widgets after logging
-                    WidgetCenter.shared.reloadAllTimelines()
-                } else {
-                    print("📱 Failed to handle URL: \(url)")
-                }
-            }
-        }
-        
+        // URL scheme handling (nicnark2://log?mg=6) is registered ONCE at the app
+        // level in nicnark_2App.body. It was previously also registered here, which
+        // double-logged every deep-linked pouch.
+
         // MARK: - App Initialization
         // .task runs when the view appears (similar to viewDidLoad in UIKit)
         .task {

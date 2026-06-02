@@ -44,29 +44,32 @@ enum NotificationManager {
      * 
      * Called from the main app delegate or app initialization.
      */
+    @MainActor private static var didConfigure = false
+
     static func configure() {
-        let center = UNUserNotificationCenter.current()
-        
-        // Set our custom delegate to handle notification interactions (taps, actions)
         Task { @MainActor in
+            // Idempotent: configure() is called from both app init and ContentView/app
+            // onAppear. Re-requesting authorization and re-scheduling on every onAppear is
+            // wasted work, so run the one-time setup only once.
+            guard !didConfigure else { return }
+            didConfigure = true
+
+            let center = UNUserNotificationCenter.current()
+
+            // Set our custom delegate to handle notification interactions (taps, actions)
             center.delegate = NotificationDelegate.shared
-        }
-        
-        // Request permission to show notifications with alerts, sounds, and badge counts
-        let authOptions: UNAuthorizationOptions = [.alert, .sound, .badge]
-        
-        center.requestAuthorization(options: authOptions) { granted, error in
-            if let error = error {
-                logger.error("Notification authorization error: \(error.localizedDescription)")
-            } else {
+
+            // Request permission to show notifications with alerts, sounds, and badge counts
+            let authOptions: UNAuthorizationOptions = [.alert, .sound, .badge]
+            do {
+                let granted = try await center.requestAuthorization(options: authOptions)
                 logger.info("Notification authorization granted: \(granted)")
-                
-                // If user granted permission, set up all the notifications based on current settings
+                // If user granted permission, set up all notifications based on current settings
                 if granted {
-                    Task { @MainActor in
-                        scheduleConfiguredNotifications()
-                    }
+                    scheduleConfiguredNotifications()
                 }
+            } catch {
+                logger.error("Notification authorization error: \(error.localizedDescription)")
             }
         }
     }
@@ -265,9 +268,19 @@ enum NotificationManager {
      * 
      * This ensures notifications match current user preferences.
      */
+    @MainActor private static var rescheduleTask: Task<Void, Never>?
+
     static func rescheduleNotifications() {
         Task { @MainActor in
-            scheduleConfiguredNotifications()
+            // Debounce: settings sliders/steppers fire onChange many times per drag, and each
+            // reschedule re-runs the projection + inventory + daily-summary scheduling. Coalesce
+            // a burst into a single reschedule once the edits settle.
+            rescheduleTask?.cancel()
+            rescheduleTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                if Task.isCancelled { return }
+                scheduleConfiguredNotifications()
+            }
         }
     }
     

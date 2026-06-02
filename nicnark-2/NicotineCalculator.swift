@@ -54,40 +54,41 @@ class NicotineCalculator {
     ///   - timestamp: Point in time to calculate level for (defaults to now)
     /// - Returns: Total nicotine level in bloodstream at the specified time
     func calculateTotalNicotineLevel(context: NSManagedObjectContext, at timestamp: Date = Date()) async -> Double {
-        // Fetch pouches from the last 10 hours (5 half-lives = 99.97% decay)
-        let lookbackTime = timestamp.addingTimeInterval(-10 * 3600) // 10 hours
-        
-        let request: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
-        request.predicate = NSPredicate(format: "insertionTime >= %@", lookbackTime as NSDate)
-        request.sortDescriptors = [NSSortDescriptor(keyPath: \PouchLog.insertionTime, ascending: true)]
-        
         do {
-            let pouches = try context.fetch(request)
-            var totalLevel = 0.0
-            
-            for pouch in pouches {
-                guard let insertionTime = pouch.insertionTime else { continue }
-                
-                // Only consider pouches that were inserted before our calculation timestamp
-                guard insertionTime <= timestamp else { continue }
-                
-                let contribution = calculatePouchContribution(
-                    pouch: pouch,
-                    at: timestamp,
-                    insertionTime: insertionTime
-                )
-                totalLevel += contribution
-                
-                logger.debug("Pouch \(pouch.nicotineAmount)mg: contribution = \(String(format: "%.4f", contribution))mg")
-            }
-            
-            logger.info("Total nicotine level at \(timestamp): \(String(format: "%.3f", totalLevel))mg from \(pouches.count) pouches")
-            return max(0, totalLevel) // Ensure non-negative
-            
+            let pouches = try fetchRecentPouches(context: context, endingAt: timestamp)
+            return levelFromPouches(pouches, at: timestamp)
         } catch {
             logger.error("Failed to calculate nicotine level: \(error.localizedDescription)")
             return 0
         }
+    }
+
+    /// Fetches pouches that could still contribute nicotine at `timestamp` — those inserted
+    /// within the last 10 hours (≈5 half-lives = 99.97% decayed). Sorted ascending.
+    func fetchRecentPouches(context: NSManagedObjectContext, endingAt timestamp: Date = Date()) throws -> [PouchLog] {
+        let lookbackTime = timestamp.addingTimeInterval(-10 * 3600) // 10 hours
+        let request: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
+        request.predicate = NSPredicate(format: "insertionTime >= %@", lookbackTime as NSDate)
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \PouchLog.insertionTime, ascending: true)]
+        return try context.fetch(request)
+    }
+
+    /// Pure, fetch-free computation of total bloodstream nicotine at `timestamp` from an
+    /// already-fetched pouch array. Applies the SAME 10-hour lookback window that the
+    /// single-shot fetch path uses, so callers can fetch ONCE and sample many timestamps
+    /// in memory (projection/graph/watch loops) with byte-identical results — instead of
+    /// re-fetching the same rows per sample point.
+    func levelFromPouches(_ pouches: [PouchLog], at timestamp: Date) -> Double {
+        let lookbackTime = timestamp.addingTimeInterval(-10 * 3600)
+        var totalLevel = 0.0
+        for pouch in pouches {
+            guard let insertionTime = pouch.insertionTime else { continue }
+            // Same window + ordering guards as the single-shot fetch path.
+            guard insertionTime >= lookbackTime else { continue }
+            guard insertionTime <= timestamp else { continue }
+            totalLevel += calculatePouchContribution(pouch: pouch, at: timestamp, insertionTime: insertionTime)
+        }
+        return max(0, totalLevel) // Ensure non-negative
     }
     
     /// Projects future nicotine levels and identifies boundary crossings
@@ -119,11 +120,21 @@ class NicotineCalculator {
         let lowBoundary = settings.effectiveLowBoundary
         let highBoundary = settings.effectiveHighBoundary
         
+        // Fetch the full window ONCE, then sample it in memory. Previously this loop called
+        // calculateTotalNicotineLevel() per 5-min sample → ~121 identical Core Data fetches
+        // on the main actor on every reschedule/slider tick. The window must start 10h before
+        // the FIRST sample so early samples still see their full decay tail.
+        let windowStart = startTime.addingTimeInterval(-10 * 3600)
+        let windowRequest: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
+        windowRequest.predicate = NSPredicate(format: "insertionTime >= %@", windowStart as NSDate)
+        windowRequest.sortDescriptors = [NSSortDescriptor(keyPath: \PouchLog.insertionTime, ascending: true)]
+        let windowPouches = (try? context.fetch(windowRequest)) ?? []
+
         var currentTime = startTime
         var previousLevel: Double?
-        
+
         while currentTime <= endTime {
-            let level = await calculateTotalNicotineLevel(context: context, at: currentTime)
+            let level = levelFromPouches(windowPouches, at: currentTime)
             projectedPoints.append(NicotineLevelPoint(timestamp: currentTime, level: level))
             
             // Check for boundary crossings

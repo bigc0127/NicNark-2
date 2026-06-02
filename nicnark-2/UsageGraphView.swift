@@ -678,10 +678,13 @@ struct UsageGraphView: View {
     /**
      * Formats a Date as a time string (e.g., "3:45 PM")
      */
+    private static let timeOfDayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "h:mm a"
+        return f
+    }()
     private func formattedTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "h:mm a"
-        return formatter.string(from: date)
+        Self.timeOfDayFormatter.string(from: date)
     }
     
     /**
@@ -887,9 +890,13 @@ private struct HourRowView: View {
         .padding(.vertical, 4)
     }
 
+    private static let hourRangeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "h:mm a"
+        return f
+    }()
     private var hourTitle: String {
-        let df = DateFormatter()
-        df.dateFormat = "h:mm a"
+        let df = Self.hourRangeFormatter
         let endDate = Calendar.current.date(byAdding: .minute, value: 59, to: bucket.hourStart)
         let endString = df.string(from: endDate ?? bucket.hourStart)
         return "\(df.string(from: bucket.hourStart)) – \(endString)"

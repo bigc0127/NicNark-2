@@ -9,9 +9,7 @@ import SwiftUI
 
 struct FirstRunDisclaimerView: View {
     @Binding var isPresented: Bool
-    @State private var hasScrolledToBottom = false
-    @State private var scrollViewContentOffset: CGFloat = 0
-    
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -134,51 +132,19 @@ struct FirstRunDisclaimerView: View {
                         .padding(.leading, 8)
                     }
                     .padding(.vertical)
-                    
-                    // Bottom padding for scroll detection
-                    Color.clear
-                        .frame(height: 1)
-                        .background(
-                            GeometryReader { geometry in
-                                Color.clear
-                                    .onAppear {
-                                        // Check if user has scrolled to bottom
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                            hasScrolledToBottom = true
-                                        }
-                                    }
-                            }
-                        )
                 }
                 .padding()
-                .background(
-                    GeometryReader { geometry in
-                        Color.clear
-                            .onChange(of: geometry.frame(in: .named("scroll"))) { _, frame in
-                                scrollViewContentOffset = frame.minY
-                                // Enable button when user scrolls near bottom
-                                if frame.minY < -100 {
-                                    hasScrolledToBottom = true
-                                }
-                            }
-                    }
-                )
             }
-            .coordinateSpace(name: "scroll")
             .navigationTitle("Disclaimer")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(hasScrolledToBottom ? "I Understand & Agree" : "Please Scroll to Continue") {
-                        if hasScrolledToBottom {
-                            // Mark disclaimer as shown
-                            UserDefaults.standard.set(true, forKey: "HasShownFirstRunDisclaimer")
-                            isPresented = false
-                        }
+                    Button("I Understand & Agree") {
+                        // Mark disclaimer as shown
+                        UserDefaults.standard.set(true, forKey: "HasShownFirstRunDisclaimer")
+                        isPresented = false
                     }
-                    .disabled(!hasScrolledToBottom)
-                    .foregroundColor(hasScrolledToBottom ? .blue : .secondary)
-                    .fontWeight(hasScrolledToBottom ? .semibold : .regular)
+                    .fontWeight(.semibold)
                 }
             }
         }

@@ -24,6 +24,10 @@ class CloudKitSyncState: ObservableObject {
     
     private let logger = Logger(subsystem: "com.nicnark.nicnark-2", category: "SyncState")
     private var syncCompletionTimer: Timer?
+    /// Token for the remote-change observer registered during initial sync. Stored so we
+    /// can remove it on completion/timeout — startInitialSync() used to add a new observer
+    /// on every call and never remove it, leaking observers for the whole session.
+    private var remoteChangeObserver: NSObjectProtocol?
     private let syncTimeout: TimeInterval = 10.0 // Maximum time to wait for sync
     
     init() {
@@ -93,8 +97,9 @@ class CloudKitSyncState: ObservableObject {
         // Start timeout timer
         startSyncTimeout()
         
-        // Listen for CloudKit sync notifications
-        NotificationCenter.default.addObserver(
+        // Listen for CloudKit sync notifications (single observer; torn down on completion).
+        removeRemoteChangeObserver()
+        remoteChangeObserver = NotificationCenter.default.addObserver(
             forName: .NSPersistentStoreRemoteChange,
             object: nil,
             queue: .main
@@ -186,6 +191,7 @@ class CloudKitSyncState: ObservableObject {
     
     private func completeSyncProcess() async {
         cancelSyncTimeout()
+        removeRemoteChangeObserver()
         
         await MainActor.run {
             self.syncProgress = 1.0
@@ -220,9 +226,17 @@ class CloudKitSyncState: ObservableObject {
         syncCompletionTimer?.invalidate()
         syncCompletionTimer = nil
     }
+
+    private func removeRemoteChangeObserver() {
+        if let token = remoteChangeObserver {
+            NotificationCenter.default.removeObserver(token)
+            remoteChangeObserver = nil
+        }
+    }
     
     private func handleSyncTimeout() async {
         logger.warning("⚠️ Sync timeout - completing anyway")
+        removeRemoteChangeObserver()
         
         await MainActor.run {
             self.syncProgress = 1.0

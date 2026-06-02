@@ -47,6 +47,11 @@ import WidgetKit      // Widget timeline management
 @available(iOS 16.1, *)
 @MainActor
 class LiveActivityManager: ObservableObject {
+    /// Shared singleton so non-View callers (e.g. NotificationDelegate) mutate the
+    /// same instance the UI observes. A throwaway `LiveActivityManager()` used to
+    /// flip `hasActiveNotification` on an instance nobody was watching.
+    static let shared = LiveActivityManager()
+
     /// Published property that UI can observe to show/hide activity-related elements
     @Published var hasActiveNotification: Bool = false
     /// Logger for debugging activity lifecycle issues
@@ -55,10 +60,6 @@ class LiveActivityManager: ObservableObject {
     /// Maps pouch UUIDs to activity IDs to prevent duplicate activities for the same pouch
     /// Dictionary: pouchId (String) -> activityId (String)
     private static var activeActivitiesByPouchId: [String: String] = [:]
-    
-    /// Serial queue to prevent race conditions when multiple parts of the app try to manage activities
-    /// Uses userInitiated QoS for responsive Live Activity updates
-    private static let activityQueue = DispatchQueue(label: "com.nicnark.liveactivity.queue", qos: .userInitiated)
     
     /**
      * TrackedActivity: Lightweight representation of a Live Activity for background processing.
@@ -264,10 +265,12 @@ class LiveActivityManager: ObservableObject {
                 pouchName: attributes.pouchName,
                 endTime: end
             )
-            WidgetCenter.shared.reloadAllTimelines()
+            WidgetReloadCoordinator.reload()
             
-        // Foreground ticker for smooth UI while app is active
-        Task { await startForegroundMinuteTicker(pouchId: pouchId, nicotineAmount: nicotineAmount, startTime: start, duration: actualDuration) }
+            // Foreground Live Activity updates are driven by LogView's timer while the app
+            // is active; background refreshes by BackgroundMaintainer. We no longer spawn a
+            // third detached per-activity ticker here (it duplicated those updates and
+            // reloaded widgets every 30s).
             // Schedule an early background refresh in case the app soon goes inactive
             Task { await BackgroundMaintainer.shared.scheduleSoon() }
             
@@ -285,62 +288,6 @@ class LiveActivityManager: ObservableObject {
         } catch {
             log.error("Start Live Activity failed: \(error.localizedDescription, privacy: .public)")
             return false
-        }
-    }
-    
-    // MARK: - Foreground ticker
-    
-    /**
-     * Foreground ticker that updates the Live Activity while the app is active.
-     *
-     * Uses the explicit `startTime` passed from the creator rather than the
-     * activity's attributes to guard against any drift or attribute desyncs.
-     */
-    private static func startForegroundMinuteTicker(pouchId: String, nicotineAmount: Double, startTime: Date, duration: TimeInterval) async {
-        let log = Logger(subsystem: "com.nicnark.nicnark-2", category: "LiveActivity")
-        var updateCount = 0
-        
-        while true {
-            // Only need to verify existence; no need to bind a local variable
-            guard Activity<PouchActivityAttributes>.activities.first(where: { $0.attributes.pouchId == pouchId }) != nil else {
-                log.info("Ticker stopped: no activity")
-                break
-            }
-            
-            // Stop foreground ticker when app goes to background
-            if UIApplication.shared.applicationState != .active {
-                log.info("App backgrounded - stopping foreground ticker, relying on background tasks")
-                // Schedule immediate background update when going to background
-                await BackgroundMaintainer.shared.scheduleSoon()
-                break
-            }
-            
-            // Use the actual start time passed in, not the activity's attribute
-            let elapsed = Date().timeIntervalSince(startTime)
-            let remaining = max(0, duration - elapsed)
-            if remaining <= 0 {
-                await endLiveActivity(for: pouchId)
-                break
-            }
-            
-            let currentLevel = AbsorptionConstants.shared
-                .calculateCurrentNicotineLevel(nicotineContent: nicotineAmount, elapsedTime: elapsed)
-            let progress = min(max(elapsed / duration, 0), 1)
-            // Use the actual start time and calculated end time
-            let timer = startTime...startTime.addingTimeInterval(duration)
-            
-            await updateLiveActivity(
-                for: pouchId,
-                timerInterval: timer,
-                absorptionProgress: progress,
-                currentNicotineLevel: currentLevel
-            )
-            
-            updateCount += 1
-            log.info("🔄 Foreground update #\(updateCount) - level: \(String(format: "%.3f", currentLevel))mg, progress: \(Int(progress * 100))%")
-            
-            // Update every 30 seconds in foreground for better responsiveness
-            try? await Task.sleep(nanoseconds: 30 * NSEC_PER_SEC)
         }
     }
     
@@ -420,25 +367,9 @@ class LiveActivityManager: ObservableObject {
             pouchName: activity.attributes.pouchName,
             endTime: activity.attributes.endTime
         )
-        WidgetCenter.shared.reloadAllTimelines()
+        WidgetReloadCoordinator.reload()
         
         log.info("✅ Live Activity updated: pouch=\(pouchId, privacy: .public) level=\(String(format: "%.3f", currentNicotineLevel))mg progress=\(Int(absorptionProgress * 100))% status=\(status, privacy: .public)")
-    }
-    
-    static func updateLiveActivity(
-        for pouchId: String,
-        timeRemaining: TimeInterval,
-        absorptionProgress: Double,
-        currentNicotineLevel: Double
-    ) async {
-        guard let activity = Activity<PouchActivityAttributes>.activities.first(where: { $0.attributes.pouchId == pouchId }) else { return }
-        let timer = activity.attributes.startTime...activity.attributes.endTime
-        await updateLiveActivity(
-            for: pouchId,
-            timerInterval: timer,
-            absorptionProgress: absorptionProgress,
-            currentNicotineLevel: currentNicotineLevel
-        )
     }
     
     // MARK: - End
@@ -494,7 +425,7 @@ class LiveActivityManager: ObservableObject {
         Task {
             try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5 second delay
             helper.markActivityEnded()
-            WidgetCenter.shared.reloadAllTimelines()
+            WidgetReloadCoordinator.reload()
         }
         
         log.info("Live Activity ended - actual absorption: \(String(format: "%.3f", finalLevel))mg")

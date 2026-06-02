@@ -126,10 +126,17 @@ class CloudKitSyncManager: ObservableObject {
             }
         }
         
-        // Periodically check for sync status
-        Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in
+        // Re-check CloudKit availability when the app returns to the foreground, instead
+        // of a forever-running 60s polling timer that strongly retained this singleton
+        // (the closure captured `self`, not `[weak self]`) and burned battery polling
+        // accountStatus on a fixed cadence for the whole app lifetime.
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
             Task { @MainActor in
-                await self.checkSyncStatus()
+                await self?.checkCloudKitAvailability()
             }
         }
     }
@@ -306,13 +313,13 @@ class CloudKitSyncManager: ObservableObject {
                 
                 // Nudge widgets
                 await MainActor.run {
-                    WidgetCenter.shared.reloadAllTimelines()
+                    WidgetReloadCoordinator.reload()
                 }
                 
                 logger.info("📱 Widget data updated after sync")
             } else {
                 helper.markActivityEnded()
-                await MainActor.run { WidgetCenter.shared.reloadAllTimelines() }
+                await MainActor.run { WidgetReloadCoordinator.reload() }
                 logger.info("📱 Widget marked as ended after sync")
             }
             
@@ -407,12 +414,11 @@ class CloudKitSyncManager: ObservableObject {
         // Initialize CloudKit schema
         await initializeCloudKitSchema()
         
-        // Force a comprehensive sync to ensure data consistency
+        // Force a comprehensive sync to ensure data consistency.
+        // triggerManualSync() already calls handleRemoteDataChanges(), so we don't
+        // duplicate that work here.
         await triggerManualSync()
-        
-        // Also try to pull any remote changes
-        await handleRemoteDataChanges()
-        
+
         logger.info("✅ Initial sync completed")
     }
     
@@ -432,81 +438,36 @@ class CloudKitSyncManager: ObservableObject {
         #endif
     }
     
-    private func forceSchemaCreationWithTestData() async {
-        logger.info("🔧 Forcing CloudKit schema creation with test data")
-
-        let context = PersistenceController.shared.container.viewContext
-
-        // Step 1: Create and save test record
-        do {
-            let testPouch = PouchLog(context: context)
-            testPouch.pouchId = UUID()
-            testPouch.insertionTime = Date()
-            testPouch.nicotineAmount = 0.01 // Tiny amount to identify as test data
-            testPouch.removalTime = Date() // Already "removed" so it won't interfere
-            try context.save()
-            logger.info("✅ Test record created to force CloudKit schema")
-        } catch {
-            logger.error("❌ Failed to create test record for CloudKit schema: \(error.localizedDescription, privacy: .public)")
-        }
-
-        // Step 2: Wait for CloudKit to process
-        do {
-            try await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
-        } catch {
-            logger.warning("⚠️ Task sleep interrupted: \(error.localizedDescription, privacy: .public)")
-        }
-
-        // Step 3: Clean up the test data
-        let fetchRequest = NSFetchRequest<PouchLog>(entityName: "PouchLog")
-        fetchRequest.predicate = NSPredicate(format: "nicotineAmount == %f", 0.01)
-        do {
-            let testRecords = try context.fetch(fetchRequest)
-            for testRecord in testRecords {
-                context.delete(testRecord)
-            }
-            try context.save()
-            logger.info("✅ Test record(s) cleaned up after schema creation")
-        } catch {
-            logger.error("❌ Failed to clean up test records: \(error.localizedDescription, privacy: .public)")
-        }
-    }
-    
     // MARK: - UUID Migration
     
     private func migrateExistingPouchLogsWithMissingUUIDs() async {
-        logger.info("🔄 Starting UUID migration for existing PouchLog entries")
+        // Only ever needs to run once: every PouchLog created since v2 gets a UUID at
+        // insertion time. Gate behind a flag so we don't re-fetch the whole table on EVERY
+        // launch (the old code did). We deliberately stay on the MainActor viewContext:
+        // this project generates Core Data classes under MainActor isolation, so mutating
+        // pouch.pouchId from a background context's Sendable closure is unsafe.
+        guard !UserDefaults.standard.bool(forKey: "didBackfillPouchUUIDs") else { return }
 
         let context = PersistenceController.shared.container.viewContext
         let fetchRequest = NSFetchRequest<PouchLog>(entityName: "PouchLog")
         fetchRequest.predicate = NSPredicate(format: "pouchId == nil")
-
+        fetchRequest.fetchBatchSize = 200
         do {
             let pouchesWithoutUUIDs = try context.fetch(fetchRequest)
-
             if pouchesWithoutUUIDs.isEmpty {
                 logger.info("✅ All PouchLog entries already have UUIDs")
-                return
+            } else {
+                logger.info("🔧 Backfilling \(pouchesWithoutUUIDs.count) PouchLog entries without UUIDs")
+                for pouch in pouchesWithoutUUIDs {
+                    pouch.pouchId = UUID()
+                }
+                try context.save()
             }
-
-            logger.info("🔧 Found \(pouchesWithoutUUIDs.count) PouchLog entries without UUIDs - migrating")
-
-            for pouch in pouchesWithoutUUIDs {
-                pouch.pouchId = UUID()
-            }
-
-            try context.save()
-            logger.info("✅ Successfully migrated \(pouchesWithoutUUIDs.count) PouchLog entries with new UUIDs")
+            // Only set the flag once we've successfully checked/migrated.
+            UserDefaults.standard.set(true, forKey: "didBackfillPouchUUIDs")
         } catch {
             logger.error("❌ UUID migration failed: \(error.localizedDescription, privacy: .public)")
         }
-    }
-    
-    // MARK: - Sync Status
-    
-    private func checkSyncStatus() async {
-        // Check if CloudKit status has changed
-        await checkCloudKitAvailability()
     }
     
     // MARK: - CloudKit Diagnostics

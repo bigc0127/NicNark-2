@@ -8,7 +8,6 @@
 
 import CoreData
 import CloudKit
-import ActivityKit
 import os.log
 
 /**
@@ -139,19 +138,6 @@ print("📍 Store URL: \(storeDescription.url?.absoluteString ?? "Unknown")")
         container.viewContext.automaticallyMergesChangesFromParent = true
         container.viewContext.mergePolicy = NSMergePolicy.mergeByPropertyObjectTrump
 
-        // Listen for remote changes (CloudKit merges)
-        NotificationCenter.default.addObserver(
-            forName: .NSPersistentStoreRemoteChange,
-            object: container.persistentStoreCoordinator,
-            queue: .main
-        ) { [weak container] _ in
-            // Handle remote changes - trigger Live Activity sync
-            Self.logger.info("📡 Remote CloudKit changes detected - syncing Live Activities")
-            Task {
-                await Self.handleRemoteChanges(container: container)
-            }
-        }
-        
         // Check CloudKit account status on init
         Task.detached {
             await Self.checkCloudKitStatus()
@@ -197,34 +183,6 @@ print("📍 Store URL: \(storeDescription.url?.absoluteString ?? "Unknown")")
         }
     }
     
-    // MARK: - CloudKit Sync
-    
-/// Attempts to nudge CloudKit to sync by saving a background context and processing history.
-    /// This is safe to call when you want to ensure remote devices see recent changes.
-    func triggerCloudKitSync() async {
-        // Force a background context save to trigger CloudKit sync
-        let backgroundContext = container.newBackgroundContext()
-        await backgroundContext.perform {
-            do {
-                // Process any pending persistent history
-                let historyRequest = NSPersistentHistoryChangeRequest.fetchHistory(after: .distantPast)
-                _ = try backgroundContext.execute(historyRequest)
-                
-                // Save to trigger CloudKit operations
-                if backgroundContext.hasChanges {
-                    try backgroundContext.save()
-                    print("✅ Background context saved - CloudKit sync triggered")
-                } else {
-                    // Even without changes, save to trigger sync
-                    try backgroundContext.save()
-                    print("✅ CloudKit sync triggered via background save")
-                }
-            } catch {
-                print("❌ Failed to trigger CloudKit sync: \(error.localizedDescription)")
-            }
-        }
-    }
-    
     // MARK: - CloudKit Status Checking
     
 /// Checks the user's iCloud account status and logs human-readable messages for debugging.
@@ -251,101 +209,6 @@ print("📍 Store URL: \(storeDescription.url?.absoluteString ?? "Unknown")")
             }
         } catch {
             Self.logger.error("❌ Failed to check CloudKit status: \(error.localizedDescription, privacy: .public)")
-        }
-    }
-    
-    // MARK: - Remote Change Handling
-    
-/// Handles remote CloudKit changes by syncing Live Activities with the latest Core Data state.
-    /// - Parameter container: The persistent container used to read current state.
-    private static func handleRemoteChanges(container: NSPersistentCloudKitContainer?) async {
-        guard let container = container else { return }
-        // When CloudKit syncs new data, check for active pouches that need Live Activities
-        await syncLiveActivitiesWithRemoteData(container: container)
-    }
-    
-/// Reconciles the Live Activities on-device with the canonical Core Data state after a sync.
-    /// - Important: Only attempts to start a Live Activity when exactly one pouch is active.
-    ///   If multiple are active (unexpected), it skips creation to avoid inconsistent UI.
-    private static func syncLiveActivitiesWithRemoteData(container: NSPersistentCloudKitContainer) async {
-        await MainActor.run {
-            let context = container.viewContext
-            let fetchRequest: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
-            fetchRequest.predicate = NSPredicate(format: "removalTime == nil")
-            fetchRequest.sortDescriptors = [NSSortDescriptor(keyPath: \PouchLog.insertionTime, ascending: false)]
-            
-            do {
-                let activePouches = try context.fetch(fetchRequest)
-                
-                if #available(iOS 16.1, *) {
-                    // Only sync Live Activities if we have exactly one active pouch
-                    // Multiple active pouches shouldn't happen, but if they do, don't create activities
-                    if activePouches.count == 1, let pouch = activePouches.first {
-                        // Use stable UUID for cross-device identity
-                        let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
-                        
-                        // Use the improved helper to check for existing activity
-                        if !LiveActivityManager.activityExists(for: pouchId) {
-                            // Check if this pouch was created recently (within last 5 seconds)
-                            // If so, it's likely created locally and we shouldn't sync a Live Activity
-                            let isRecentlyCreated = pouch.insertionTime.map { Date().timeIntervalSince($0) < 5 } ?? false
-                            
-                            if !isRecentlyCreated {
-                                // Double-check pouch is still active before creating activity
-                                Task {
-                                    guard await LiveActivityManager.isPouchActive(pouchId) else {
-                                        Self.logger.info("🚫 Pouch no longer active, skipping Live Activity sync")
-                                        return
-                                    }
-                                    
-                                    Self.logger.info("🔄 Starting Live Activity for synced pouch: \(pouchId, privacy: .public)")
-                                    // Use the pouch's specific duration (stored in minutes, convert to seconds)
-                                    let duration = TimeInterval(pouch.timerDuration * 60)
-                                    
-                                    // Pass the original insertion time so synced pouches show accurate countdown.
-                                    // Without this, a pouch logged 15 minutes ago on another device would
-                                    // incorrectly restart with a full 30-minute timer.
-                                    let success = await LiveActivityManager.startLiveActivity(
-                                        for: pouchId,
-                                        nicotineAmount: pouch.nicotineAmount,
-                                        insertionTime: pouch.insertionTime,  // Preserves correct remaining time
-                                        duration: duration,  // Respects custom duration settings
-                                        isFromSync: true  // Avoids ending activities on other devices
-                                    )
-                                    if success {
-                                        Self.logger.info("✅ Live Activity started for synced pouch")
-                                    } else {
-                                        Self.logger.error("❌ Failed to start Live Activity for synced pouch")
-                                    }
-                                }
-                            } else {
-                                Self.logger.info("⏭️ Skipping Live Activity for recently created pouch (likely local)")
-                            }
-                        }
-                    } else if activePouches.count > 1 {
-                        Self.logger.warning("⚠️ Multiple active pouches detected (\(activePouches.count, privacy: .public)) - skipping Live Activity sync")
-                    }
-                    
-                    // End Live Activities for pouches that were completed on other devices
-                    for activity in Activity<PouchActivityAttributes>.activities {
-                        let pouchId = activity.attributes.pouchId
-                        
-                        // Use Core Data guard to check if pouch is still active
-                        Task {
-                            let isStillActive = await LiveActivityManager.isPouchActive(pouchId)
-                            if !isStillActive {
-                                Self.logger.info("🔄 Ending Live Activity for completed pouch: \(pouchId, privacy: .public)")
-                                await LiveActivityManager.endLiveActivity(for: pouchId)
-                            }
-                        }
-                    }
-                }
-                
-                Self.logger.info("🔄 Live Activity sync completed - \(activePouches.count, privacy: .public) active pouches")
-                
-            } catch {
-                Self.logger.error("❌ Failed to fetch active pouches for sync: \(error.localizedDescription, privacy: .public)")
-            }
         }
     }
 }

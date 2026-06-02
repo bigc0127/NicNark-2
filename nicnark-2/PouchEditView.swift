@@ -206,7 +206,7 @@ struct PouchEditView: View {
             }
             
             // Update widgets and Live Activities
-            WidgetCenter.shared.reloadAllTimelines()
+            WidgetReloadCoordinator.reload()
             
             // Post notification for other views to update
             NotificationCenter.default.post(name: NSNotification.Name("PouchEdited"), object: nil)
@@ -232,7 +232,7 @@ struct PouchEditView: View {
             try viewContext.save()
             
             // Update widgets
-            WidgetCenter.shared.reloadAllTimelines()
+            WidgetReloadCoordinator.reload()
             
             // Post notification for other views to update
             NotificationCenter.default.post(name: NSNotification.Name("PouchDeleted"), object: nil)

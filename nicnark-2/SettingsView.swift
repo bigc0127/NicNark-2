@@ -10,7 +10,6 @@
 // • Timer Settings - Absorption duration and auto-removal options
 // • Data Export - CSV export of all pouch logs
 // • CloudKit Sync - Multi-device synchronization controls
-// • Support/Tips - In-app purchase tip jar
 // • Data Management - Complete data deletion
 //
 // The view integrates deeply with CloudKit for:
@@ -27,7 +26,6 @@
 
 import SwiftUI
 import CoreData
-import StoreKit
 import os.log
 import CloudKit
 #if canImport(UIKit)
@@ -53,9 +51,8 @@ import WidgetKit
  * 5. Data Export - Export all pouch logs as CSV
  * 6. App Information - Version and developer details
  * 7. CloudKit Sync - Multi-device synchronization
- * 8. Support - Tip jar for supporting development
- * 9. Data Management - Delete all data option
- * 10. About - App description and privacy statement
+ * 8. Data Management - Delete all data option
+ * 9. About - App description and privacy statement
  * 
  * The view uses @StateObject for managers to ensure single instances
  * and @AppStorage for simple persistent preferences.
@@ -63,7 +60,6 @@ import WidgetKit
 struct SettingsView: View {
     // MARK: - Environment & State Management
     @Environment(\.managedObjectContext) private var viewContext           // Core Data context
-    @StateObject private var tipStore = TipStore()                         // In-app purchase manager
     @StateObject private var syncManager = CloudKitSyncManager.shared      // CloudKit sync manager
     @StateObject private var timerSettings = TimerSettings.shared          // Timer duration settings
     #if canImport(WatchConnectivity)
@@ -79,7 +75,6 @@ struct SettingsView: View {
     @AppStorage(SleepProtectionKeys.bedtimeSecondsFromMidnight) private var sleepProtectionBedtimeSecondsFromMidnight: Int = 23 * 3600
     @AppStorage(SleepProtectionKeys.targetMg) private var sleepProtectionTargetMg: Double = 1.3
     @State private var showingDeleteAlert = false
-    @State private var showingTipThankYou = false
     @State private var isDeleting = false
     @State private var showingFullDisclaimer = false
     @State private var isCloudKitSyncEnabled = UserDefaults.standard.object(forKey: "cloudKitSyncEnabled") as? Bool ?? true
@@ -120,7 +115,6 @@ struct SettingsView: View {
             #if DEBUG
             if debugToolsVisible { developerSchemaSection }
             #endif
-            supportSection
             dataManagementSection
             aboutSection
         }
@@ -133,11 +127,6 @@ struct SettingsView: View {
             watchStatus.stop()
         }
         #endif
-        .alert("Thank You! 🎉", isPresented: $showingTipThankYou) {
-            Button("You're Welcome! ☕️") { }
-        } message: {
-            Text("Your support helps fund continued development!")
-        }
         .alert("Delete All Data", isPresented: $showingDeleteAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Delete Everything", role: .destructive) {
@@ -147,7 +136,6 @@ struct SettingsView: View {
             Text("This permanently deletes ALL app data. This cannot be undone.")
         }
         .task {
-            await tipStore.loadProducts()
             exportStats = await ExportManager.getExportStatistics(context: viewContext)
         }
         .sheet(isPresented: $showingFullDisclaimer) {
@@ -205,11 +193,6 @@ struct SettingsView: View {
             }
         }
         #endif
-        .alert("Test Sync Complete", isPresented: .constant(isTestingSyncData && !isTestingSyncData)) {
-            Button("OK") { }
-        } message: {
-            Text("CloudKit sync test completed. Check the console logs for details.")
-        }
     }
 
     // MARK: - View Sections
@@ -675,44 +658,6 @@ struct SettingsView: View {
         }
     }
 
-    private var supportSection: some View {
-        Section {
-            if tipStore.isLoading {
-                HStack {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                    Text("Loading tips...")
-                        .foregroundColor(.secondary)
-                }
-                .padding(.vertical, 8)
-            } else if tipStore.tips.isEmpty {
-                Button("Reload Tips") {
-                    Task { await tipStore.loadProducts() }
-                }
-            } else {
-                ForEach(tipStore.tips, id: \.id) { tip in
-                    TipRowView(tip: tip) {
-                        Task {
-                            await tipStore.purchaseTip(tip)
-                            showingTipThankYou = true
-                        }
-                    }
-                    .disabled(tipStore.isLoading)
-                }
-            }
-            
-            if !tipStore.errorMessage.isEmpty {
-                Text(tipStore.errorMessage)
-                    .foregroundColor(.red)
-                    .font(.caption)
-            }
-        } header: {
-            Text("Support the Developer")
-        } footer: {
-            Text("Thank you for supporting continued development! Tips help fund new features and improvements.")
-        }
-    }
-
     private var dataManagementSection: some View {
         Section {
             Button(action: { showingDeleteAlert = true }) {
@@ -959,7 +904,7 @@ struct SettingsView: View {
         
         // Reload widgets
         await MainActor.run {
-            WidgetCenter.shared.reloadAllTimelines()
+            WidgetReloadCoordinator.reload()
         }
         
         isDeleting = false
@@ -980,71 +925,34 @@ struct SettingsView: View {
     }
     
     private func deleteAllCoreDataEntities() async {
-        let entityNames = ["PouchLog", "CustomButton"]
+        // NSBatchDeleteRequest does NOT propagate deletions to CloudKit (the mirror
+        // keeps the records, so deleted data resurrects on the next sync) and the old
+        // code also skipped Can/CanTemplate despite the "delete ALL" copy. Delete each
+        // object individually on a background context so NSPersistentCloudKitContainer
+        // records the deletions and they propagate across devices.
+        let entityNames = ["PouchLog", "Can", "CanTemplate", "CustomButton"]
+        let context = PersistenceController.shared.container.newBackgroundContext()
 
-        for entityName in entityNames {
-            let fetchRequest = NSFetchRequest<NSFetchRequestResult>(entityName: entityName)
-            let deleteRequest = NSBatchDeleteRequest(fetchRequest: fetchRequest)
-
-            do {
-                try viewContext.execute(deleteRequest)
-            } catch {
-                logger.error("Failed to delete \(entityName): \(error.localizedDescription)")
-            }
-        }
-
-        do {
-            try viewContext.save()
-        } catch {
-            logger.error("Failed to save context after deletion: \(error.localizedDescription)")
-        }
-    }
-}
-
-// MARK: - Tip Row View
-
-private struct TipRowView: View {
-    let tip: Product
-    let onPurchase: () -> Void
-
-    var body: some View {
-        Button(action: onPurchase) {
-            HStack {
-                Image(systemName: tipIcon)
-                    .foregroundColor(tipColor)
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(tip.displayName)
-                        .foregroundColor(.primary)
-                    Text(tip.description)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+        await context.perform {
+            let log = Logger(subsystem: "com.nicnark.nicnark-2", category: "DeleteAll")
+            for entityName in entityNames {
+                let fetchRequest = NSFetchRequest<NSManagedObject>(entityName: entityName)
+                fetchRequest.includesPropertyValues = false
+                do {
+                    for object in try context.fetch(fetchRequest) {
+                        context.delete(object)
+                    }
+                } catch {
+                    log.error("Failed to fetch \(entityName) for deletion: \(error.localizedDescription)")
                 }
-                
-                Spacer()
-                
-                Text(tip.displayPrice)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.blue)
             }
-        }
-    }
-
-    private var tipIcon: String {
-        switch tip.id {
-        case "small_coffee": return "cup.and.saucer"
-        case "medium_coffee": return "mug"
-        case "large_coffee": return "takeoutbag.and.cup.and.straw"
-        default: return "heart.circle.fill"
-        }
-    }
-
-    private var tipColor: Color {
-        switch tip.id {
-        case "small_coffee": return .orange
-        case "medium_coffee": return .brown
-        case "large_coffee": return .purple
-        default: return .pink
+            if context.hasChanges {
+                do {
+                    try context.save()
+                } catch {
+                    log.error("Failed to save context after deletion: \(error.localizedDescription)")
+                }
+            }
         }
     }
 }

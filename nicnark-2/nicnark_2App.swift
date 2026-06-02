@@ -135,7 +135,7 @@ struct nicnark_2App: App {
                         if success {
                             print("📱 Successfully handled URL: \(url)")
                             // Tell all home screen widgets to refresh their data
-                            WidgetCenter.shared.reloadAllTimelines()
+                            WidgetReloadCoordinator.reload()
                         } else {
                             print("📱 Failed to handle URL: \(url)")
                         }

@@ -203,11 +203,15 @@ extension WatchConnectivityBridge: WCSessionDelegate {
         let end = now.addingTimeInterval(2 * 3600)
         let step: TimeInterval = 10 * 60
 
+        // Fetch once (window starts 10h before the first sample), then sample in memory —
+        // was ~49 identical Core Data fetches per watch refresh.
+        let pouches = (try? calculator.fetchRecentPouches(context: ctx, endingAt: start)) ?? []
+
         var points: [[String: Any]] = []
         var t = start
 
         while t <= end {
-            let level = await calculator.calculateTotalNicotineLevel(context: ctx, at: t)
+            let level = calculator.levelFromPouches(pouches, at: t)
             points.append([
                 "time": t.timeIntervalSince1970,
                 "level": max(0, level)

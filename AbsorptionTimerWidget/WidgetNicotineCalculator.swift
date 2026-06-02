@@ -40,36 +40,38 @@ class WidgetNicotineCalculator {
     /// Calculates comprehensive nicotine levels including decay from removed pouches
     /// This mirrors NicotineCalculator.calculateTotalNicotineLevel() exactly
     func calculateTotalNicotineLevel(context: NSManagedObjectContext, at timestamp: Date = Date()) -> Double {
-        // Fetch pouches from the last 10 hours (≈5 half-lives)
-        let lookbackTime = timestamp.addingTimeInterval(-10 * 3600)
-        
-        let request: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
-        request.predicate = NSPredicate(format: "insertionTime >= %@", lookbackTime as NSDate)
-        request.sortDescriptors = [NSSortDescriptor(keyPath: \PouchLog.insertionTime, ascending: true)]
-        
         do {
-            let pouches = try context.fetch(request)
-            var totalLevel = 0.0
-            
-            for pouch in pouches {
-                guard let insertionTime = pouch.insertionTime else { continue }
-                guard insertionTime <= timestamp else { continue }
-                
-                let contribution = calculatePouchContribution(
-                    pouch: pouch,
-                    at: timestamp,
-                    insertionTime: insertionTime
-                )
-                totalLevel += contribution
-                logger.debug("[Widget] Pouch \(pouch.nicotineAmount)mg -> +\(String(format: "%.4f", contribution))mg")
-            }
-            
-            logger.info("[Widget] Total nicotine at \(timestamp): \(String(format: "%.3f", totalLevel))mg from \(pouches.count) pouches")
-            return max(0, totalLevel)
+            let pouches = try fetchRecentPouches(context: context, endingAt: timestamp)
+            return levelFromPouches(pouches, at: timestamp)
         } catch {
             logger.error("[Widget] Failed to calculate nicotine level: \(error.localizedDescription)")
             return 0
         }
+    }
+
+    /// Fetches pouches that could still contribute nicotine at `timestamp` (inserted within
+    /// the last 10 hours). Lets callers fetch ONCE and sample many points in memory.
+    func fetchRecentPouches(context: NSManagedObjectContext, endingAt timestamp: Date = Date()) throws -> [PouchLog] {
+        let lookbackTime = timestamp.addingTimeInterval(-10 * 3600)
+        let request: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
+        request.predicate = NSPredicate(format: "insertionTime >= %@", lookbackTime as NSDate)
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \PouchLog.insertionTime, ascending: true)]
+        return try context.fetch(request)
+    }
+
+    /// Pure, fetch-free total-level computation from an already-fetched pouch array,
+    /// applying the same 10-hour window as the single-shot path so a timeline can fetch
+    /// once and sample every chart point in memory.
+    func levelFromPouches(_ pouches: [PouchLog], at timestamp: Date) -> Double {
+        let lookbackTime = timestamp.addingTimeInterval(-10 * 3600)
+        var totalLevel = 0.0
+        for pouch in pouches {
+            guard let insertionTime = pouch.insertionTime else { continue }
+            guard insertionTime >= lookbackTime else { continue }
+            guard insertionTime <= timestamp else { continue }
+            totalLevel += calculatePouchContribution(pouch: pouch, at: timestamp, insertionTime: insertionTime)
+        }
+        return max(0, totalLevel)
     }
     
     // MARK: - Private helpers (mirrored from main app)

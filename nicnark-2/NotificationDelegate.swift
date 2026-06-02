@@ -55,8 +55,8 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
                     // Keep badge/state aligned with current activities
                     if #available(iOS 16.1, *) {
                         let count = Activity<PouchActivityAttributes>.activities.count
-                        // Use a transient manager instance just to flip the published property.
-                        LiveActivityManager().hasActiveNotification = (count > 0)
+                        // Update the shared manager the UI actually observes.
+                        LiveActivityManager.shared.hasActiveNotification = (count > 0)
                     }
                     t.c()
                 }

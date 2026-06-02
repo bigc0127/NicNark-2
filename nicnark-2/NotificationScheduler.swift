@@ -68,14 +68,16 @@ class NotificationScheduler: ObservableObject {
             
             // Clean up stale alert records
             alertTracker.purge(matching: validCanIds)
-            
+
+            // Fetch pending requests ONCE, not once per low-inventory can.
+            let pendingIds = Set(await UNUserNotificationCenter.current().pendingNotificationRequests().map { $0.identifier })
+
             for can in lowInventoryCans {
                 let canId = can.objectID.uriRepresentation().absoluteString
                 let notificationId = "\(canInventoryPrefix)\(canId)"
-                
+
                 // Check if we've already notified about this can
-                let pending = await UNUserNotificationCenter.current().pendingNotificationRequests()
-                let alreadyScheduled = pending.contains { $0.identifier == notificationId }
+                let alreadyScheduled = pendingIds.contains(notificationId)
                 
                 // Check 24-hour cooldown period
                 let canShowAlert = alertTracker.canShowAlert(for: canId)
@@ -303,13 +305,11 @@ class NotificationScheduler: ObservableObject {
             
             // Schedule for the specified time
             let calendar = Calendar.current
-            var dateComponents = calendar.dateComponents([.hour, .minute], from: settings.dailySummaryDate)
+            let dateComponents = calendar.dateComponents([.hour, .minute], from: settings.dailySummaryDate)
             
-            // If showing previous day summary, schedule for tomorrow at the specified time
-            if !settings.dailySummaryShowPreviousDay {
-                dateComponents.day = calendar.component(.day, from: Date())
-            }
-            
+            // Repeat daily at the configured hour:minute. (Previously this pinned
+            // dateComponents.day to today's day-of-month, so with repeats: true the summary
+            // fired only once per MONTH instead of every day.)
             let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
             let request = UNNotificationRequest(identifier: dailySummaryID, content: content, trigger: trigger)
             
@@ -331,8 +331,12 @@ class NotificationScheduler: ObservableObject {
         let percentageIncrease = averageUsage > 0 ? ((currentPeriodUsage - averageUsage) / averageUsage) * 100 : 0
         
         if percentageIncrease >= settings.insightsThresholdPercentage {
-            let notificationId = "\(insightsPrefix)\(Date().timeIntervalSince1970)"
-            
+            // Stable id per period so a re-check REPLACES the prior alert instead of stacking
+            // a brand-new pending notification each time (the old id used a timestamp, so it
+            // could never be deduped).
+            let notificationId = "\(insightsPrefix)\(settings.insightsPeriod)"
+            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [notificationId])
+
             let content = UNMutableNotificationContent()
             content.title = "Usage Trend Alert"
             content.body = String(format: "Your usage in the last %@ is %.0f%% above normal (%.1fmg vs %.1fmg average)",

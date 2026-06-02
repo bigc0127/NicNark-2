@@ -58,12 +58,8 @@ enum PouchRemovalService {
 
         // Update widgets snapshot + reload timelines
         await updateWidgetSnapshot(in: context)
-        WidgetCenter.shared.reloadAllTimelines()
-
-        // Nudge CloudKit
-        Task {
-            await PersistenceController.shared.triggerCloudKitSync()
-        }
+        WidgetReloadCoordinator.reload()
+        // CloudKit export is scheduled automatically by NSPersistentCloudKitContainer on save.
 
         return true
     }
@@ -73,24 +69,51 @@ enum PouchRemovalService {
         let request: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
         request.predicate = NSPredicate(format: "removalTime == nil")
 
+        let active: [PouchLog]
         do {
-            let active = try context.fetch(request)
-            guard !active.isEmpty else { return 0 }
-
-            var removedCount = 0
-            for pouch in active {
-                let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
-                let removed = await removePouch(withId: pouchId, in: context)
-                if removed {
-                    removedCount += 1
-                }
-            }
-
-            return removedCount
+            active = try context.fetch(request)
         } catch {
             print("❌ Failed to fetch active pouches for removal: \(error.localizedDescription)")
             return 0
         }
+        guard !active.isEmpty else { return 0 }
+
+        // Batch removal: mark every active pouch removed and save the context ONCE, then run
+        // the shared side effects (Live Activity end, notification cancel, widget snapshot +
+        // reload) a single time — instead of looping removePouch(withId:), which did a save,
+        // a snapshot recompute, a CloudKit nudge AND a widget reload per pouch.
+        let removalTime = Date.now
+        var removedIds: [String] = []
+        for pouch in active where pouch.removalTime == nil {
+            let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
+            guard !pouchesBeingRemoved.contains(pouchId) else { continue }
+            pouchesBeingRemoved.insert(pouchId)
+            pouch.removalTime = removalTime
+            removedIds.append(pouchId)
+        }
+        defer { removedIds.forEach { pouchesBeingRemoved.remove($0) } }
+
+        guard !removedIds.isEmpty else { return 0 }
+
+        do {
+            try context.save()
+        } catch {
+            print("❌ Failed to save batched pouch removal: \(error.localizedDescription)")
+        }
+
+        // End any Live Activities and cancel completion notifications for the removed pouches.
+        for pouchId in removedIds {
+            if #available(iOS 16.1, *) {
+                await LiveActivityManager.endLiveActivity(for: pouchId)
+            }
+            NotificationManager.cancelAlert(id: pouchId)
+        }
+
+        // Single widget snapshot refresh + one coalesced reload for the whole batch.
+        await updateWidgetSnapshot(in: context)
+        WidgetReloadCoordinator.reload()
+
+        return removedIds.count
     }
 
     // MARK: - Private

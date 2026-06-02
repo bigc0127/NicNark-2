@@ -53,7 +53,7 @@ struct CanCardView: View {
                     }
                     
                     // Show map pin icon when inventory is low
-                    if can.pouchCount <= Int16(NotificationSettings.shared.canLowInventoryThreshold) {
+                    if Int(can.pouchCount) <= NotificationSettings.shared.canLowInventoryThreshold {
                         Image(systemName: "map.fill")
                             .font(.caption)
                             .foregroundColor(.orange)
@@ -293,7 +293,7 @@ struct CanCardView: View {
     
     private func handleCanNameTap() {
         // Only open Maps if inventory is low
-        guard can.pouchCount <= Int16(NotificationSettings.shared.canLowInventoryThreshold) else {
+        guard Int(can.pouchCount) <= NotificationSettings.shared.canLowInventoryThreshold else {
             print("ℹ️ Can has sufficient inventory (\(can.pouchCount) pouches), not opening Maps")
             return
         }
@@ -349,7 +349,7 @@ struct CanCardView: View {
         NotificationManager.cancelAlert(id: pouchId)
         
         // Update widgets
-        WidgetCenter.shared.reloadAllTimelines()
+        WidgetReloadCoordinator.reload()
     }
     
     // MARK: - Timer Management

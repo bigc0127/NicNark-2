@@ -30,12 +30,13 @@ struct NicotineGraphEntry: TimelineEntry {
 
 // MARK: - Chart Data Point
 struct NicotineChartPoint: Identifiable, Hashable {
-    let id = UUID()
     let time: Date
     let level: Double
-    
+    // Identity derived from time so the widget chart can diff stably across timeline entries.
+    var id: Date { time }
+
     func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
+        hasher.combine(time)
     }
 }
 
@@ -57,10 +58,11 @@ struct NicotineGraphProvider: TimelineProvider {
         logger.info("📱 Widget timeline requested")
         let currentEntry = generateEntry()
         
-        // More aggressive update schedule:
-        // - Every 1 minute if there are active pouches (for real-time updates)
-        // - Every 5 minutes otherwise (to catch new activity)
-        let updateInterval = currentEntry.hasActivePouches ? 60.0 : 300.0
+        // Update schedule tuned to iOS's limited widget-refresh budget (~40-70/day):
+        // - Every 5 minutes if there are active pouches (the chart + level stay current;
+        //   a 60s cadence just exhausted the budget and got throttled anyway)
+        // - Every 15 minutes otherwise (only need to catch newly-logged activity)
+        let updateInterval = currentEntry.hasActivePouches ? 300.0 : 900.0
         let nextUpdateDate = Date().addingTimeInterval(updateInterval)
         
         // Use after policy with calculated next update date
@@ -117,14 +119,13 @@ struct NicotineGraphProvider: TimelineProvider {
             currentTime = currentTime.addingTimeInterval(30 * 60) // 30 minutes
         }
         
-        // Use widget nicotine calculator for consistency with the app
+        // Fetch once, then compute every chart point in memory (was one Core Data fetch per
+        // 30-min point). levelFromPouches re-applies the 10h window so results are identical.
         let calculator = WidgetNicotineCalculator()
-        var points: [NicotineChartPoint] = []
-        for timePoint in timePoints {
-            let level = calculator.calculateTotalNicotineLevel(context: context, at: timePoint)
-            points.append(NicotineChartPoint(time: timePoint, level: max(0, level)))
+        let pouches = (try? calculator.fetchRecentPouches(context: context, endingAt: sixHoursAgo)) ?? []
+        return timePoints.map { timePoint in
+            NicotineChartPoint(time: timePoint, level: max(0, calculator.levelFromPouches(pouches, at: timePoint)))
         }
-        return points
     }
     
     private func calculateTimeSinceLastPouch(pouches: [PouchLog], now: Date) -> String {

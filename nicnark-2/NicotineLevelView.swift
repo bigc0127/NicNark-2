@@ -12,12 +12,14 @@ import os.log
 
 // MARK: - Data Models
 private struct NicotinePoint: Identifiable, Hashable {
-    let id = UUID()
     let time: Date
     let level: Double
-    
+    // Derive identity from time (not a fresh UUID per construction) so SwiftUI Charts can
+    // diff/animate across refreshes instead of treating every rebuilt point as brand new.
+    var id: Date { time }
+
     func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
+        hasher.combine(time)
     }
 }
 
@@ -613,16 +615,15 @@ struct NicotineLevelView: View {
             currentTime = currentTime.addingTimeInterval(15 * 60) // 15 minutes
         }
         
-        // Calculate nicotine level at each time point using the centralized calculator
+        // Fetch the contributing pouches ONCE, then compute every point in memory.
+        // Was: one Core Data fetch per 15-min point (~97 fetches) on every chart refresh.
         let calculator = NicotineCalculator()
-        var points: [NicotinePoint] = []
-        for timePoint in timePoints {
-            let level = await calculator.calculateTotalNicotineLevel(context: viewContext, at: timePoint)
-            points.append(NicotinePoint(time: timePoint, level: max(0, level)))
+        let pouches = (try? calculator.fetchRecentPouches(context: viewContext, endingAt: startTime)) ?? []
+        return timePoints.map { timePoint in
+            NicotinePoint(time: timePoint, level: max(0, calculator.levelFromPouches(pouches, at: timePoint)))
         }
-        return points
     }
-    
+
     private func calculateFuturePredictions() async -> [NicotinePoint] {
         let now = Date()
         let endTime = Calendar.current.date(byAdding: .hour, value: 12, to: now) ?? now
@@ -636,20 +637,19 @@ struct NicotineLevelView: View {
             currentTime = currentTime.addingTimeInterval(15 * 60) // 15 minutes
         }
         
-        // Calculate predicted nicotine level at each future time point
+        // Fetch once; future levels are pure decay of already-logged pouches.
+        // Was: one Core Data fetch per 15-min future point (~49 fetches).
         let calculator = NicotineCalculator()
-        var points: [NicotinePoint] = []
-        for timePoint in timePoints {
-            let level = await calculator.calculateTotalNicotineLevel(context: viewContext, at: timePoint)
-            points.append(NicotinePoint(time: timePoint, level: max(0, level)))
+        let pouches = (try? calculator.fetchRecentPouches(context: viewContext, endingAt: now)) ?? []
+        return timePoints.map { timePoint in
+            NicotinePoint(time: timePoint, level: max(0, calculator.levelFromPouches(pouches, at: timePoint)))
         }
-        return points
     }
-    
+
     private func calculatePredictionPoints() async -> [PredictionPoint] {
         let now = Date()
         let calculator = NicotineCalculator()
-        
+
         // Define prediction intervals
         let intervals: [(minutes: Int, label: String)] = [
             (30, "30 minutes"),
@@ -659,20 +659,17 @@ struct NicotineLevelView: View {
             (360, "6 hours"),
             (720, "12 hours")
         ]
-        
-        var predictions: [PredictionPoint] = []
-        
-        for interval in intervals {
+
+        // One fetch for all intervals instead of one per interval.
+        let pouches = (try? calculator.fetchRecentPouches(context: viewContext, endingAt: now)) ?? []
+        return intervals.map { interval in
             let futureTime = now.addingTimeInterval(TimeInterval(interval.minutes * 60))
-            let level = await calculator.calculateTotalNicotineLevel(context: viewContext, at: futureTime)
-            predictions.append(PredictionPoint(
+            return PredictionPoint(
                 time: futureTime,
-                level: max(0, level),
+                level: max(0, calculator.levelFromPouches(pouches, at: futureTime)),
                 label: interval.label
-            ))
+            )
         }
-        
-        return predictions
     }
     
     private func calculateAbsorptionRates() async -> [AbsorptionRateData] {

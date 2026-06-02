@@ -436,7 +436,7 @@ struct LogView: View {
                     }
                 }
             }
-            WidgetCenter.shared.reloadAllTimelines()
+            WidgetReloadCoordinator.reload()
         }
         .onChange(of: activePouches.isEmpty) { _, isEmpty in
             if isEmpty {
@@ -463,7 +463,7 @@ struct LogView: View {
                 // Only remove if the notification is for the current active pouch
                 if notificationPouchId == activePouchId {
                     removePouch(activePouch)
-                    WidgetCenter.shared.reloadAllTimelines()
+                    WidgetReloadCoordinator.reload()
                 }
             }
         }
@@ -795,7 +795,7 @@ struct LogView: View {
                 try? ctx.save()
                 input = ""
                 showInput = false
-                WidgetCenter.shared.reloadAllTimelines()
+                WidgetReloadCoordinator.reload()
             }
             .buttonStyle(.borderedProminent)
 
@@ -1049,18 +1049,15 @@ struct LogView: View {
             tick = Date()
             startLiveTimerIfNeeded()
             startOptimizedTimer()
-            updateWidgetPersistenceHelper()
+            Task { await updateWidgetPersistenceHelper() }
             
             // Refresh can list
             canManager.fetchActiveCans(context: ctx)
             
-            // Trigger CloudKit sync
-            Task {
-                await PersistenceController.shared.triggerCloudKitSync()
-            }
-            
+            // CloudKit export is scheduled automatically on save by the container.
+
             // Update widgets
-            WidgetCenter.shared.reloadAllTimelines()
+            WidgetReloadCoordinator.reload()
             
             // Success haptic
             let successGenerator = UINotificationFeedbackGenerator()
@@ -1096,7 +1093,7 @@ struct LogView: View {
         startLiveTimerIfNeeded()
         
         // Update widget persistence helper immediately after logging
-        updateWidgetPersistenceHelper()
+        Task { await updateWidgetPersistenceHelper() }
     }
     
     func logPouchFromCan(_ can: Can) {
@@ -1113,8 +1110,8 @@ struct LogView: View {
         
         if success {
             startLiveTimerIfNeeded()
-            updateWidgetPersistenceHelper()
-            
+            Task { await updateWidgetPersistenceHelper() }
+
             // Refresh can list to update counts
             canManager.fetchActiveCans(context: ctx)
         }
@@ -1198,7 +1195,7 @@ struct LogView: View {
         let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
         Task {
             await LiveActivityManager.endLiveActivity(for: pouchId)
-            WidgetCenter.shared.reloadAllTimelines()
+            WidgetReloadCoordinator.reload()
         }
     }
 
@@ -1248,7 +1245,7 @@ struct LogView: View {
                 }
             }
         } else {
-            WidgetCenter.shared.reloadAllTimelines()
+            WidgetReloadCoordinator.reload()
         }
     }
 
@@ -1317,7 +1314,7 @@ struct LogView: View {
         let shouldUpdate = timeSinceLastUpdate >= 120 || checkIfPouchCompleted()
         
         if shouldUpdate {
-            WidgetCenter.shared.reloadAllTimelines()
+            WidgetReloadCoordinator.reload()
             lastWidgetUpdate = now
         }
     }
@@ -1348,7 +1345,7 @@ struct LogView: View {
 
     func throttledWidgetReload(at now: Date) {
         if now.timeIntervalSince(lastWidgetUpdate) >= 30 {
-            WidgetCenter.shared.reloadAllTimelines()
+            WidgetReloadCoordinator.reload()
             lastWidgetUpdate = now
         }
     }
@@ -1393,21 +1390,23 @@ struct LogView: View {
     
     // MARK: - Widget Persistence Helper Update
     
-    private func updateWidgetPersistenceHelper() {
+    private func updateWidgetPersistenceHelper() async {
         let helper = WidgetPersistenceHelper()
-        
+
         // Check if there are any active pouches
         if activePouches.isEmpty {
             // No active pouches, mark activity as ended
             helper.markActivityEnded()
         } else {
-            // Calculate current nicotine levels for active pouches
-            let currentLevel = calculateCurrentTotalNicotineLevel()
+            // Calculate the current nicotine level via the centralized calculator.
+            // This previously blocked the main thread on a DispatchSemaphore for up
+            // to 500ms per widget snapshot write; we now await it directly.
+            let currentLevel = await NicotineCalculator().calculateTotalNicotineLevel(context: ctx)
             let pouchName = "\(activePouches.count) active pouch\(activePouches.count > 1 ? "es" : "")"
             // Use the pouch's specific duration, not the app default
             let pouchSpecificDuration = activePouches.first.map { TimeInterval($0.timerDuration * 60) } ?? FULL_RELEASE_TIME
             let endTime = activePouches.first?.insertionTime?.addingTimeInterval(pouchSpecificDuration)
-            
+
             // Update the persistence helper with current data
             helper.setFromLiveActivity(
                 level: currentLevel,
@@ -1416,23 +1415,6 @@ struct LogView: View {
                 endTime: endTime
             )
         }
-    }
-    
-    private func calculateCurrentTotalNicotineLevel() -> Double {
-        // Use the centralized calculator to ensure consistency across all views
-        let calculator = NicotineCalculator()
-        // Calculate asynchronously but return synchronously for UI compatibility
-        let semaphore = DispatchSemaphore(value: 0)
-        var result: Double = 0.0
-        
-        Task {
-            result = await calculator.calculateTotalNicotineLevel(context: ctx)
-            semaphore.signal()
-        }
-        
-        // Wait for async calculation to complete (with timeout)
-        _ = semaphore.wait(timeout: .now() + 0.5)
-        return result
     }
     
     // Updates nicotine level information for the Start Timer button
@@ -1633,7 +1615,7 @@ struct LogView: View {
         Task {
             try? await Task.sleep(nanoseconds: 1 * NSEC_PER_SEC)
             helper.markActivityEnded()
-            WidgetCenter.shared.reloadAllTimelines()
+            WidgetReloadCoordinator.reload()
         }
     }
 }

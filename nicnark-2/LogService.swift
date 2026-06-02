@@ -138,7 +138,12 @@ enum LogService {
             // Fall back to app's global timer setting
             durationSeconds = FULL_RELEASE_TIME
         }
-        pouch.timerDuration = Int32(durationSeconds / 60)  // Store in Core Data as minutes
+        // Store in Core Data as minutes. Round to the nearest minute instead of truncating:
+        // the multi-pouch weighted-average path can produce fractional minutes, and truncation
+        // always lost up to ~59s. (A fully exact fix would add an additive optional
+        // `timerDurationSeconds: Double` in a new Core Data model version — see
+        // OPTIMIZATION_NOTES.md; that requires an Xcode-side migration + device test.)
+        pouch.timerDuration = Int32((durationSeconds / 60).rounded())
         
         // STEP 5: Link to inventory and decrement pouch count (if logging from a tracked can)
         if let can = can {
@@ -152,17 +157,11 @@ enum LogService {
             try ctx.save()
             print("✅ PouchLog saved successfully: \(mg)mg at \(Date().formatted(.dateTime.hour().minute()))")
             
-            // Immediately trigger CloudKit sync so other devices see this pouch
-            // Using multiple sync methods for maximum reliability
-            Task {
-                // Method 1: Core Data's built-in CloudKit sync
-                await PersistenceController.shared.triggerCloudKitSync()
-                
-                // Method 2: Custom sync manager (iOS 16.1+ for better Live Activity coordination)
-                if #available(iOS 16.1, *) {
-                    await CloudKitSyncManager.shared.triggerManualSync()
-                }
-            }
+            // NSPersistentCloudKitContainer automatically schedules a CloudKit export
+            // after every ctx.save(), so other devices pick this up on their own. We used
+            // to fire BOTH triggerCloudKitSync() and triggerManualSync() here on every log
+            // (a full history fetch + accountStatus round-trip + reconcile) — pure overhead
+            // on the hot path with no functional benefit.
         } catch {
             print("❌ Failed to save PouchLog: \(error)")
             print("❌ Error details: \(error.localizedDescription)")
@@ -210,7 +209,7 @@ enum LogService {
         
         // STEP 11: Update home screen widgets with the new pouch data
         updateWidgetPersistenceHelperAfterLogging(pouch: pouch, ctx: ctx)  // Store widget-specific data
-        WidgetCenter.shared.reloadAllTimelines()                          // Tell iOS to refresh widgets
+        WidgetReloadCoordinator.reload()                          // Tell iOS to refresh widgets
         
         // STEP 12: Check for additional notifications (inventory alerts, usage reminders)
         Task {
