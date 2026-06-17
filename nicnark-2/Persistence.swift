@@ -238,10 +238,35 @@ print("📍 Store URL: \(storeDescription.url?.absoluteString ?? "Unknown")")
 enum CloudKitEventMonitor {
     nonisolated private static let logger = Logger(subsystem: "com.nicnark.nicnark-2", category: "CloudKitEvents")
 
+    /// `UserDefaults` key for the in-app ring buffer of recent event lines (viewable in Settings →
+    /// CloudKit → "Event Log" on a device with no Mac/Console attached).
+    nonisolated private static let logBufferKey = "ckEventLogBuffer"
+    /// Keep the buffer small — the most recent events are what matter for diagnosis.
+    nonisolated private static let maxBufferedLines = 60
+
     /// Runtime debug flag. Defaults ON so a TestFlight install logs without a debug build.
     /// `nonisolated`: only touches `UserDefaults` (Sendable-safe) so the observer block can read it.
     nonisolated static var isEnabled: Bool {
         UserDefaults.standard.object(forKey: "ckEventLoggingEnabled") as? Bool ?? true
+    }
+
+    /// Most-recent-last list of formatted event lines, for the in-app viewer.
+    nonisolated static func recentLog() -> [String] {
+        UserDefaults.standard.stringArray(forKey: logBufferKey) ?? []
+    }
+
+    /// Clear the in-app buffer (so a fresh "log a pouch" test starts clean).
+    nonisolated static func clearLog() {
+        UserDefaults.standard.removeObject(forKey: logBufferKey)
+    }
+
+    /// Append one line to the capped ring buffer. UserDefaults is thread-safe; the observer
+    /// block runs serially on the main queue, so the read-modify-write here is race-free.
+    nonisolated private static func appendToBuffer(_ line: String) {
+        var lines = UserDefaults.standard.stringArray(forKey: logBufferKey) ?? []
+        lines.append(line)
+        if lines.count > maxBufferedLines { lines.removeFirst(lines.count - maxBufferedLines) }
+        UserDefaults.standard.set(lines, forKey: logBufferKey)
     }
 
     /// Register the observer. Called once from `PersistenceController.init` for the real store.
@@ -270,17 +295,21 @@ enum CloudKitEventMonitor {
         }
 
         // endDate == nil → operation just *started*; non-nil → it *finished* (succeeded/error meaningful).
-        let id = event.identifier.uuidString
+        let id = event.identifier.uuidString.prefix(8)
+        let time = Date.now.formatted(date: .omitted, time: .standard)
 
         if event.endDate == nil {
             logger.debug("☁️… CK \(kind, privacy: .public) started id=\(id, privacy: .public)")
+            appendToBuffer("\(time)  \(kind) … started  [\(id)]")
             return
         }
 
         if let error = event.error {
             logger.error("☁️❌ CK \(kind, privacy: .public) FAILED id=\(id, privacy: .public) error=\(error.localizedDescription, privacy: .public) full=\(String(describing: error), privacy: .public)")
+            appendToBuffer("\(time)  \(kind) ❌ FAILED  [\(id)]\n   \(error.localizedDescription)\n   \(String(describing: error))")
         } else {
             logger.info("☁️✅ CK \(kind, privacy: .public) finished succeeded=\(event.succeeded, privacy: .public) id=\(id, privacy: .public)")
+            appendToBuffer("\(time)  \(kind) ✅ finished succeeded=\(event.succeeded)  [\(id)]")
         }
     }
 }

@@ -81,6 +81,8 @@ struct SettingsView: View {
     @State private var showingDiagnostics = false
     @State private var diagnosticsResult = ""
     @State private var isRunningDiagnostics = false
+    @State private var showingEventLog = false
+    @State private var eventLogText = ""
     @State private var isTestingSyncData = false
     @State private var showingSyncProgress = false
     @State private var showingExportSheet = false
@@ -170,6 +172,38 @@ struct SettingsView: View {
                         Button("Done") {
                             showingDiagnostics = false
                         }
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showingEventLog) {
+            NavigationView {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(eventLogText)
+                            .font(.system(.caption2, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding()
+                            .background(Color(.secondarySystemBackground))
+                            .cornerRadius(8)
+                    }
+                    .padding()
+                }
+                .navigationTitle("CloudKit Event Log")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItemGroup(placement: .navigationBarTrailing) {
+                        Button("Copy") {
+                            #if canImport(UIKit)
+                            UIPasteboard.general.string = eventLogText
+                            #endif
+                        }
+                        Button("Clear") {
+                            CloudKitEventMonitor.clearLog()
+                            eventLogText = "Cleared. Log a pouch, then reopen."
+                        }
+                        Button("Done") { showingEventLog = false }
                     }
                 }
             }
@@ -585,6 +619,17 @@ struct SettingsView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.mini)
                     .disabled(isRunningDiagnostics)
+
+                    Button("Event Log") {
+                        let lines = CloudKitEventMonitor.recentLog()
+                        eventLogText = lines.isEmpty
+                            ? "No CloudKit sync events recorded yet.\n\nLog a pouch, then reopen this. Each import/export attempt and its success/error will appear here."
+                            : lines.joined(separator: "\n")
+                        showingEventLog = true
+                    }
+                    .font(.caption2)
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
                     
                     Button("Test Sync") {
                         isTestingSyncData = true
