@@ -83,6 +83,12 @@ struct SettingsView: View {
     @State private var isRunningDiagnostics = false
     @State private var showingEventLog = false
     @State private var eventLogText = ""
+    // Stalled-export recovery (works in Release/TestFlight; unlocked by tapping Sync Status 5×).
+    @State private var recoveryUnlocked = false
+    @State private var recoveryTapCount = 0
+    @State private var showingReuploadConfirm = false
+    @State private var isReuploading = false
+    @State private var reuploadStatus = ""
     @State private var isTestingSyncData = false
     @State private var showingSyncProgress = false
     @State private var showingExportSheet = false
@@ -136,6 +142,19 @@ struct SettingsView: View {
             }
         } message: {
             Text("This permanently deletes ALL app data. This cannot be undone.")
+        }
+        .alert("Reset CloudKit Zone?", isPresented: $showingReuploadConfirm) {
+            Button("Cancel", role: .cancel) { }
+            Button("Reset & Re-upload", role: .destructive) {
+                isReuploading = true
+                reuploadStatus = ""
+                Task {
+                    reuploadStatus = await syncManager.resetCloudKitZoneForFullReupload()
+                    isReuploading = false
+                }
+            }
+        } message: {
+            Text("Deletes this account's CloudKit copy and re-uploads ALL data from THIS device. Your local data is kept. Export a CSV backup first. After it completes you must force-quit and reopen the app to start the upload.")
         }
         .task {
             exportStats = await ExportManager.getExportStatistics(context: viewContext)
@@ -592,7 +611,7 @@ struct SettingsView: View {
             HStack {
                 Image(systemName: syncStatusIcon)
                     .foregroundColor(syncStatusColor)
-                
+
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Sync Status")
                         .font(.subheadline)
@@ -600,8 +619,14 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
-                
+
                 Spacer()
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                guard !recoveryUnlocked else { return }
+                recoveryTapCount += 1
+                if recoveryTapCount >= 5 { recoveryUnlocked = true }
             }
             
             // Diagnostic and sync buttons
@@ -661,7 +686,40 @@ struct SettingsView: View {
                 }
                 .padding(.top, 4)
             }
-            
+
+            // Stalled-export recovery (hidden until Sync Status tapped 5×).
+            if recoveryUnlocked {
+                VStack(alignment: .leading, spacing: 6) {
+                    Divider()
+                    Label("Recovery", systemImage: "wrench.and.screwdriver")
+                        .font(.caption.bold())
+                        .foregroundColor(.orange)
+                    Text("Force a full re-upload of this device's data to iCloud by resetting the CloudKit zone. Use only if exports are stuck. Export a CSV backup first.")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    HStack {
+                        Button(role: .destructive) {
+                            showingReuploadConfirm = true
+                        } label: {
+                            Text(isReuploading ? "Resetting…" : "Reset Zone & Re-upload")
+                        }
+                        .font(.caption2)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.mini)
+                        .disabled(isReuploading || !syncManager.isCloudKitAvailable)
+
+                        if isReuploading { ProgressView().scaleEffect(0.6) }
+                    }
+                    if !reuploadStatus.isEmpty {
+                        Text(reuploadStatus)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+                .padding(.top, 4)
+            }
+
             // Cross-Device Features Info
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "iphone.and.ipad")

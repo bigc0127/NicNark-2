@@ -710,8 +710,62 @@ class CloudKitSyncManager: ObservableObject {
         }
     }
     
+    // MARK: - Stalled-Export Recovery
+
+    /**
+     Recovery for a stalled/poisoned `NSPersistentCloudKitContainer` export queue.
+
+     Symptom this fixes: the local store holds far more records than CloudKit (e.g. 2625 local
+     vs 57 in the cloud, frozen for months) because one rejected export transaction blocked the
+     queue and the container never recovered — even after the Production schema was corrected.
+
+     Fix: delete the Core Data CloudKit record zone (`com.apple.coredata.cloudkit.zone`) in the
+     private database. When the container next initializes and finds the zone missing, it
+     re-creates it and re-uploads the **entire local store** from scratch — bypassing the stuck
+     transaction entirely.
+
+     SAFE ONLY when this device holds the superset of data (it does here: cloud ⊂ local). The
+     caller MUST force-quit and relaunch the app immediately after this returns, so the container
+     re-initializes from a clean state and re-uploads, rather than trying to reconcile the
+     deletion in the current session. Recommend the user export a CSV backup beforehand.
+
+     - Returns: a human-readable status string for display.
+     */
+    func resetCloudKitZoneForFullReupload() async -> String {
+        guard isCloudKitAvailable else {
+            return "❌ CloudKit not available — cannot reset (check iCloud sign-in / network)."
+        }
+
+        let zoneID = CKRecordZone.ID(zoneName: "com.apple.coredata.cloudkit.zone",
+                                     ownerName: CKCurrentUserDefaultName)
+        logger.info("🧨 Deleting CloudKit zone \(zoneID.zoneName, privacy: .public) to force full re-upload")
+        do {
+            let result = try await container.privateCloudDatabase.modifyRecordZones(
+                saving: [], deleting: [zoneID]
+            )
+            if case .failure(let error)? = result.deleteResults[zoneID] {
+                let nsError = error as NSError
+                // Zone already gone is effectively success for our purpose.
+                if nsError.domain == CKError.errorDomain, nsError.code == CKError.zoneNotFound.rawValue {
+                    return "ℹ️ Cloud zone was already absent. Force-quit and reopen the app to trigger the full re-upload."
+                }
+                logger.error("❌ Zone delete failed: \(error.localizedDescription, privacy: .public)")
+                return "❌ Zone delete failed: \(error.localizedDescription)"
+            }
+            logger.info("✅ CloudKit zone deleted — full re-upload will begin on next launch")
+            return "✅ Cloud zone deleted.\n\nNOW: force-quit the app (swipe it away) and reopen it. The full re-upload of all local records will begin — keep the app open and on Wi-Fi; it can take several minutes for 2000+ records. Watch Event Log for repeated 'export ✅' lines."
+        } catch {
+            let nsError = error as NSError
+            if nsError.domain == CKError.errorDomain, nsError.code == CKError.zoneNotFound.rawValue {
+                return "ℹ️ Cloud zone was already absent. Force-quit and reopen the app to trigger the full re-upload."
+            }
+            logger.error("❌ Zone reset failed: \(error.localizedDescription, privacy: .public)")
+            return "❌ Zone reset failed: \(error.localizedDescription)"
+        }
+    }
+
     // MARK: - Public API
-    
+
     func getSyncStatusText() -> String {
         if isCloudKitAvailable {
             if let lastSync = lastSyncDate {
