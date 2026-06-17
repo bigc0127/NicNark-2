@@ -138,6 +138,12 @@ print("📍 Store URL: \(storeDescription.url?.absoluteString ?? "Unknown")")
         container.viewContext.automaticallyMergesChangesFromParent = true
         container.viewContext.mergePolicy = NSMergePolicy.mergeByPropertyObjectTrump
 
+        // Surface CloudKit sync (import/export) health so we can confirm records actually
+        // reach the CloudKit *Production* environment. Real store only (no CloudKit in previews).
+        if !inMemory {
+            CloudKitEventMonitor.start(for: container)
+        }
+
         // Check CloudKit account status on init
         Task.detached {
             await Self.checkCloudKitStatus()
@@ -209,6 +215,72 @@ print("📍 Store URL: \(storeDescription.url?.absoluteString ?? "Unknown")")
             }
         } catch {
             Self.logger.error("❌ Failed to check CloudKit status: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+}
+
+// MARK: - CloudKit Sync Event Monitor
+
+/**
+ Debug-gated observer of `NSPersistentCloudKitContainer.eventChangedNotification`.
+
+ Logs CloudKit setup / import / **export** outcomes (succeeded flag + error) so we can
+ verify that local saves actually reach CloudKit. This is the signal that tells us whether
+ the Production schema deploy worked: before the deploy, export events for records carrying
+ the `CD_timerDuration` field fail; after, they should report `succeeded=true`.
+
+ Visible in **Console.app** (or the Xcode device console) filtered to subsystem
+ `com.nicnark.nicnark-2`, category `CloudKitEvents`. Intentionally NOT gated on `#if DEBUG`
+ — it must work on a TestFlight/Release build (Production environment) to confirm the fix.
+ Gated instead on a runtime flag (`UserDefaults` key `ckEventLoggingEnabled`, default on);
+ set that key to `false` to silence.
+ */
+enum CloudKitEventMonitor {
+    nonisolated private static let logger = Logger(subsystem: "com.nicnark.nicnark-2", category: "CloudKitEvents")
+
+    /// Runtime debug flag. Defaults ON so a TestFlight install logs without a debug build.
+    /// `nonisolated`: only touches `UserDefaults` (Sendable-safe) so the observer block can read it.
+    nonisolated static var isEnabled: Bool {
+        UserDefaults.standard.object(forKey: "ckEventLoggingEnabled") as? Bool ?? true
+    }
+
+    /// Register the observer. Called once from `PersistenceController.init` for the real store.
+    /// The block runs on the main queue and logs synchronously, so it captures no mutable state
+    /// (Swift 6 concurrency-safe) and never needs to be removed for the app's lifetime.
+    nonisolated static func start(for container: NSPersistentCloudKitContainer) {
+        NotificationCenter.default.addObserver(
+            forName: NSPersistentCloudKitContainer.eventChangedNotification,
+            object: container,
+            queue: .main
+        ) { note in
+            guard isEnabled else { return }
+            guard let event = note.userInfo?[NSPersistentCloudKitContainer.eventNotificationUserInfoKey]
+                    as? NSPersistentCloudKitContainer.Event else { return }
+            log(event)
+        }
+    }
+
+    nonisolated private static func log(_ event: NSPersistentCloudKitContainer.Event) {
+        let kind: String
+        switch event.type {
+        case .setup:  kind = "setup"
+        case .import: kind = "import"
+        case .export: kind = "export"
+        @unknown default: kind = "unknown"
+        }
+
+        // endDate == nil → operation just *started*; non-nil → it *finished* (succeeded/error meaningful).
+        let id = event.identifier.uuidString
+
+        if event.endDate == nil {
+            logger.debug("☁️… CK \(kind, privacy: .public) started id=\(id, privacy: .public)")
+            return
+        }
+
+        if let error = event.error {
+            logger.error("☁️❌ CK \(kind, privacy: .public) FAILED id=\(id, privacy: .public) error=\(error.localizedDescription, privacy: .public) full=\(String(describing: error), privacy: .public)")
+        } else {
+            logger.info("☁️✅ CK \(kind, privacy: .public) finished succeeded=\(event.succeeded, privacy: .public) id=\(id, privacy: .public)")
         }
     }
 }
