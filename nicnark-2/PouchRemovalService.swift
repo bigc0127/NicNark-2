@@ -66,6 +66,12 @@ enum PouchRemovalService {
         WidgetReloadCoordinator.reload()
         // CloudKit export is scheduled automatically by NSPersistentCloudKitContainer on save.
 
+        // Push the updated state to a paired Apple Watch so it reflects the removal even
+        // while this app is backgrounded. No-op if no watch is paired.
+        #if os(iOS)
+        await WatchConnectivityBridge.shared.pushHomeToWatch()
+        #endif
+
         return true
     }
 
@@ -123,6 +129,12 @@ enum PouchRemovalService {
         // Single widget snapshot refresh + one coalesced reload for the whole batch.
         await updateWidgetSnapshot(in: context)
         WidgetReloadCoordinator.reload()
+
+        // Push the updated state to a paired Apple Watch so it reflects the removals even
+        // while this app is backgrounded. No-op if no watch is paired.
+        #if os(iOS)
+        await WatchConnectivityBridge.shared.pushHomeToWatch()
+        #endif
 
         return removedIds.count
     }

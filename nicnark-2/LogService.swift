@@ -217,6 +217,12 @@ enum LogService {
         // STEP 11: Update home screen widgets with the new pouch data
         updateWidgetPersistenceHelperAfterLogging(pouch: pouch, ctx: ctx)  // Store widget-specific data
         WidgetReloadCoordinator.reload()                          // Tell iOS to refresh widgets
+
+        // Push the new state to a paired Apple Watch so it updates passively (the watch
+        // can't reach the phone when it's backgrounded). No-op if no watch is paired.
+        #if os(iOS)
+        Task { @MainActor in await WatchConnectivityBridge.shared.pushHomeToWatch() }
+        #endif
         
         // STEP 12: Check for additional notifications (inventory alerts, usage reminders)
         Task {

@@ -27,6 +27,28 @@ final class WatchConnectivityBridge: NSObject {
         session.delegate = self
         session.activate()
     }
+
+    /// Proactively pushes the latest watch-home snapshot to the paired watch via
+    /// `updateApplicationContext`. Unlike `sendMessage`, application context is delivered in
+    /// the background and persists as the watch's last-known state — so the watch stays in
+    /// sync even when this app isn't reachable (foregrounded). Call this whenever pouch data
+    /// changes on the phone (log / removal). Safe no-op when no watch is paired or installed.
+    @MainActor
+    func pushHomeToWatch() async {
+        guard WCSession.isSupported() else { return }
+        let session = WCSession.default
+        guard session.activationState == .activated,
+              session.isPaired,
+              session.isWatchAppInstalled else { return }
+
+        let ctx = PersistenceController.shared.container.viewContext
+        var payload = await makeWatchHomePayload(in: ctx)
+        payload["ok"] = true
+        // WCSession coalesces identical application contexts; a changing timestamp guarantees
+        // each successive update is actually delivered to the watch.
+        payload["updatedAt"] = Date().timeIntervalSince1970
+        try? session.updateApplicationContext(payload)
+    }
 }
 
 extension WatchConnectivityBridge: WCSessionDelegate {
@@ -67,6 +89,9 @@ extension WatchConnectivityBridge: WCSessionDelegate {
         let t = Transfer(userInfo: userInfo)
         Task { @MainActor in
             _ = await handleRequest(t.userInfo, expectsReply: false)
+            // The watch queued this action while unreachable and got no reply. Push the
+            // updated snapshot via application context so its UI reflects the change.
+            await pushHomeToWatch()
         }
     }
 
@@ -234,11 +259,18 @@ extension WatchConnectivityBridge: WCSessionDelegate {
         // was ~49 identical Core Data fetches per watch refresh.
         let pouches = (try? calculator.fetchRecentPouches(context: ctx, endingAt: start)) ?? []
 
+        // Pin the lookback floor to a FIXED window start (matching the fetch's lower bound,
+        // start - 10h) so the SAME pouch set contributes at every sample. Without this,
+        // levelFromPouches defaults its floor to `t - 10h`, a window that moves forward as
+        // `t` advances and silently drops aging pouches mid-graph, injecting a spurious
+        // downward step in the decay tail. Mirrors NicotineCalculator.projectNicotineLevels.
+        let windowStart = start.addingTimeInterval(-10 * 3600)
+
         var points: [[String: Any]] = []
         var t = start
 
         while t <= end {
-            let level = calculator.levelFromPouches(pouches, at: t)
+            let level = calculator.levelFromPouches(pouches, at: t, lookbackFloor: windowStart)
             points.append([
                 "time": t.timeIntervalSince1970,
                 "level": max(0, level)

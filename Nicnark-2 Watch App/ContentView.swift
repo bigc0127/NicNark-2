@@ -27,7 +27,7 @@ struct WatchCanSummary: Identifiable, Hashable, Sendable {
     }
 
     var subtitle: String {
-        let strengthText = "\(Int(strength))mg"
+        let strengthText = "\(safeInt(strength))mg"
         let countText = "\(pouchCount) left"
         return "\(strengthText) • \(countText)"
     }
@@ -38,11 +38,14 @@ struct WatchActivePouchSummary: Identifiable, Hashable, Sendable {
     let mg: Double
     let brand: String
     let flavor: String
-    let remainingSeconds: TimeInterval
+    /// Absolute time the pouch is modeled to finish absorbing. Stored as a date (not a
+    /// precomputed "seconds remaining") so the watch can render a live, self-updating
+    /// countdown instead of a value frozen at the moment of the last sync.
+    let removalDate: Date
 
     var title: String {
         if brand.isEmpty && flavor.isEmpty {
-            return "\(Int(mg))mg pouch"
+            return "\(safeInt(mg))mg pouch"
         }
 
         let base = brand.isEmpty ? "Pouch" : brand
@@ -51,7 +54,15 @@ struct WatchActivePouchSummary: Identifiable, Hashable, Sendable {
     }
 
     var subtitle: String {
-        "\(Int(mg))mg • \(formatMinutesSeconds(remainingSeconds)) left"
+        "\(safeInt(mg))mg"
+    }
+
+    /// Crash-safe range for `Text(timerInterval:countsDown:)`. A reversed `ClosedRange`
+    /// (lowerBound > upperBound) traps, so clamp the start to never exceed `removalDate`;
+    /// once the timer has elapsed this collapses to a zero-length range and renders 00:00.
+    var countdownRange: ClosedRange<Date> {
+        let now = Date()
+        return min(now, removalDate)...removalDate
     }
 }
 
@@ -62,9 +73,16 @@ struct WatchNicotinePoint: Identifiable, Hashable, Sendable {
     var id: TimeInterval { time.timeIntervalSince1970 }
 }
 
-private func formatMinutesSeconds(_ timeInterval: TimeInterval) -> String {
-    let seconds = Int(max(timeInterval, 0))
-    return String(format: "%02d:%02d", seconds / 60, seconds % 60)
+/// Converts a `Double` to `Int` without trapping. The stdlib `Int(_:)` initializer fatally
+/// crashes on NaN, ±Infinity, or any value outside `Int`'s range — and these summaries are
+/// built from raw WatchConnectivity payload doubles, so a single non-finite value (e.g. from
+/// a corrupt sync) would otherwise crash the List on every render and every relaunch.
+private func safeInt(_ value: Double) -> Int {
+    guard value.isFinite else { return 0 }
+    let rounded = value.rounded()
+    if rounded >= Double(Int.max) { return Int.max }
+    if rounded <= Double(Int.min) { return Int.min }
+    return Int(rounded)
 }
 
 // MARK: - ViewModel
@@ -87,6 +105,11 @@ final class WatchDashboardViewModel: NSObject, ObservableObject {
 
     private var session: WCSession?
 
+    // Guards so onAppear (which fires on every re-appear) doesn't re-activate the session
+    // or surface a spurious error before activation has settled.
+    private var didStart = false
+    private var hasActivated = false
+
     // Idempotency for watch-initiated logging: reuse the same request id when the
     // user re-taps the SAME can after a failed/uncertain send, so the iPhone can
     // de-duplicate a retry instead of double-logging. Cleared once any successful
@@ -97,9 +120,17 @@ final class WatchDashboardViewModel: NSObject, ObservableObject {
     // is reused ONLY after such a failure, so a deliberate re-tap of the same can still
     // logs a second pouch instead of being silently de-duplicated as a retry.
     private var lastLogFailedCanId: String?
+    // Timestamp of that last failed log send. Request-id reuse is additionally bounded to a
+    // short window after the failure, so a deliberate same-can re-tap minutes later logs a
+    // real second pouch instead of being deduped against a stale "retry".
+    private var lastLogFailedAt: Date?
 
     func start() {
+        // onAppear fires on every re-appear; only activate once. (Set the flag AFTER the
+        // isSupported check so an unsupported device isn't permanently latched.)
+        guard !didStart else { return }
         guard WCSession.isSupported() else { return }
+        didStart = true
 
         let session = WCSession.default
         session.delegate = self
@@ -107,9 +138,21 @@ final class WatchDashboardViewModel: NSObject, ObservableObject {
         self.session = session
 
         updateReachability(from: session)
+
+        // Seed immediately from the last snapshot the iPhone pushed via application context,
+        // so a cold launch shows real data right away — even before activation completes or
+        // while the iPhone is unreachable (backgrounded).
+        let cached = session.receivedApplicationContext
+        if !cached.isEmpty {
+            applyHomeReply(cached)
+        }
     }
 
     func refresh() {
+        // Skip if a fetch is already in flight: onAppear, activation, and reachability
+        // callbacks can all call refresh() near-simultaneously.
+        guard !isLoading else { return }
+
         errorMessage = nil
         statusMessage = nil
 
@@ -120,7 +163,19 @@ final class WatchDashboardViewModel: NSObject, ObservableObject {
 
         guard session.isReachable else {
             updateReachability(from: session)
-            errorMessage = "Open the iPhone app to refresh"
+            // Can't reach the iPhone live, so fall back to the last snapshot it pushed via
+            // application context — a backgrounded phone still shows recent data instead of
+            // an error.
+            let cached = session.receivedApplicationContext
+            if !cached.isEmpty {
+                applyHomeReply(cached)
+                statusMessage = "Showing last synced data"
+            } else if hasActivated {
+                // Only surface the hint once activation has settled, so the cold-launch race
+                // (refresh() running before activationDidComplete) doesn't flash an error
+                // before any data has had a chance to arrive.
+                errorMessage = "Open the iPhone app to refresh"
+            }
             return
         }
 
@@ -148,7 +203,11 @@ final class WatchDashboardViewModel: NSObject, ObservableObject {
         // FAILED (so the iPhone dedups a genuine retry). A deliberate re-tap after a normal
         // send still mints a fresh id, so two intentional taps log two pouches.
         let requestId: String
-        if pendingLogCanId == can.id, let existing = pendingLogRequestId, lastLogFailedCanId == can.id {
+        // Reuse only within a short retry window after an actual failure — well inside the
+        // iPhone's 300s dedup window — so a deliberate re-tap of the same can a minute or
+        // more later still mints a fresh id and logs a real second pouch.
+        let recentFailure = lastLogFailedAt.map { Date().timeIntervalSince($0) < 60 } ?? false
+        if pendingLogCanId == can.id, let existing = pendingLogRequestId, lastLogFailedCanId == can.id, recentFailure {
             requestId = existing
         } else {
             requestId = UUID().uuidString
@@ -156,6 +215,7 @@ final class WatchDashboardViewModel: NSObject, ObservableObject {
         pendingLogCanId = can.id
         pendingLogRequestId = requestId
         lastLogFailedCanId = nil  // this attempt is fresh until/unless its send fails
+        lastLogFailedAt = nil
 
         sendAction(
             ["action": "logPouchFromCanId", "canId": can.id, "requestId": requestId],
@@ -208,6 +268,7 @@ final class WatchDashboardViewModel: NSObject, ObservableObject {
                         if message["action"] as? String == "logPouchFromCanId",
                            let canId = message["canId"] as? String {
                             self?.lastLogFailedCanId = canId
+                            self?.lastLogFailedAt = Date()
                         }
                     }
                 }
@@ -277,13 +338,23 @@ final class WatchDashboardViewModel: NSObject, ObservableObject {
                 let mg = dict["mg"] as? Double ?? 0
                 let brand = dict["brand"] as? String ?? ""
                 let flavor = dict["flavor"] as? String ?? ""
-                let remaining = dict["remaining"] as? Double ?? 0
+                // Prefer absolute insertionTime + duration so the watch can run a live
+                // countdown; fall back to the precomputed `remaining` (relative to now) for
+                // older payloads that don't carry the absolute fields.
+                let removalDate: Date
+                if let insertion = dict["insertionTime"] as? Double,
+                   let duration = dict["duration"] as? Double {
+                    removalDate = Date(timeIntervalSince1970: insertion + duration)
+                } else {
+                    let remaining = dict["remaining"] as? Double ?? 0
+                    removalDate = Date().addingTimeInterval(max(0, remaining))
+                }
                 return WatchActivePouchSummary(
                     id: id,
                     mg: mg,
                     brand: brand,
                     flavor: flavor,
-                    remainingSeconds: remaining
+                    removalDate: removalDate
                 )
             }
         }
@@ -311,16 +382,36 @@ extension WatchDashboardViewModel: WCSessionDelegate {
         let reachable = session.isReachable
         let activated = (activationState == .activated)
         let errMsg = error?.localizedDescription
+        // [String: Any] isn't Sendable; wrap it to cross into the MainActor task safely
+        // (WC application-context values are plist types, so this is sound).
+        struct Box: @unchecked Sendable { let ctx: [String: Any] }
+        let box = Box(ctx: session.receivedApplicationContext)
         Task { @MainActor in
             isReachable = reachable
+            if activated { hasActivated = true }
             if let errMsg {
                 errorMessage = errMsg
+            }
+            // Render whatever the iPhone last pushed, even if we can't reach it now.
+            if !box.ctx.isEmpty {
+                applyHomeReply(box.ctx)
             }
             // onAppear's refresh() bails before activation completes, so load now
             // that the session is ready. (refresh() clears any stale error itself.)
             if activated && reachable && !isLoading {
                 refresh()
             }
+        }
+    }
+
+    nonisolated func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
+        // The iPhone proactively pushed a fresh watch-home snapshot (e.g. after a pouch was
+        // logged or removed on the phone). Apply it so the watch updates passively without
+        // the user needing to be reachable or to tap Refresh.
+        struct Box: @unchecked Sendable { let ctx: [String: Any] }
+        let box = Box(ctx: applicationContext)
+        Task { @MainActor in
+            applyHomeReply(box.ctx)
         }
     }
 
@@ -346,7 +437,11 @@ struct ContentView: View {
     var body: some View {
         List {
             Section {
-                if !vm.activePouches.isEmpty {
+                // Show the chart whenever there is meaningful residual nicotine — not only
+                // while a pouch is active — so the decay tail after the last removal is still
+                // visible (and tappable to the fullscreen chart). The iPhone always emits
+                // graph points, so gate on level rather than non-emptiness.
+                if vm.graphPoints.contains(where: { $0.level > 0.01 }) {
                     WatchNicotineChartCompact(points: vm.graphPoints)
                         .frame(height: 96)
                         .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
@@ -401,10 +496,16 @@ struct ContentView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(pouch.title)
                                 .lineLimit(1)
-                            Text(pouch.subtitle)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
+                            HStack(spacing: 4) {
+                                Text(pouch.subtitle)
+                                // Self-updating countdown — no manual Timer needed, and it
+                                // stays accurate between syncs instead of freezing at the
+                                // value captured when the snapshot was last received.
+                                Text(timerInterval: pouch.countdownRange, countsDown: true)
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                         }
                         .swipeActions(edge: .trailing) {
                             Button(role: .destructive) {
