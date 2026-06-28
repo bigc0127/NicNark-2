@@ -18,9 +18,14 @@ import os.log
 /// Absorption fraction - 30% of nicotine gets absorbed
 private let WIDGET_ABSORPTION_FRACTION: Double = 0.30
 
-/// Dynamic absorption time based on user preference
+/// Dynamic absorption time based on user preference.
+/// Read from the shared App Group suite (NOT UserDefaults.standard): the widget runs
+/// in a separate process whose `.standard` domain is the extension's own and never
+/// sees the user's setting. The app mirrors `selectedTimerDuration` into this suite
+/// (see TimerSettings), so both processes agree.
 private var WIDGET_FULL_RELEASE_TIME: TimeInterval {
-    let savedValue = UserDefaults.standard.integer(forKey: "selectedTimerDuration")
+    let groupDefaults = UserDefaults(suiteName: "group.ConnorNeedling.nicnark-2")
+    let savedValue = groupDefaults?.integer(forKey: "selectedTimerDuration") ?? 0
     switch savedValue {
     case 45: return 45 * 60  // 45 minutes in seconds
     case 60: return 60 * 60  // 60 minutes in seconds

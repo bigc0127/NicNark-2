@@ -381,7 +381,7 @@ struct CanRowView: View {
      * - Red: <20% remaining (critical - needs restocking)
      */
     private var progressColor: Color {
-        let percentage = Double(can.pouchCount) / Double(can.initialCount)
+        let percentage = can.remainingPercentage   // guarded: returns 0 when initialCount <= 0
         if percentage > 0.5 {
             return .green
         } else if percentage > 0.2 {
@@ -447,7 +447,7 @@ struct CanRowView: View {
                             RoundedRectangle(cornerRadius: 2)
                                 .fill(progressColor)
                                 .frame(
-                                    width: geometry.size.width * (Double(can.pouchCount) / Double(can.initialCount)),
+                                    width: geometry.size.width * min(max(can.remainingPercentage, 0), 1),
                                     height: 4
                                 )
                         }

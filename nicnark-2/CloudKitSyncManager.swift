@@ -157,7 +157,11 @@ class CloudKitSyncManager: ObservableObject {
         
         logger.info("📡 Processing remote CloudKit data changes")
         lastSyncDate = Date()
-        
+
+        // Backfill UUIDs for any records that just arrived from CloudKit without a pouchId,
+        // so the Live Activity sync below can select/dedup them by their cross-device identity.
+        await migrateExistingPouchLogsWithMissingUUIDs()
+
         // Sync Live Activities with remote data
         await syncLiveActivitiesAcrossDevices()
         
@@ -225,19 +229,24 @@ class CloudKitSyncManager: ObservableObject {
             // STEP 5: Find the pouch with the longest remaining duration
             let now = Date()
             var longestPouch: PouchLog?
-            var longestRemainingTime: TimeInterval = 0
+            var longestRemainingTime: TimeInterval = -1  // sentinel: lets fully-elapsed (remaining == 0) pouches still win
             var totalNicotine: Double = 0
-            
+
             for pouch in activePouches {
                 guard let insertionTime = pouch.insertionTime else { continue }
-                
+
                 let duration = TimeInterval(pouch.timerDuration * 60)
                 let elapsed = now.timeIntervalSince(insertionTime)
                 let remaining = max(0, duration - elapsed)
-                
-                // Sum all nicotine
+
+                // Total nicotine should reflect ALL active pouches, even UUID-less ones.
                 totalNicotine += pouch.nicotineAmount
-                
+
+                // The representative MUST have a UUID — Live Activities are keyed on pouchId.
+                // Skipping nil-pouchId records prevents a single legacy/imported pouch from
+                // suppressing the Live Activity for every other valid active pouch.
+                guard pouch.pouchId != nil else { continue }
+
                 // Track longest remaining time
                 if remaining > longestRemainingTime {
                     longestRemainingTime = remaining
@@ -441,30 +450,32 @@ class CloudKitSyncManager: ObservableObject {
     // MARK: - UUID Migration
     
     private func migrateExistingPouchLogsWithMissingUUIDs() async {
-        // Only ever needs to run once: every PouchLog created since v2 gets a UUID at
-        // insertion time. Gate behind a flag so we don't re-fetch the whole table on EVERY
-        // launch (the old code did). We deliberately stay on the MainActor viewContext:
-        // this project generates Core Data classes under MainActor isolation, so mutating
-        // pouch.pouchId from a background context's Sendable closure is unsafe.
-        guard !UserDefaults.standard.bool(forKey: "didBackfillPouchUUIDs") else { return }
-
+        // Backfill pouchId for any PouchLog with a nil UUID. Every PouchLog created since v2
+        // gets a UUID at insertion time, but a record imported via CloudKit from a pre-UUID
+        // build can arrive with a nil pouchId at any point — so we re-check on every launch
+        // (and on remote changes) instead of gating behind a permanent one-shot flag, which
+        // would leave such late-arriving records without the cross-device identity that Live
+        // Activity selection/dedup keys on. The check is cheap: count(for:) does not
+        // materialize objects, so it costs ~nothing when there is nothing to backfill.
+        // We deliberately stay on the MainActor viewContext: this project generates Core Data
+        // classes under MainActor isolation, so mutating pouch.pouchId from a background
+        // context's Sendable closure is unsafe.
         let context = PersistenceController.shared.container.viewContext
         let fetchRequest = NSFetchRequest<PouchLog>(entityName: "PouchLog")
         fetchRequest.predicate = NSPredicate(format: "pouchId == nil")
         fetchRequest.fetchBatchSize = 200
         do {
-            let pouchesWithoutUUIDs = try context.fetch(fetchRequest)
-            if pouchesWithoutUUIDs.isEmpty {
+            let missing = try context.count(for: fetchRequest)
+            guard missing > 0 else {
                 logger.info("✅ All PouchLog entries already have UUIDs")
-            } else {
-                logger.info("🔧 Backfilling \(pouchesWithoutUUIDs.count) PouchLog entries without UUIDs")
-                for pouch in pouchesWithoutUUIDs {
-                    pouch.pouchId = UUID()
-                }
-                try context.save()
+                return
             }
-            // Only set the flag once we've successfully checked/migrated.
-            UserDefaults.standard.set(true, forKey: "didBackfillPouchUUIDs")
+            logger.info("🔧 Backfilling \(missing) PouchLog entries without UUIDs")
+            let pouchesWithoutUUIDs = try context.fetch(fetchRequest)
+            for pouch in pouchesWithoutUUIDs {
+                pouch.pouchId = UUID()
+            }
+            try context.save()
         } catch {
             logger.error("❌ UUID migration failed: \(error.localizedDescription, privacy: .public)")
         }

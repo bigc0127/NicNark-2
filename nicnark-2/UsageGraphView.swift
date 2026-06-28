@@ -25,21 +25,23 @@ import CoreData
 
 /**
  * PouchEvent: Lightweight representation of a pouch usage event.
- * 
+ *
  * This struct is a projection of the Core Data PouchLog entity,
  * containing only the essential data needed for display. This approach:
  * - Reduces memory footprint for large datasets
  * - Improves scrolling performance
  * - Decouples UI from Core Data managed object lifecycle
- * 
+ *
  * Properties:
  * - id: Unique identifier matching the Core Data pouchId
+ * - objectID: Permanent Core Data object identity — used for reliable edit/delete lookup
  * - name: Display name (e.g., "6mg Pouch")
  * - removedAt: When the pouch was removed (or insertion time if still active)
  * - nicotineMg: Nicotine content for absorption calculations
  */
 public struct PouchEvent: Identifiable, Hashable {
     public let id: UUID
+    public let objectID: NSManagedObjectID   // stable identity even when pouchId is nil
     public let name: String
     public let removedAt: Date   // removalTime or fallback to insertionTime
     public let nicotineMg: Double
@@ -131,7 +133,7 @@ final class UsageGraphViewModel: ObservableObject {
             let eventId = row.pouchId ?? UUID()
             let mg = max(0, row.nicotineAmount)
             let title = String(format: "%.0fmg Pouch", mg)
-            return PouchEvent(id: eventId, name: title, removedAt: ts, nicotineMg: mg)
+            return PouchEvent(id: eventId, objectID: row.objectID, name: title, removedAt: ts, nicotineMg: mg)
         }
 
         // Filter last 24 hours and sort newest first
@@ -314,6 +316,7 @@ struct UsageGraphView: View {
     @State private var selectedPouchForEdit: PouchLog?                     // Pouch being edited
     @State private var nicotineInfo: (current: Double, prediction: String?, estimatedAfterCurrent: Double?) = (0.0, nil, nil)  // Current level, prediction, and estimated after current pouch
     @State private var nextPouchTime: Date?                                // Recommended time for next pouch
+    @State private var showingPouchNotFoundAlert = false                    // Shown when the tapped pouch can't be located
 
     init(streakDays: Int = 0) {
         self.streakDays = streakDays
@@ -347,6 +350,11 @@ struct UsageGraphView: View {
             .sheet(isPresented: $showingEditSheet, content: editSheetContent)
             .onChange(of: showingEditSheet) { _, newValue in
                 onSheetStateChange(newValue)
+            }
+            .alert("Pouch Not Found", isPresented: $showingPouchNotFoundAlert) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("This pouch could not be located. It may have already been deleted.")
             }
     }
     
@@ -397,13 +405,14 @@ struct UsageGraphView: View {
     private func handlePouchEdit(_ event: PouchEvent) {
         print("🔍 Looking for pouch with ID: \(event.id)")
         print("🔍 Available pouches: \(recentLogs.map { $0.pouchId?.uuidString ?? "nil" })")
-        
+
         if let pouchLog = findPouchLog(for: event) {
             print("✅ Found matching pouch log!")
             selectedPouchForEdit = pouchLog
             showingEditSheet = true
         } else {
             print("❌ No matching pouch found for event ID: \(event.id)")
+            showingPouchNotFoundAlert = true
         }
     }
     
@@ -435,62 +444,24 @@ struct UsageGraphView: View {
     }
     
     private func findPouchLog(for event: PouchEvent) -> PouchLog? {
-        print("🔎 FindPouchLog - Looking for: \(event.id)")
-        print("🔎 FindPouchLog - Event nicotine: \(event.nicotineMg)mg")
-        print("🔎 FindPouchLog - Event time: \(event.removedAt)")
-        
-        // First try exact UUID match
-        if let foundPouch = recentLogs.first(where: { $0.pouchId == event.id }) {
-            print("✅ FindPouchLog - Exact UUID match found")
-            return foundPouch
+        print("🔎 FindPouchLog - Looking for objectID: \(event.objectID) id: \(event.id)")
+
+        // Prefer objectID match: PouchEvents are built directly from recentLogs rows so
+        // the objectID is always present and deterministic, even when pouchId is nil.
+        if let found = recentLogs.first(where: { $0.objectID == event.objectID }) {
+            print("✅ FindPouchLog - objectID match found")
+            return found
         }
-        
-        // Enhanced fallback strategy for pouches with nil IDs or timing issues
-        let sortedPouches = recentLogs.sorted { pouch1, pouch2 in
-            guard let time1 = pouch1.insertionTime ?? pouch1.removalTime,
-                  let time2 = pouch2.insertionTime ?? pouch2.removalTime else {
-                return false
-            }
-            return abs(event.removedAt.timeIntervalSince(time1)) < abs(event.removedAt.timeIntervalSince(time2))
+
+        // Fallback to pouchId UUID for any edge case where objectID diverges
+        // (e.g., a fault fired and refreshed the underlying object reference).
+        if let found = recentLogs.first(where: { $0.pouchId == event.id }) {
+            print("✅ FindPouchLog - pouchId UUID match found")
+            return found
         }
-        
-        for (index, pouchLog) in sortedPouches.enumerated() {
-            guard let insertionTime = pouchLog.insertionTime else { continue }
-            
-            let timeDifferenceFromInsertion = abs(event.removedAt.timeIntervalSince(insertionTime))
-            let nicotineMatch = abs(pouchLog.nicotineAmount - event.nicotineMg) < 0.1
-            
-            // Check against removal time if it exists
-            let timeDifferenceFromRemoval: Double
-            if let removalTime = pouchLog.removalTime {
-                timeDifferenceFromRemoval = abs(event.removedAt.timeIntervalSince(removalTime))
-            } else {
-                timeDifferenceFromRemoval = Double.infinity
-            }
-            
-            let minTimeDifference = min(timeDifferenceFromInsertion, timeDifferenceFromRemoval)
-            
-            print("🔎 Pouch #\(index): Nicotine \(pouchLog.nicotineAmount)mg, ID: \(pouchLog.pouchId?.uuidString ?? "nil")")
-            print("🔎   Time diff (insertion): \(timeDifferenceFromInsertion)s")
-            print("🔎   Time diff (removal): \(timeDifferenceFromRemoval == Double.infinity ? "N/A" : "\(timeDifferenceFromRemoval)s")")
-            print("🔎   Nicotine match: \(nicotineMatch)")
-            
-            // More lenient matching: within 2 hours and exact nicotine match
-            if nicotineMatch && minTimeDifference < 7200 { // 2 hours = 7200 seconds
-                print("✅ FindPouchLog - Fallback match found (Pouch #\(index))")
-                return pouchLog
-            }
-        }
-        
-        // Last resort: just match by nicotine amount (for debugging)
-        if let lastResortPouch = recentLogs.first(where: { abs($0.nicotineAmount - event.nicotineMg) < 0.1 }) {
-            print("🆘 FindPouchLog - Last resort match by nicotine amount only")
-            return lastResortPouch
-        }
-        
+
         print("❌ FindPouchLog - No match found")
         print("🔎 Available pouches count: \(recentLogs.count)")
-        
         return nil
     }
 

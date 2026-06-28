@@ -38,11 +38,6 @@ enum PouchRemovalService {
             return true
         }
 
-        // End the Live Activity first (prevents background re-creation).
-        if #available(iOS 16.1, *) {
-            await LiveActivityManager.endLiveActivity(for: pouchId)
-        }
-
         let removalTime = Date.now
         pouch.removalTime = removalTime
 
@@ -51,6 +46,16 @@ enum PouchRemovalService {
         } catch {
             print("❌ Failed to save pouch removal: \(error.localizedDescription)")
             print("❌ Full error: \(error)")
+            // Revert the unsaved change so the pouch stays consistently active, and
+            // report failure to callers instead of running the irreversible side effects.
+            pouch.removalTime = nil
+            return false
+        }
+
+        // End the Live Activity only after a confirmed save: the store now shows the
+        // pouch inactive, so a background sync cannot re-create the activity.
+        if #available(iOS 16.1, *) {
+            await LiveActivityManager.endLiveActivity(for: pouchId)
         }
 
         // Cancel completion notification
@@ -84,12 +89,14 @@ enum PouchRemovalService {
         // a snapshot recompute, a CloudKit nudge AND a widget reload per pouch.
         let removalTime = Date.now
         var removedIds: [String] = []
+        var markedPouches: [PouchLog] = []
         for pouch in active where pouch.removalTime == nil {
             let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
             guard !pouchesBeingRemoved.contains(pouchId) else { continue }
             pouchesBeingRemoved.insert(pouchId)
             pouch.removalTime = removalTime
             removedIds.append(pouchId)
+            markedPouches.append(pouch)
         }
         defer { removedIds.forEach { pouchesBeingRemoved.remove($0) } }
 
@@ -99,6 +106,10 @@ enum PouchRemovalService {
             try context.save()
         } catch {
             print("❌ Failed to save batched pouch removal: \(error.localizedDescription)")
+            // Revert the in-memory removals so the store stays consistent, and report
+            // 0 removed instead of running the irreversible per-pouch side effects.
+            markedPouches.forEach { $0.removalTime = nil }
+            return 0
         }
 
         // End any Live Activities and cancel completion notifications for the removed pouches.

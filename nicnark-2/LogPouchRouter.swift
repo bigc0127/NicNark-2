@@ -24,7 +24,7 @@ enum LogPouchRouter {
             if success {
                 print("✅ URL scheme successfully logged \(mg)mg pouch")
             } else {
-                print("⚠️ URL scheme blocked: Active pouch already exists")
+                print("⚠️ URL scheme failed: could not save pouch")
             }
         }
         

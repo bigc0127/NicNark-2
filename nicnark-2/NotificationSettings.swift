@@ -15,7 +15,7 @@
 //  • Can inventory low-stock alerts
 //
 //  The class is @MainActor to ensure settings changes update UI-bound
-//  views safely. Backing storage uses @AppStorage to persist across launches.
+//  views safely. Backing storage uses @Published properties persisted to UserDefaults.
 //
 
 import Foundation
@@ -104,7 +104,7 @@ enum InsightPeriod: String, CaseIterable, Codable {
  * - Encapsulate decision-making helpers (shouldAlertForLow/HighNicotine)
  * 
  * Storage Strategy:
- * - Uses @AppStorage for simple persistence tied to UserDefaults
+ * - Uses @Published properties persisted to UserDefaults (so changes are observable)
  * - Exposes Swift-friendly computed properties for enum-backed selections
  * 
  * Threading:
@@ -114,50 +114,104 @@ enum InsightPeriod: String, CaseIterable, Codable {
 class NotificationSettings: ObservableObject {
     static let shared = NotificationSettings()
     
+    // NOTE: These are @Published (not @AppStorage) so that mutating them inside
+    // this ObservableObject fires objectWillChange. @AppStorage only tracks
+    // changes when it lives directly in a View, so as class storage it persisted
+    // silently and never notified observers — leaving settings UI / .onChange
+    // (rescheduleNotifications) stale. The didSet persisters keep the same
+    // UserDefaults keys/values, so existing users' preferences are preserved.
+
     // MARK: - Can Inventory Alerts
-    @AppStorage("canLowInventoryEnabled") var canLowInventoryEnabled = false
-    @AppStorage("canLowInventoryThreshold") var canLowInventoryThreshold = 5
-    
+    @Published var canLowInventoryEnabled: Bool {
+        didSet { UserDefaults.standard.set(canLowInventoryEnabled, forKey: "canLowInventoryEnabled") }
+    }
+    @Published var canLowInventoryThreshold: Int {
+        didSet { UserDefaults.standard.set(canLowInventoryThreshold, forKey: "canLowInventoryThreshold") }
+    }
+
     // MARK: - Usage Reminders
-    @AppStorage("reminderType") private var reminderTypeRaw = ReminderType.disabled.rawValue
+    @Published private var reminderTypeRaw: String {
+        didSet { UserDefaults.standard.set(reminderTypeRaw, forKey: "reminderType") }
+    }
     var reminderType: ReminderType {
         get { ReminderType(rawValue: reminderTypeRaw) ?? .disabled }
         set { reminderTypeRaw = newValue.rawValue }
     }
-    
+
     // Time-based reminders
-    @AppStorage("reminderInterval") private var reminderIntervalRaw = ReminderInterval.oneHour.rawValue
+    @Published private var reminderIntervalRaw: String {
+        didSet { UserDefaults.standard.set(reminderIntervalRaw, forKey: "reminderInterval") }
+    }
     var reminderInterval: ReminderInterval {
         get { ReminderInterval(rawValue: reminderIntervalRaw) ?? .oneHour }
         set { reminderIntervalRaw = newValue.rawValue }
     }
-    @AppStorage("customReminderMinutes") var customReminderMinutes = 60
-    
+    @Published var customReminderMinutes: Int {
+        didSet { UserDefaults.standard.set(customReminderMinutes, forKey: "customReminderMinutes") }
+    }
+
     // Nicotine level-based reminders
-    @AppStorage("nicotineRangeLow") var nicotineRangeLow = 2.5
-    @AppStorage("nicotineRangeHigh") var nicotineRangeHigh = 3.2
-    @AppStorage("nicotineAlertThreshold") var nicotineAlertThreshold = 0.2
-    
+    @Published var nicotineRangeLow: Double {
+        didSet { UserDefaults.standard.set(nicotineRangeLow, forKey: "nicotineRangeLow") }
+    }
+    @Published var nicotineRangeHigh: Double {
+        didSet { UserDefaults.standard.set(nicotineRangeHigh, forKey: "nicotineRangeHigh") }
+    }
+    @Published var nicotineAlertThreshold: Double {
+        didSet { UserDefaults.standard.set(nicotineAlertThreshold, forKey: "nicotineAlertThreshold") }
+    }
+
     // MARK: - Daily Summary
-    @AppStorage("dailySummaryEnabled") var dailySummaryEnabled = false
-    @AppStorage("dailySummaryTime") var dailySummaryTime = Date.now.timeIntervalSince1970
-    @AppStorage("dailySummaryShowPreviousDay") var dailySummaryShowPreviousDay = false
-    
+    @Published var dailySummaryEnabled: Bool {
+        didSet { UserDefaults.standard.set(dailySummaryEnabled, forKey: "dailySummaryEnabled") }
+    }
+    @Published var dailySummaryTime: Double {
+        didSet { UserDefaults.standard.set(dailySummaryTime, forKey: "dailySummaryTime") }
+    }
+    @Published var dailySummaryShowPreviousDay: Bool {
+        didSet { UserDefaults.standard.set(dailySummaryShowPreviousDay, forKey: "dailySummaryShowPreviousDay") }
+    }
+
     var dailySummaryDate: Date {
         get { Date(timeIntervalSince1970: dailySummaryTime) }
         set { dailySummaryTime = newValue.timeIntervalSince1970 }
     }
-    
+
     // MARK: - Usage Insights
-    @AppStorage("insightsEnabled") var insightsEnabled = false
-    @AppStorage("insightsPeriod") private var insightsPeriodRaw = InsightPeriod.sixHours.rawValue
+    @Published var insightsEnabled: Bool {
+        didSet { UserDefaults.standard.set(insightsEnabled, forKey: "insightsEnabled") }
+    }
+    @Published private var insightsPeriodRaw: String {
+        didSet { UserDefaults.standard.set(insightsPeriodRaw, forKey: "insightsPeriod") }
+    }
     var insightsPeriod: InsightPeriod {
         get { InsightPeriod(rawValue: insightsPeriodRaw) ?? .sixHours }
         set { insightsPeriodRaw = newValue.rawValue }
     }
-    @AppStorage("insightsThresholdPercentage") var insightsThresholdPercentage = 20.0 // Alert if usage is 20% above normal
-    
-    private init() {}
+    // Alert if usage is 20% above normal
+    @Published var insightsThresholdPercentage: Double {
+        didSet { UserDefaults.standard.set(insightsThresholdPercentage, forKey: "insightsThresholdPercentage") }
+    }
+
+    /// Loads each stored preference from UserDefaults, falling back to the prior
+    /// @AppStorage defaults so existing keys/values are preserved for current users.
+    private init() {
+        let defaults = UserDefaults.standard
+        canLowInventoryEnabled = defaults.object(forKey: "canLowInventoryEnabled") as? Bool ?? false
+        canLowInventoryThreshold = defaults.object(forKey: "canLowInventoryThreshold") as? Int ?? 5
+        reminderTypeRaw = defaults.string(forKey: "reminderType") ?? ReminderType.disabled.rawValue
+        reminderIntervalRaw = defaults.string(forKey: "reminderInterval") ?? ReminderInterval.oneHour.rawValue
+        customReminderMinutes = defaults.object(forKey: "customReminderMinutes") as? Int ?? 60
+        nicotineRangeLow = defaults.object(forKey: "nicotineRangeLow") as? Double ?? 2.5
+        nicotineRangeHigh = defaults.object(forKey: "nicotineRangeHigh") as? Double ?? 3.2
+        nicotineAlertThreshold = defaults.object(forKey: "nicotineAlertThreshold") as? Double ?? 0.2
+        dailySummaryEnabled = defaults.object(forKey: "dailySummaryEnabled") as? Bool ?? false
+        dailySummaryTime = defaults.object(forKey: "dailySummaryTime") as? Double ?? Date.now.timeIntervalSince1970
+        dailySummaryShowPreviousDay = defaults.object(forKey: "dailySummaryShowPreviousDay") as? Bool ?? false
+        insightsEnabled = defaults.object(forKey: "insightsEnabled") as? Bool ?? false
+        insightsPeriodRaw = defaults.string(forKey: "insightsPeriod") ?? InsightPeriod.sixHours.rawValue
+        insightsThresholdPercentage = defaults.object(forKey: "insightsThresholdPercentage") as? Double ?? 20.0
+    }
     
     // MARK: - Helper Methods
     

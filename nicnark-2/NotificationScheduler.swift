@@ -132,34 +132,27 @@ class NotificationScheduler: ObservableObject {
     }
     
     private func scheduleTimeBasedReminder(context: NSManagedObjectContext) async {
-        // Check when last pouch was used
-        let request: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
-        request.sortDescriptors = [NSSortDescriptor(keyPath: \PouchLog.insertionTime, ascending: false)]
-        request.fetchLimit = 1
-        
-        do {
-            let lastPouch = try context.fetch(request).first
-            let lastUseTime = lastPouch?.insertionTime ?? Date.distantPast
-            let interval = settings.getEffectiveReminderInterval()
-            let nextReminderTime = lastUseTime.addingTimeInterval(interval)
-            
-            if nextReminderTime > Date() {
-                let content = UNMutableNotificationContent()
-                content.title = "Time for a Pouch"
-                content.body = "It's been \(formatInterval(interval)) since your last pouch"
-                content.sound = .default
-                content.categoryIdentifier = "USAGE_REMINDER"
-                
-                let triggerInterval = nextReminderTime.timeIntervalSinceNow
-                let trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, triggerInterval), repeats: false)
-                let request = UNNotificationRequest(identifier: usageReminderID, content: content, trigger: trigger)
-                
-                try? await UNUserNotificationCenter.current().add(request)
-                logger.info("Scheduled time-based reminder for \(nextReminderTime)")
-            }
-        } catch {
-            logger.error("Failed to schedule time-based reminder: \(error.localizedDescription)")
-        }
+        // Recurring reminder anchored to the configured interval. Because this is
+        // re-armed after every pouch log (LogService) and on launch/settings change,
+        // the first fire lands ~interval after the latest log; with repeats: true it
+        // then keeps nudging every interval if the user stops logging. (Previously a
+        // repeats: false one-shot fired exactly once at lastUse+interval and never
+        // again, contradicting the "Every X hours" promise in the settings UI.)
+        let interval = settings.getEffectiveReminderInterval()
+
+        let content = UNMutableNotificationContent()
+        content.title = "Time for a Pouch"
+        // Generic body since it now fires repeatedly, not just once after the last use.
+        content.body = "It's been a while since your last pouch"
+        content.sound = .default
+        content.categoryIdentifier = "USAGE_REMINDER"
+
+        // All configured intervals are >= 15 min, well above the 60s repeating-trigger minimum.
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(60, interval), repeats: true)
+        let request = UNNotificationRequest(identifier: usageReminderID, content: content, trigger: trigger)
+
+        try? await UNUserNotificationCenter.current().add(request)
+        logger.info("Scheduled repeating time-based reminder every \(self.formatInterval(interval))")
     }
     
     private func scheduleNicotineLevelReminder(context: NSManagedObjectContext) async {
@@ -178,22 +171,33 @@ class NotificationScheduler: ObservableObject {
         let currentLevel = projection.currentLevel
         
         if settings.shouldAlertForLowNicotine(currentLevel: currentLevel) {
-            await scheduleImmediateNicotineLevelAlert(
-                title: "Nicotine Level Low",
-                body: String(format: "Your nicotine level (%.2fmg) is below your target range (%.1f-%.1fmg)", 
-                             currentLevel, settings.nicotineRangeLow, settings.nicotineRangeHigh),
-                isLowAlert: true
-            )
+            // Throttle so a persistently-low level doesn't re-spam an immediate alert
+            // on every log/launch (the 1s-trigger alert is already delivered, not
+            // pending, so removePendingNotificationRequests can't dedup it).
+            if shouldFireImmediateNicotineAlert(state: "low") {
+                await scheduleImmediateNicotineLevelAlert(
+                    title: "Nicotine Level Low",
+                    body: String(format: "Your nicotine level (%.2fmg) is below your target range (%.1f-%.1fmg)",
+                                 currentLevel, settings.nicotineRangeLow, settings.nicotineRangeHigh),
+                    isLowAlert: true
+                )
+                recordImmediateNicotineAlert(state: "low")
+            }
             return
         } else if settings.shouldAlertForHighNicotine(currentLevel: currentLevel) {
-            await scheduleImmediateNicotineLevelAlert(
-                title: "Nicotine Level High",
-                body: String(format: "Your nicotine level (%.2fmg) is above your target range (%.1f-%.1fmg)", 
-                             currentLevel, settings.nicotineRangeLow, settings.nicotineRangeHigh),
-                isLowAlert: false
-            )
+            if shouldFireImmediateNicotineAlert(state: "high") {
+                await scheduleImmediateNicotineLevelAlert(
+                    title: "Nicotine Level High",
+                    body: String(format: "Your nicotine level (%.2fmg) is above your target range (%.1f-%.1fmg)",
+                                 currentLevel, settings.nicotineRangeLow, settings.nicotineRangeHigh),
+                    isLowAlert: false
+                )
+                recordImmediateNicotineAlert(state: "high")
+            }
             return
         }
+        // Back in range: clear stored state so the next out-of-range transition alerts immediately.
+        UserDefaults.standard.set("inRange", forKey: "lastNicotineAlertState")
         
         // Schedule future alerts for predicted boundary crossings
         var nextAlert: (date: Date, isLow: Bool, level: Double)? = nil
@@ -282,7 +286,29 @@ class NotificationScheduler: ObservableObject {
         let alertType = isLowAlert ? "low" : "high"
         logger.info("Scheduled immediate \(alertType) nicotine level reminder")
     }
-    
+
+    /// Returns true if an immediate nicotine-level alert for `state` ("low"/"high")
+    /// should fire now: only on a genuine transition into that state, or after the
+    /// cooldown elapses for a persistent condition. Mirrors InventoryAlertTracker's
+    /// cooldown so out-of-range levels don't re-spam on every log/launch.
+    private func shouldFireImmediateNicotineAlert(state: String) -> Bool {
+        let defaults = UserDefaults.standard
+        let lastState = defaults.string(forKey: "lastNicotineAlertState")
+        let lastTime = defaults.object(forKey: "lastNicotineAlertTime") as? Date
+        let cooldown: TimeInterval = 4 * 3600
+        if lastState == state, let lastTime, Date().timeIntervalSince(lastTime) < cooldown {
+            return false
+        }
+        return true
+    }
+
+    /// Records that an immediate nicotine-level alert for `state` just fired.
+    private func recordImmediateNicotineAlert(state: String) {
+        let defaults = UserDefaults.standard
+        defaults.set(state, forKey: "lastNicotineAlertState")
+        defaults.set(Date(), forKey: "lastNicotineAlertTime")
+    }
+
     // MARK: - Daily Summary
     
     func scheduleDailySummary(context: NSManagedObjectContext) {
@@ -307,10 +333,13 @@ class NotificationScheduler: ObservableObject {
             let calendar = Calendar.current
             let dateComponents = calendar.dateComponents([.hour, .minute], from: settings.dailySummaryDate)
             
-            // Repeat daily at the configured hour:minute. (Previously this pinned
-            // dateComponents.day to today's day-of-month, so with repeats: true the summary
-            // fired only once per MONTH instead of every day.)
-            let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
+            // Schedule ONLY the next occurrence with the freshly computed stats
+            // (repeats: false). A repeating trigger baked in this immutable, already-
+            // stale content and re-delivered it every day, because local-notification
+            // content is never recomputed at fire time. We re-arm on each app launch
+            // and settings change instead, so each delivered summary reflects the
+            // latest data rather than the same frozen numbers forever.
+            let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: false)
             let request = UNNotificationRequest(identifier: dailySummaryID, content: content, trigger: trigger)
             
             do {

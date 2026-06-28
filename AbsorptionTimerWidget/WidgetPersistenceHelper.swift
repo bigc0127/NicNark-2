@@ -96,10 +96,12 @@ public final class WidgetPersistenceHelper {
     // Check if Core Data store is actually accessible with data
     // Only return true if we can successfully read data from the store
     public func isCoreDataReadable() -> Bool {
-        let context = backgroundContext()
+        // viewContext() is the main-queue context, and these helpers run on @MainActor,
+        // so a direct fetch here is on the context's designated queue (contract-safe).
+        let context = viewContext()
         let request = PouchLog.fetchRequest()
         request.fetchLimit = 1
-        
+
         do {
             // Try to fetch at least one record to verify store is accessible
             _ = try context.fetch(request)
@@ -130,39 +132,44 @@ public final class WidgetPersistenceHelper {
     }
     
     // MARK: Core Data Support for Widgets
-    private var _persistentContainer: NSPersistentContainer?
-    
-    private func createPersistentContainer() -> NSPersistentContainer {
+    //
+    // A SINGLE process-wide container for the whole widget extension. Building an
+    // NSPersistentCloudKitContainer (CloudKit mirroring + loadPersistentStores) is
+    // expensive, and the widget runs under a tight memory budget, so a fresh
+    // container per helper instance — several per timeline render — risked jetsam.
+    // `static let` is initialized exactly once, lazily and thread-safely. The store
+    // is opened read-only and only ever read.
+    private static let sharedContainer: NSPersistentContainer = {
         let container = NSPersistentCloudKitContainer(name: "nicnark_2")
-        
+
         // Use App Group container for shared access between app and widgets
         guard let groupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.ConnorNeedling.nicnark-2") else {
             print("❌ Failed to get App Group container URL")
             return container
         }
-        
+
         let storeURL = groupURL.appendingPathComponent("nicnark_2.sqlite")
-        
+
         let description = NSPersistentStoreDescription(url: storeURL)
         description.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
         description.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
-        
+
         // CloudKit configuration for widgets
         description.cloudKitContainerOptions = NSPersistentCloudKitContainerOptions(
             containerIdentifier: "iCloud.ConnorNeedling.nicnark-2"
         )
-        
+
         // Configure for read-only access in widget to avoid conflicts
         description.setOption(true as NSNumber, forKey: NSReadOnlyPersistentStoreOption)
-        
+
         // Set merge policy to handle CloudKit conflicts
         container.viewContext.mergePolicy = NSMergePolicy.mergeByPropertyObjectTrump
         container.viewContext.automaticallyMergesChangesFromParent = true
-        
+
         container.persistentStoreDescriptions = [description]
-        
+
         print("📱 Widget Core Data: Configuring with App Group CloudKit store URL: \(storeURL.path)")
-        
+
         container.loadPersistentStores { storeDescription, error in
             if let error = error as NSError? {
                 print("❌ Widget Core Data error: \(error), \(error.userInfo)")
@@ -170,24 +177,29 @@ public final class WidgetPersistenceHelper {
                 print("✅ Widget Core Data loaded successfully from: \(storeDescription.url?.path ?? "unknown")")
             }
         }
-        
+
         return container
+    }()
+
+    // Returns the container's main-queue viewContext. The widget's Core Data callers
+    // are all @MainActor-isolated, so reading this main-queue context on the main
+    // thread satisfies Core Data's threading contract (a private-queue
+    // newBackgroundContext() read off the main queue did not). Mirrors the app's
+    // CloudKitSyncManager, which likewise uses viewContext directly under @MainActor.
+    public func viewContext() -> NSManagedObjectContext {
+        let context = WidgetPersistenceHelper.sharedContainer.viewContext
+        // The container is process-wide and reused across timeline renders, but the APP
+        // (a separate process) writes to the shared App Group store. A long-lived context
+        // keeps serving its cached rows, so e.g. a pouch removed in the app would still
+        // read as active in the widget until the extension process was recycled. Treat
+        // cached data as always stale and drop registered objects to faults so the next
+        // fetch re-reads current store state on every render.
+        context.stalenessInterval = 0
+        context.refreshAllObjects()
+        return context
     }
-    
-    private var persistentContainer: NSPersistentContainer {
-        if let container = _persistentContainer {
-            return container
-        }
-        let container = createPersistentContainer()
-        _persistentContainer = container
-        return container
-    }
-    
-    public func backgroundContext() -> NSManagedObjectContext {
-        return persistentContainer.newBackgroundContext()
-    }
-    
+
     public func getPersistentStoreCoordinator() -> NSPersistentStoreCoordinator {
-        return persistentContainer.persistentStoreCoordinator
+        return WidgetPersistenceHelper.sharedContainer.persistentStoreCoordinator
     }
 }

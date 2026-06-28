@@ -139,6 +139,10 @@ struct ContentView: View {
             if newPhase == .active {
                 // Clear any notification badges when user opens the app
                 NotificationManager.clearBadge()
+                // Re-arm configured notifications with fresh data. The daily summary uses a
+                // non-repeating trigger (so its baked-in stats can't go stale), so it must be
+                // re-scheduled each time the app becomes active to keep recurring.
+                NotificationManager.scheduleConfiguredNotifications()
             }
         }
     }

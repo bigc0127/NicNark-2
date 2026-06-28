@@ -99,6 +99,11 @@ struct PouchEditView: View {
             
             VStack(alignment: .leading, spacing: 8) {
                 Toggle("Has removal time", isOn: $hasRemovalTime)
+                    .onChange(of: hasRemovalTime) { _, newValue in
+                        if newValue && removalTime == nil {
+                            removalTime = insertionTime.addingTimeInterval(30 * 60)
+                        }
+                    }
                 
                 if hasRemovalTime {
                     DatePicker("Removal Time", selection: Binding(
@@ -186,7 +191,7 @@ struct PouchEditView: View {
         
         // Update pouch properties
         pouchLog.insertionTime = insertionTime
-        pouchLog.removalTime = hasRemovalTime ? removalTime : nil
+        pouchLog.removalTime = hasRemovalTime ? (removalTime ?? insertionTime.addingTimeInterval(30 * 60)) : nil
         pouchLog.nicotineAmount = amount
         
         // Save to Core Data

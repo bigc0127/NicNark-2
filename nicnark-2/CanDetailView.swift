@@ -238,6 +238,7 @@ struct CanDetailView: View {
             can.flavor = flavor.isEmpty ? nil : flavor
             can.strength = round(strength)  // Round to avoid floating-point precision issues
             can.pouchCount = Int32(pouchCount)
+            can.initialCount = max(can.initialCount, Int32(pouchCount))  // keep denominator >= count so progress bars never exceed 100%
             can.barcode = barcode.isEmpty ? nil : barcode
             can.duration = hasCustomDuration ? Int32(duration) : 0
             

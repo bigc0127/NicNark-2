@@ -87,6 +87,17 @@ final class WatchDashboardViewModel: NSObject, ObservableObject {
 
     private var session: WCSession?
 
+    // Idempotency for watch-initiated logging: reuse the same request id when the
+    // user re-taps the SAME can after a failed/uncertain send, so the iPhone can
+    // de-duplicate a retry instead of double-logging. Cleared once any successful
+    // reply confirms the watch is back in sync.
+    private var pendingLogCanId: String?
+    private var pendingLogRequestId: String?
+    // Set only when a log send's errorHandler fires (lost/uncertain reply). A request id
+    // is reused ONLY after such a failure, so a deliberate re-tap of the same can still
+    // logs a second pouch instead of being silently de-duplicated as a retry.
+    private var lastLogFailedCanId: String?
+
     func start() {
         guard WCSession.isSupported() else { return }
 
@@ -133,8 +144,21 @@ final class WatchDashboardViewModel: NSObject, ObservableObject {
     }
 
     func logFromCan(_ can: WatchCanSummary) {
+        // Reuse the request id ONLY when re-tapping the SAME can whose last send actually
+        // FAILED (so the iPhone dedups a genuine retry). A deliberate re-tap after a normal
+        // send still mints a fresh id, so two intentional taps log two pouches.
+        let requestId: String
+        if pendingLogCanId == can.id, let existing = pendingLogRequestId, lastLogFailedCanId == can.id {
+            requestId = existing
+        } else {
+            requestId = UUID().uuidString
+        }
+        pendingLogCanId = can.id
+        pendingLogRequestId = requestId
+        lastLogFailedCanId = nil  // this attempt is fresh until/unless its send fails
+
         sendAction(
-            ["action": "logPouchFromCanId", "canId": can.id],
+            ["action": "logPouchFromCanId", "canId": can.id, "requestId": requestId],
             fallbackQueueMessage: "Queued log from \(can.title)"
         )
     }
@@ -179,6 +203,12 @@ final class WatchDashboardViewModel: NSObject, ObservableObject {
                     Task { @MainActor in
                         self?.errorMessage = error.localizedDescription
                         self?.isLoading = false
+                        // Record a failed log send so a deliberate re-tap of the SAME can
+                        // reuses its request id (retry dedup); a fresh tap still mints a new id.
+                        if message["action"] as? String == "logPouchFromCanId",
+                           let canId = message["canId"] as? String {
+                            self?.lastLogFailedCanId = canId
+                        }
                     }
                 }
             )
@@ -206,6 +236,11 @@ final class WatchDashboardViewModel: NSObject, ObservableObject {
             errorMessage = reply["error"] as? String ?? "Request failed"
             return
         }
+
+        // A successful payload means the watch is in sync; any in-flight log
+        // request is resolved, so future taps start a new request id.
+        pendingLogCanId = nil
+        pendingLogRequestId = nil
 
         if let level = reply["level"] as? Double {
             self.level = level
@@ -274,11 +309,17 @@ final class WatchDashboardViewModel: NSObject, ObservableObject {
 extension WatchDashboardViewModel: WCSessionDelegate {
     nonisolated func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
         let reachable = session.isReachable
+        let activated = (activationState == .activated)
         let errMsg = error?.localizedDescription
         Task { @MainActor in
             isReachable = reachable
             if let errMsg {
                 errorMessage = errMsg
+            }
+            // onAppear's refresh() bails before activation completes, so load now
+            // that the session is ready. (refresh() clears any stale error itself.)
+            if activated && reachable && !isLoading {
+                refresh()
             }
         }
     }
@@ -286,7 +327,12 @@ extension WatchDashboardViewModel: WCSessionDelegate {
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
         let reachable = session.isReachable
         Task { @MainActor in
+            let wasReachable = isReachable
             isReachable = reachable
+            // Becoming reachable (e.g. after a cold launch) should auto-fetch.
+            if reachable && !wasReachable && !isLoading {
+                refresh()
+            }
         }
     }
 }

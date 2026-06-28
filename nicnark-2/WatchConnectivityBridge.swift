@@ -6,6 +6,16 @@ import CoreData
 final class WatchConnectivityBridge: NSObject {
     static let shared = WatchConnectivityBridge()
 
+    // Recently-processed watch log request ids, used to make `logPouchFromCanId`
+    // idempotent across retries when a sendMessage reply is lost and the watch
+    // re-sends the same request. Mutated only from the @MainActor request handler.
+    private static var processedLogRequests: [String: Date] = [:]
+
+    private static func pruneProcessedLogRequests(now: Date = Date()) {
+        let cutoff = now.addingTimeInterval(-300)
+        processedLogRequests = processedLogRequests.filter { $0.value >= cutoff }
+    }
+
     private override init() {
         super.init()
     }
@@ -101,8 +111,25 @@ extension WatchConnectivityBridge: WCSessionDelegate {
                 return ["ok": false, "error": "Can not found"]
             }
 
+            // Idempotency: if this exact request was already logged (e.g. the
+            // sendMessage reply was lost and the watch retried the same id), return
+            // the current state instead of logging a duplicate pouch + decrement.
+            let requestId = message["requestId"] as? String
+            if let requestId,
+               let processedAt = Self.processedLogRequests[requestId],
+               Date().timeIntervalSince(processedAt) < 300 {
+                var response: [String: Any] = ["ok": true]
+                response.merge(await makeWatchHomePayload(in: ctx), uniquingKeysWith: { _, new in new })
+                return response
+            }
+
             let mg = (message["mg"] as? Double) ?? can.strength
             let ok = CanManager.shared.logPouchFromCan(can: can, amount: mg, context: ctx)
+
+            if ok, let requestId {
+                Self.pruneProcessedLogRequests()
+                Self.processedLogRequests[requestId] = Date()
+            }
 
             var response: [String: Any] = ["ok": ok]
             if ok {

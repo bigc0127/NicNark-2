@@ -59,6 +59,11 @@ enum NotificationManager {
             // Set our custom delegate to handle notification interactions (taps, actions)
             center.delegate = NotificationDelegate.shared
 
+            // Register actionable categories so action buttons (e.g. "Remove" on a pouch
+            // completion alert) actually appear and route to NotificationDelegate. Without
+            // this the REMOVE_POUCH_ACTION handler is unreachable.
+            registerNotificationCategories(on: center)
+
             // Request permission to show notifications with alerts, sounds, and badge counts
             let authOptions: UNAuthorizationOptions = [.alert, .sound, .badge]
             do {
@@ -89,6 +94,30 @@ enum NotificationManager {
     static func scheduleConfiguredNotifications() {
         let context = PersistenceController.shared.container.viewContext
         NotificationScheduler.shared.scheduleAllNotifications(context: context)
+    }
+
+    /**
+     * Registers actionable notification categories.
+     *
+     * The pouch-completion alert carries a "Remove" action button (REMOVE_POUCH_ACTION),
+     * handled in NotificationDelegate. A category must be registered for the button to
+     * appear at all. setNotificationCategories replaces the registered set; only the
+     * completion category needs registered actions — the other categories (CAN_INVENTORY,
+     * USAGE_REMINDER, …) are tap-only and work without registration.
+     */
+    static func registerNotificationCategories(on center: UNUserNotificationCenter = .current()) {
+        let removeAction = UNNotificationAction(
+            identifier: "REMOVE_POUCH_ACTION",
+            title: "Remove",
+            options: [.destructive]
+        )
+        let completionCategory = UNNotificationCategory(
+            identifier: "POUCH_COMPLETION",
+            actions: [removeAction],
+            intentIdentifiers: [],
+            options: []
+        )
+        center.setNotificationCategories([completionCategory])
     }
 
     /**
@@ -180,6 +209,7 @@ enum NotificationManager {
         content.body = body         // Detailed message
         content.sound = .default    // Play notification sound
         content.badge = 1          // Show red badge on app icon
+        content.categoryIdentifier = "POUCH_COMPLETION"  // Enables the "Remove" action button
         
         // Check if user enabled high-priority notifications in settings
         let priorityEnabled = UserDefaults.standard.bool(forKey: "priorityNotifications")

@@ -51,6 +51,7 @@ class BarcodeScannerViewController: UIViewController {
     
     private nonisolated(unsafe) var captureSession: AVCaptureSession?
     private var previewLayer: AVCaptureVideoPreviewLayer?
+    private var hasScanned = false
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -60,6 +61,28 @@ class BarcodeScannerViewController: UIViewController {
         setupUI()
     }
     
+    override func viewDidLayoutSubviews() {
+        // Keep preview layer frame and rotation in sync after SwiftUI layout and on rotation.
+        super.viewDidLayoutSubviews()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        previewLayer?.frame = view.layer.bounds
+        CATransaction.commit()
+
+        if let connection = previewLayer?.connection {
+            let angle: CGFloat
+            switch view.window?.windowScene?.interfaceOrientation {
+            case .landscapeLeft:  angle = 180
+            case .landscapeRight: angle = 0
+            case .portraitUpsideDown: angle = 270
+            default: angle = 90 // portrait
+            }
+            if connection.isVideoRotationAngleSupported(angle) {
+                connection.videoRotationAngle = angle
+            }
+        }
+    }
+
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         
@@ -79,34 +102,59 @@ class BarcodeScannerViewController: UIViewController {
     }
     
     private func setupCamera() {
+        // Check authorization before configuring the capture session so a denied/restricted
+        // user gets an actionable alert instead of a silent black screen.
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            configureSession()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    if granted {
+                        self.configureSession()
+                        DispatchQueue.global(qos: .userInitiated).async { self.captureSession?.startRunning() }
+                    } else {
+                        self.showPermissionDeniedAlert()
+                    }
+                }
+            }
+        case .denied, .restricted:
+            showPermissionDeniedAlert()
+        @unknown default:
+            showPermissionDeniedAlert()
+        }
+    }
+
+    private func configureSession() {
         captureSession = AVCaptureSession()
-        
+
         guard let videoCaptureDevice = AVCaptureDevice.default(for: .video) else {
             showError("No camera available")
             return
         }
-        
+
         let videoInput: AVCaptureDeviceInput
-        
+
         do {
             videoInput = try AVCaptureDeviceInput(device: videoCaptureDevice)
         } catch {
             showError("Camera input error")
             return
         }
-        
+
         if captureSession?.canAddInput(videoInput) == true {
             captureSession?.addInput(videoInput)
         } else {
             showError("Could not add camera input")
             return
         }
-        
+
         let metadataOutput = AVCaptureMetadataOutput()
-        
+
         if captureSession?.canAddOutput(metadataOutput) == true {
             captureSession?.addOutput(metadataOutput)
-            
+
             metadataOutput.setMetadataObjectsDelegate(self, queue: DispatchQueue.main)
             metadataOutput.metadataObjectTypes = [
                 .ean8,
@@ -122,7 +170,7 @@ class BarcodeScannerViewController: UIViewController {
             showError("Could not add metadata output")
             return
         }
-        
+
         previewLayer = AVCaptureVideoPreviewLayer(session: captureSession!)
         previewLayer?.frame = view.layer.bounds
         previewLayer?.videoGravity = .resizeAspectFill
@@ -195,21 +243,38 @@ class BarcodeScannerViewController: UIViewController {
         })
         present(alert, animated: true)
     }
+
+    private func showPermissionDeniedAlert() {
+        let alert = UIAlertController(title: "Camera Access Needed",
+            message: "Enable camera access in Settings to scan barcodes.", preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Open Settings", style: .default) { _ in
+            if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+        })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { [weak self] _ in
+            self?.delegate?.didCancel()
+        })
+        present(alert, animated: true)
+    }
 }
 
 extension BarcodeScannerViewController: AVCaptureMetadataOutputObjectsDelegate {
     func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {
-        captureSession?.stopRunning()
-        
-        if let metadataObject = metadataObjects.first {
-            guard let readableObject = metadataObject as? AVMetadataMachineReadableCodeObject else { return }
-            guard let stringValue = readableObject.stringValue else { return }
-            
-            // Haptic feedback
-            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-            impactFeedback.impactOccurred()
-            
-            delegate?.didScanBarcode(stringValue)
+        // Delegate runs on DispatchQueue.main (see setMetadataObjectsDelegate).
+        // Guard against repeated callbacks while stopRunning() is completing off-thread.
+        guard !hasScanned,
+              let readableObject = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
+              let stringValue = readableObject.stringValue else { return }
+
+        hasScanned = true
+
+        // stopRunning() blocks until the session tears down — keep it off the main thread.
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            self?.captureSession?.stopRunning()
         }
+
+        // Haptic feedback
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+
+        delegate?.didScanBarcode(stringValue)
     }
 }

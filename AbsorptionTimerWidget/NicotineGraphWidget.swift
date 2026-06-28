@@ -129,16 +129,18 @@ struct NicotineGraphProvider: TimelineProvider {
     }
     
     private func calculateTimeSinceLastPouch(pouches: [PouchLog], now: Date) -> String {
-        // Get all pouches to find the most recent activity (either insertion or removal)
+        // Get all pouches to find the most recent activity (either insertion or removal).
+        // viewContext() is the main-queue context and this runs on @MainActor, so the
+        // direct fetches below are on the context's designated queue (contract-safe).
         let persistenceHelper = WidgetPersistenceHelper()
-        let context = persistenceHelper.backgroundContext()
-        
+        let context = persistenceHelper.viewContext()
+
         // First check if there are any active pouches (not removed yet)
         let activePouchRequest = PouchLog.fetchRequest()
         activePouchRequest.predicate = NSPredicate(format: "removalTime == nil")
         activePouchRequest.sortDescriptors = [NSSortDescriptor(keyPath: \PouchLog.insertionTime, ascending: false)]
         activePouchRequest.fetchLimit = 1
-        
+
         if let activePouch = try? context.fetch(activePouchRequest).first,
            let insertionTime = activePouch.insertionTime {
             // If there's an active pouch, use its insertion time
@@ -146,7 +148,7 @@ struct NicotineGraphProvider: TimelineProvider {
             let totalMinutes = Int(ceil(timeDiff / 60.0))
             let hours = totalMinutes / 60
             let minutes = totalMinutes % 60
-            
+
             if hours == 0 {
                 return minutes == 1 ? "1 min since last pouch" : "\(minutes) mins since last pouch"
             } else if minutes == 0 {
@@ -157,13 +159,13 @@ struct NicotineGraphProvider: TimelineProvider {
                 return "\(hours) \(hourText) \(minutes) \(minText) since last pouch"
             }
         }
-        
+
         // No active pouches, find the most recently removed pouch
         let removedPouchRequest = PouchLog.fetchRequest()
         removedPouchRequest.predicate = NSPredicate(format: "removalTime != nil")
         removedPouchRequest.sortDescriptors = [NSSortDescriptor(keyPath: \PouchLog.removalTime, ascending: false)]
         removedPouchRequest.fetchLimit = 1
-        
+
         if let lastRemovedPouch = try? context.fetch(removedPouchRequest).first,
            let removalTime = lastRemovedPouch.removalTime {
             // Use the removal time of the most recently removed pouch
@@ -171,7 +173,7 @@ struct NicotineGraphProvider: TimelineProvider {
             let totalMinutes = Int(ceil(timeDiff / 60.0))
             let hours = totalMinutes / 60
             let minutes = totalMinutes % 60
-            
+
             if hours == 0 {
                 return minutes == 1 ? "1 min since last pouch" : "\(minutes) mins since last pouch"
             } else if minutes == 0 {
@@ -182,7 +184,7 @@ struct NicotineGraphProvider: TimelineProvider {
                 return "\(hours) \(hourText) \(minutes) \(minText) since last pouch"
             }
         }
-        
+
         return "No pouches logged yet"
     }
     
@@ -251,37 +253,40 @@ struct NicotineGraphProvider: TimelineProvider {
     // MARK: - Core Data Access for Widget
     private func fetchCoreDataForWidget(now: Date) -> (success: Bool, currentLevel: Double, chartData: [NicotineChartPoint], timeSince: String, hasActive: Bool) {
         let persistenceHelper = WidgetPersistenceHelper()
-        let context = persistenceHelper.backgroundContext()
-        
+        // viewContext() is the main-queue context; this method runs on @MainActor, so
+        // the direct fetches below (including those inside generateChartData /
+        // calculateTotalNicotineLevel) are on the context's designated queue.
+        let context = persistenceHelper.viewContext()
+
         do {
             // Fetch recent pouches (last 6 hours for chart)
             let sixHoursAgo = Calendar.current.date(byAdding: .hour, value: -6, to: now) ?? now
             let recentPouchesRequest = PouchLog.fetchRequest()
             recentPouchesRequest.predicate = NSPredicate(format: "insertionTime >= %@", sixHoursAgo as NSDate)
             recentPouchesRequest.sortDescriptors = [NSSortDescriptor(keyPath: \PouchLog.insertionTime, ascending: true)]
-            
+
             let recentPouches = try context.fetch(recentPouchesRequest)
-            
+
             // Generate chart data from recent pouches (6 hours for display)
             let chartData = generateChartData(context: context, now: now, sixHoursAgo: sixHoursAgo)
-            
+
             // Calculate current total nicotine level using widget calculator
             let calculator = WidgetNicotineCalculator()
             let currentLevel = calculator.calculateTotalNicotineLevel(context: context, at: now)
-            
+
             // Check for active pouches
             let activePouchesRequest = PouchLog.fetchRequest()
             activePouchesRequest.predicate = NSPredicate(format: "removalTime == nil")
             let activePouches = try context.fetch(activePouchesRequest)
             let hasActive = !activePouches.isEmpty
-            
+
             // Calculate time since last pouch
             let timeSince = calculateTimeSinceLastPouch(pouches: recentPouches, now: now)
-            
+
             logger.info("📱 Widget successfully fetched Core Data: level=\(currentLevel), points=\(chartData.count), hasActive=\(hasActive)")
-            
+
             return (success: true, currentLevel: currentLevel, chartData: chartData, timeSince: timeSince, hasActive: hasActive)
-            
+
         } catch {
             logger.error("📱 Widget Core Data fetch failed: \(error.localizedDescription)")
             return (success: false, currentLevel: 0, chartData: [], timeSince: "No data available", hasActive: false)
@@ -605,25 +610,28 @@ struct RefreshWidgetIntent: AppIntent {
         
         // Try to get fresh data from Core Data
         if helper.isCoreDataReadable() {
-            let context = helper.backgroundContext()
+            // viewContext() is the main-queue context and perform() is @MainActor, so
+            // the direct fetch below is on the context's designated queue (the prior
+            // private-queue newBackgroundContext() read off the main queue was not).
+            let context = helper.viewContext()
             let calculator = WidgetNicotineCalculator()
-            
+
             do {
                 // Calculate fresh nicotine level
                 let currentLevel = calculator.calculateTotalNicotineLevel(context: context, at: Date())
-                
+
                 // Check for active pouches
                 let activePouchesRequest = PouchLog.fetchRequest()
                 activePouchesRequest.predicate = NSPredicate(format: "removalTime == nil")
                 let activePouches = try context.fetch(activePouchesRequest)
                 let hasActive = !activePouches.isEmpty
-                
+
                 // Update the snapshot with fresh data
                 helper.updateSnapshot(level: currentLevel, isRunning: hasActive)
-                
+
                 // Reload all widget timelines
                 WidgetCenter.shared.reloadAllTimelines()
-                
+
                 return .result(dialog: "Widget refreshed with level \(String(format: "%.3f", currentLevel)) mg")
             } catch {
                 // Fallback: just reload timelines

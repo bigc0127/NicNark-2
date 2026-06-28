@@ -78,8 +78,14 @@ class NicotineCalculator {
     /// single-shot fetch path uses, so callers can fetch ONCE and sample many timestamps
     /// in memory (projection/graph/watch loops) with byte-identical results — instead of
     /// re-fetching the same rows per sample point.
-    func levelFromPouches(_ pouches: [PouchLog], at timestamp: Date) -> Double {
-        let lookbackTime = timestamp.addingTimeInterval(-10 * 3600)
+    ///
+    /// `lookbackFloor` pins the lower bound of the contributing window. Leave it `nil`
+    /// (default) to match the single-shot path (`timestamp - 10h`). Forward-projection
+    /// callers that sample many future timestamps from one fetched set should pass a FIXED
+    /// floor so a pouch isn't dropped from the sum as the sample time advances past its
+    /// 10h age-out — that moving window injects a small downward step in the decay tail.
+    func levelFromPouches(_ pouches: [PouchLog], at timestamp: Date, lookbackFloor: Date? = nil) -> Double {
+        let lookbackTime = lookbackFloor ?? timestamp.addingTimeInterval(-10 * 3600)
         var totalLevel = 0.0
         for pouch in pouches {
             guard let insertionTime = pouch.insertionTime else { continue }
@@ -134,7 +140,12 @@ class NicotineCalculator {
         var previousLevel: Double?
 
         while currentTime <= endTime {
-            let level = levelFromPouches(windowPouches, at: currentTime)
+            // Pin the floor to windowStart so the SAME pouch set contributes at every
+            // sample. windowPouches were fetched with `insertionTime >= windowStart`, so
+            // only the `insertionTime <= currentTime` guard governs and no pouch is ever
+            // dropped mid-projection — preventing a spurious downward step that could
+            // latch a false low-boundary crossing.
+            let level = levelFromPouches(windowPouches, at: currentTime, lookbackFloor: windowStart)
             projectedPoints.append(NicotineLevelPoint(timestamp: currentTime, level: level))
             
             // Check for boundary crossings

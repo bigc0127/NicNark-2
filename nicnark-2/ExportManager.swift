@@ -51,10 +51,13 @@ enum ExportManager {
         var csvContent = "Date,Time,Nicotine Amount (mg),Duration (minutes),Status,Timer Setting\n"
 
         let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateFormatter.calendar = Calendar(identifier: .gregorian)
         dateFormatter.dateFormat = "yyyy-MM-dd"
         dateFormatter.timeZone = TimeZone.current
 
         let timeFormatter = DateFormatter()
+        timeFormatter.locale = Locale(identifier: "en_US_POSIX")
         timeFormatter.dateFormat = "HH:mm:ss"
         timeFormatter.timeZone = TimeZone.current
 
@@ -78,8 +81,9 @@ enum ExportManager {
                 status = "Active"
             }
 
-            // Note the timer setting used (will show current setting for old logs)
-            let timerSetting = String(format: "%.0f", FULL_RELEASE_TIME / 60.0)
+            // Use the timer setting actually in effect for this pouch (minutes);
+            // fall back to the current global only for legacy logs with no stored duration.
+            let timerSetting = String(format: "%.0f", log.timerDuration > 0 ? Double(log.timerDuration) : FULL_RELEASE_TIME / 60.0)
 
             // Escape any commas in the data
             let row = "\(date),\(time),\(amount),\(duration),\(status),\(timerSetting)\n"
@@ -88,6 +92,8 @@ enum ExportManager {
 
         // Create filename with timestamp
         let dateFormatter2 = DateFormatter()
+        dateFormatter2.locale = Locale(identifier: "en_US_POSIX")
+        dateFormatter2.calendar = Calendar(identifier: .gregorian)
         dateFormatter2.dateFormat = "yyyy-MM-dd_HHmmss"
         let timestamp = dateFormatter2.string(from: Date())
         let fileName = "nicnark_export_\(timestamp).csv"

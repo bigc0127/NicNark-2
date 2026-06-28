@@ -18,9 +18,7 @@ struct CanCardView: View {
     let onEdit: (() -> Void)?
     @Environment(\.managedObjectContext) private var viewContext
     @StateObject private var canManager = CanManager.shared
-    @State private var tick = Date()  // For timer updates
-    @State private var timer: Timer?  // Timer instance for real-time updates
-    
+
     init(can: Can, loadedCount: Int = 0, activePouches: [PouchLog] = [], onIncrement: @escaping () -> Void, onDecrement: @escaping () -> Void, onEdit: (() -> Void)? = nil) {
         self.can = can
         self.loadedCount = loadedCount
@@ -161,109 +159,6 @@ struct CanCardView: View {
                 Label("Delete Can", systemImage: "trash")
             }
         }
-        .onAppear {
-            startTimerIfNeeded()
-        }
-        .onDisappear {
-            stopTimer()
-        }
-        .onChange(of: activePouches.count) { _, _ in
-            // Restart timer when active pouches change
-            startTimerIfNeeded()
-        }
-    }
-    
-    // MARK: - Timer Views
-    
-    @ViewBuilder
-    func compactTimer(for pouch: PouchLog, count: Int) -> some View {
-        let insertionTime = pouch.insertionTime ?? Date()
-        let elapsed = max(0, tick.timeIntervalSince(insertionTime))
-        let duration = TimeInterval(pouch.timerDuration * 60)
-        let remaining = max(0, duration - elapsed)
-        let progress = min(max(elapsed / duration, 0), 1)
-        
-        VStack(alignment: .leading, spacing: 2) {
-            // Timer display with count if > 1
-            HStack(spacing: 4) {
-                Text(formatMinutesSeconds(remaining))
-                    .font(.system(.caption, design: .monospaced))
-                    .fontWeight(.semibold)
-                    .foregroundColor(remaining > 0 ? .blue : .green)
-                
-                if count > 1 {
-                    Text("×\(count)")
-                        .font(.system(.caption2, design: .rounded))
-                        .fontWeight(.semibold)
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            // Mini progress bar
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.2))
-                        .frame(height: 2)
-                        .cornerRadius(1)
-                    
-                    Rectangle()
-                        .fill(remaining > 0 ? Color.blue : Color.green)
-                        .frame(width: geometry.size.width * progress, height: 2)
-                        .cornerRadius(1)
-                }
-            }
-            .frame(height: 2)
-        }
-        .frame(width: 60)
-    }
-    
-    @ViewBuilder
-    func miniTimer(for pouch: PouchLog) -> some View {
-        let insertionTime = pouch.insertionTime ?? Date()
-        let elapsed = max(0, tick.timeIntervalSince(insertionTime))
-        let duration = TimeInterval(pouch.timerDuration * 60)
-        let remaining = max(0, duration - elapsed)
-        let progress = min(max(elapsed / duration, 0), 1)
-        
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                // Timer display
-                Text(formatMinutesSeconds(remaining))
-                    .font(.system(.callout, design: .monospaced))
-                    .fontWeight(.semibold)
-                    .foregroundColor(remaining > 0 ? .blue : .green)
-                
-                // Mini progress bar
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        Rectangle()
-                            .fill(Color.gray.opacity(0.2))
-                            .frame(height: 2)
-                            .cornerRadius(1)
-                        
-                        Rectangle()
-                            .fill(remaining > 0 ? Color.blue : Color.green)
-                            .frame(width: geometry.size.width * progress, height: 2)
-                            .cornerRadius(1)
-                    }
-                }
-                .frame(height: 2)
-            }
-            .frame(width: 70)
-            
-            // Remove button
-            Button(action: {
-                removePouch(pouch)
-            }) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 20))
-                    .foregroundColor(.red)
-            }
-        }
-        .padding(6)
-        .background(Color(.tertiarySystemBackground))
-        .cornerRadius(8)
     }
     
     private var strengthColor: Color {
@@ -310,75 +205,6 @@ struct CanCardView: View {
         }
     }
     
-    private func clearAllActivePouches() {
-        // Remove all active pouches for this can
-        for pouch in activePouches {
-            removePouch(pouch)
-        }
-        
-        print("✅ Cleared \(activePouches.count) active pouches from \(can.brand ?? "Unknown")")
-    }
-    
-    private func formatMinutesSeconds(_ ti: TimeInterval) -> String {
-        let minutes = Int(ti) / 60
-        let seconds = Int(ti) % 60
-        return String(format: "%d:%02d", minutes, seconds)
-    }
-    
-    private func removePouch(_ pouch: PouchLog) {
-        let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
-        
-        // End Live Activity if this is the last active pouch
-        if #available(iOS 16.1, *) {
-            Task {
-                await LiveActivityManager.endLiveActivity(for: pouchId)
-            }
-        }
-        
-        // Mark pouch as removed
-        pouch.removalTime = Date.now
-        
-        do {
-            try viewContext.save()
-            print("✅ Removed pouch \(pouch.nicotineAmount)mg")
-        } catch {
-            print("❌ Failed to remove pouch: \(error)")
-        }
-        
-        // Cancel notification
-        NotificationManager.cancelAlert(id: pouchId)
-        
-        // Update widgets
-        WidgetReloadCoordinator.reload()
-    }
-    
-    // MARK: - Timer Management
-    
-    private func startTimerIfNeeded() {
-        // Only start timer if there are active pouches
-        guard !activePouches.isEmpty else {
-            stopTimer()
-            return
-        }
-        
-        // Stop existing timer to avoid duplicates
-        stopTimer()
-        
-        // Create and start new timer
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-            Task { @MainActor in tick = Date() }
-        }
-        
-        // Add to run loop for proper execution
-        if let timer = timer {
-            RunLoop.main.add(timer, forMode: .common)
-        }
-    }
-    
-    private func stopTimer() {
-        timer?.invalidate()
-        timer = nil
-    }
 }
 
 struct CanCardView_Previews: PreviewProvider {

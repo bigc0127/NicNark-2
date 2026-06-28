@@ -703,16 +703,21 @@ struct NicotineLevelView: View {
                 for pouch in allPouches {
                     guard let insertionTime = pouch.insertionTime, insertionTime <= timePoint else { continue }
                     
-                    let removalTime = pouch.removalTime ?? insertionTime.addingTimeInterval(FULL_RELEASE_TIME)
+                    // Use the pouch's own stored duration (custom per-can or the global
+                    // setting at log time), not the current global FULL_RELEASE_TIME.
+                    let duration = pouch.timerDuration > 0
+                        ? TimeInterval(pouch.timerDuration) * 60
+                        : FULL_RELEASE_TIME
+                    let removalTime = pouch.removalTime ?? insertionTime.addingTimeInterval(duration)
                     
                     // Only consider pouches that are currently in absorption phase
                     if timePoint <= removalTime {
                         let timeInMouth = timePoint.timeIntervalSince(insertionTime)
                         let absorptionRate = calculateInstantAbsorptionRate(
                             nicotineContent: pouch.nicotineAmount,
-                            timeInMouth: timeInMouth
+                            fullReleaseTime: duration
                         )
-                        let absorptionPercent = min(timeInMouth / FULL_RELEASE_TIME, 1.0)
+                        let absorptionPercent = min(timeInMouth / duration, 1.0)
                         
                         let info = PouchAbsorptionInfo(
                             pouchId: pouch.pouchId ?? UUID(),
@@ -740,12 +745,12 @@ struct NicotineLevelView: View {
     }
     
     /// Calculate the instantaneous absorption rate (mg/minute) for a pouch at a specific time
-    private func calculateInstantAbsorptionRate(nicotineContent: Double, timeInMouth: TimeInterval) -> Double {
-        // Linear absorption model: Rate = (D × A) / FULL_RELEASE_TIME
+    private func calculateInstantAbsorptionRate(nicotineContent: Double, fullReleaseTime: TimeInterval) -> Double {
+        // Linear absorption model: Rate = (D × A) / fullReleaseTime
         // where D = dose, A = 0.30 (absorption fraction)
         // This gives constant absorption rate throughout the absorption phase
         let maxAbsorbed = nicotineContent * ABSORPTION_FRACTION
-        let absorptionRate = maxAbsorbed / FULL_RELEASE_TIME // mg per second
+        let absorptionRate = maxAbsorbed / fullReleaseTime // mg per second
         return absorptionRate * 60 // Convert to mg per minute
     }
     
@@ -798,11 +803,15 @@ struct NicotineLevelView: View {
                 let timeInMouth = now.timeIntervalSince(insertionTime)
                 guard timeInMouth > 0 else { continue }
 
+                // Use the pouch's own stored duration, not the current global setting.
+                let duration = pouch.timerDuration > 0
+                    ? TimeInterval(pouch.timerDuration) * 60
+                    : FULL_RELEASE_TIME
                 let absorptionRate = calculateInstantAbsorptionRate(
                     nicotineContent: pouch.nicotineAmount,
-                    timeInMouth: timeInMouth
+                    fullReleaseTime: duration
                 )
-                let absorptionPercent = min(timeInMouth / FULL_RELEASE_TIME, 1.0)
+                let absorptionPercent = min(timeInMouth / duration, 1.0)
 
                 let info = PouchAbsorptionInfo(
                     pouchId: pouch.pouchId ?? UUID(),

@@ -295,23 +295,28 @@ class LiveActivityManager: ObservableObject {
     
     static func updateLiveActivityStartTime(for pouchId: String, newStartTime: Date, nicotineAmount: Double) async {
         let log = Logger(subsystem: "com.nicnark.nicnark-2", category: "LiveActivity")
-        // Only need a boolean existence check to avoid unused variable warnings
-        guard Activity<PouchActivityAttributes>.activities.contains(where: { $0.attributes.pouchId == pouchId }) else {
+        // Capture the activity so we can use its own per-pouch duration (not the global setting)
+        guard let activity = Activity<PouchActivityAttributes>.activities
+            .first(where: { $0.attributes.pouchId == pouchId }) else {
             log.warning("No activity to update start time for pouch: \(pouchId, privacy: .public)")
             return
         }
-        
+
+        // Use the activity's stored per-pouch duration so a custom-duration pouch keeps its
+        // correct countdown window instead of resetting to the global FULL_RELEASE_TIME.
+        let duration = activity.attributes.expectedDuration
+
         // Calculate new end time based on the new start time
-        let newEndTime = newStartTime.addingTimeInterval(FULL_RELEASE_TIME)
+        let newEndTime = newStartTime.addingTimeInterval(duration)
         let now = Date()
-        
+
         // Calculate elapsed time and progress based on the new start time
         let elapsed = max(0, now.timeIntervalSince(newStartTime))
-        let progress = min(max(elapsed / FULL_RELEASE_TIME, 0), 1)
-        
+        let progress = min(max(elapsed / duration, 0), 1)
+
         // Calculate current nicotine level based on new elapsed time
         let currentLevel = AbsorptionConstants.shared
-            .calculateCurrentNicotineLevel(nicotineContent: nicotineAmount, elapsedTime: elapsed)
+            .calculateCurrentNicotineLevel(nicotineContent: nicotineAmount, elapsedTime: elapsed, fullReleaseTime: duration)
         
         // Create new timer interval with updated times
         let newTimerInterval = newStartTime...newEndTime
@@ -388,23 +393,25 @@ class LiveActivityManager: ObservableObject {
             return
         }
         
-        // Calculate actual time in mouth (might be less than FULL_RELEASE_TIME if removed early)
+        // Calculate actual time in mouth (might be less than the pouch's own duration if removed early)
         let now = Date()
-        let actualTimeInMouth = min(now.timeIntervalSince(activity.attributes.startTime), FULL_RELEASE_TIME)
-        
-        // Calculate the actual absorbed amount based on actual time in mouth
+        let expectedDuration = activity.attributes.expectedDuration
+        let actualTimeInMouth = min(now.timeIntervalSince(activity.attributes.startTime), expectedDuration)
+
+        // Calculate the actual absorbed amount based on actual time in mouth and the pouch's own duration
         let finalLevel = AbsorptionConstants.shared
             .calculateAbsorbedNicotine(
                 nicotineContent: activity.attributes.totalNicotine,
-                useTime: actualTimeInMouth  // Use actual time, not theoretical max time
+                useTime: actualTimeInMouth,  // Use actual time, not theoretical max time
+                fullReleaseTime: expectedDuration  // Use the pouch's own duration, not the global setting
             )
-        
+
         let timer = activity.attributes.startTime...activity.attributes.endTime
         let finalState = PouchActivityAttributes.ContentState(
             timerInterval: timer,
             currentNicotineLevel: finalLevel,
             status: "Complete",
-            absorptionRate: min(actualTimeInMouth / FULL_RELEASE_TIME, 1.0),  // Actual absorption rate
+            absorptionRate: min(actualTimeInMouth / max(1, expectedDuration), 1.0),  // Actual absorption rate
             lastUpdated: Date()
         )
         
@@ -421,9 +428,28 @@ class LiveActivityManager: ObservableObject {
             endTime: now  // Use actual removal time
         )
         
-        // Then mark as ended after a brief delay
+        // Then mark as ended after a brief delay — but only if no other activity/pouch has
+        // taken over the snapshot in the meantime (prevents wiping a newly logged pouch).
         Task {
             try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5 second delay
+
+            // A newer Live Activity is still LIVE (e.g. a pouch logged in the gap) — leave its flag alone.
+            // The activity we just ended with .after(dismissAt) lingers in `.activities` in the
+            // .ended state for the dismissal window, so it must NOT count here — filter ended/dismissed
+            // out and only let genuinely-live activities block the clear.
+            let liveActivities = Activity<PouchActivityAttributes>.activities.filter {
+                $0.activityState != .ended && $0.activityState != .dismissed
+            }
+            guard liveActivities.isEmpty else { return }
+
+            // Or another pouch is still active in Core Data (multi-pouch removal) — keep running.
+            let context = PersistenceController.shared.container.viewContext
+            let req: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
+            req.predicate = NSPredicate(format: "removalTime == nil")
+            req.fetchLimit = 1
+            let stillActive = ((try? context.fetch(req))?.isEmpty == false)
+            guard !stillActive else { return }
+
             helper.markActivityEnded()
             WidgetReloadCoordinator.reload()
         }
@@ -521,10 +547,13 @@ class BackgroundMaintainer {
     
     func handleRefresh(_ task: BGAppRefreshTask) async {
         log.info("🔔 BG refresh invoked at \(DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium), privacy: .public)")
-        
-        await withTaskCancellationHandler {
+
+        // Run the work in a child Task so iOS's expirationHandler can cancel it on budget
+        // overrun. Without an expirationHandler the system suspends the app without
+        // setTaskCompleted ever being called, which throttles future bg.refresh scheduling.
+        let work = Task { @MainActor in
             await applyBatchedActivityUpdates()
-            
+
             // Schedule next run based on whether Live Activities are active
             let hasActivities = !Activity<PouchActivityAttributes>.activities.isEmpty
             if hasActivities {
@@ -534,23 +563,23 @@ class BackgroundMaintainer {
                 await scheduleRegular() // Normal cadence when no Live Activities
                 log.info("No Live Activities - scheduled regular refresh")
             }
-            
-            task.setTaskCompleted(success: true)
-        } onCancel: {
-            task.setTaskCompleted(success: false)
         }
+        task.expirationHandler = { work.cancel() }  // runs on a system thread; Task.cancel() is safe from any context
+        _ = await work.value
+        task.setTaskCompleted(success: !work.isCancelled)  // called exactly once
     }
     
     func handleProcess(_ task: BGProcessingTask) async {
         log.info("⚙️ BG processing invoked at \(DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium), privacy: .public)")
         await scheduleRegular()
-        
-        await withTaskCancellationHandler {
+
+        // Run the work in a child Task so iOS's expirationHandler can cancel it on budget overrun.
+        let work = Task { @MainActor in
             await applyBatchedActivityUpdates()
-            task.setTaskCompleted(success: true)
-        } onCancel: {
-            task.setTaskCompleted(success: false)
         }
+        task.expirationHandler = { work.cancel() }  // runs on a system thread; Task.cancel() is safe from any context
+        _ = await work.value
+        task.setTaskCompleted(success: !work.isCancelled)  // called exactly once
     }
     
     private func snapshotTracked() -> [LiveActivityManager.TrackedActivity] {
@@ -597,6 +626,8 @@ class BackgroundMaintainer {
         
         // Process each Live Activity
         for t in items {
+            // Stop promptly if the BG task's expiration handler cancelled us.
+            if Task.isCancelled { break }
             // Check if pouch is still active in Core Data
             let isPouchActive = await LiveActivityManager.isPouchActive(t.pouchId)
             

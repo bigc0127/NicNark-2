@@ -165,6 +165,13 @@ enum LogService {
         } catch {
             print("❌ Failed to save PouchLog: \(error)")
             print("❌ Error details: \(error.localizedDescription)")
+            // Discard the partial changes so a failed log leaves the shared
+            // viewContext clean. Without this, the orphaned PouchLog (active:
+            // insertionTime set, removalTime nil) and the can.usePouch()
+            // decrement stay pending and get silently committed by the next
+            // ctx.save() anywhere in the app — surfacing as a phantom active
+            // pouch with no Live Activity / completion alert plus lost inventory.
+            ctx.rollback()
             return false
         }
         

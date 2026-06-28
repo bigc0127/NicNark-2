@@ -77,7 +77,12 @@ class TimerSettings: ObservableObject {
     
     /// UserDefaults key for persisting the selected duration
     private let userDefaultsKey = "selectedTimerDuration"
-    
+
+    /// Shared App Group suite so the widget extension (a separate process) can read
+    /// the user's selected duration. The app keeps writing UserDefaults.standard for
+    /// back-compat; every change is mirrored here under the SAME key.
+    private let groupDefaults = UserDefaults(suiteName: "group.ConnorNeedling.nicnark-2")
+
     /// The user's currently selected timer duration
     /// @Published means SwiftUI views will automatically update when this changes
     /// didSet observer saves changes to UserDefaults immediately
@@ -85,6 +90,8 @@ class TimerSettings: ObservableObject {
         didSet {
             // Persist the change immediately when user selects new duration
             UserDefaults.standard.set(selectedDuration.rawValue, forKey: userDefaultsKey)
+            // Mirror into the App Group suite so the widget process sees the change too
+            groupDefaults?.set(selectedDuration.rawValue, forKey: userDefaultsKey)
         }
     }
     
@@ -105,6 +112,9 @@ class TimerSettings: ObservableObject {
             // No valid saved duration, use default
             self.selectedDuration = .defaultDuration
         }
+        // Seed the App Group suite so the widget process can read the current value
+        // on first launch after updating (didSet does not fire during init).
+        groupDefaults?.set(self.selectedDuration.rawValue, forKey: userDefaultsKey)
     }
     
     /// Convenience property for getting the current timer duration in seconds.

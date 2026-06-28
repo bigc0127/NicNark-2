@@ -67,11 +67,7 @@ struct LogView: View {
     // MARK: - Core Data Properties
     // @Environment gets values from the SwiftUI environment that are shared across views
     @Environment(\.managedObjectContext) private var ctx  // Database context for all Core Data operations
-    
-    // Static set to track pouches being removed across all view instances to prevent race conditions
-    // When multiple parts of the app try to remove the same pouch simultaneously (notifications, UI, etc.)
-    @State private static var pouchesBeingRemoved: Set<String> = []
-    
+
     // MARK: - User Settings & Preferences
     @StateObject private var timerSettings = TimerSettings.shared  // Global timer settings (30min default, custom durations)
     @AppStorage("autoRemovePouches") private var autoRemovePouches = false    // Auto-remove pouches when timer ends
@@ -1053,7 +1049,13 @@ struct LogView: View {
             
             // Refresh can list
             canManager.fetchActiveCans(context: ctx)
-            
+
+            // Mirror LogService STEP 12 side effects for the multi-pouch path. This flow
+            // bypasses LogService.logPouch(), so without these the low-inventory alert and
+            // usage reminder that the single-pouch path fires would be silently skipped.
+            NotificationManager.checkCanInventory(context: ctx)
+            NotificationManager.scheduleUsageReminder(context: ctx)
+
             // CloudKit export is scheduled automatically on save by the container.
 
             // Update widgets
@@ -1201,8 +1203,16 @@ struct LogView: View {
 
     private func updateLiveActivityTick() async {
         guard #available(iOS 16.1, *) else { return }
-        guard let pouch = activePouches.first,
-              let insertionTime = pouch.insertionTime else { return }
+        // startTimerWithLoadedPouches() creates ONE Live Activity for the LONGEST-running
+        // pouch (by end time), not the newest. Driving updates off activePouches.first
+        // (newest) would target the wrong pouchId in multi-can batches and silently freeze
+        // the activity. Select the activity-owning pouch by latest end time so the update
+        // always matches the Live Activity that was created.
+        guard let pouch = activePouches.max(by: { a, b in
+            let ea = (a.insertionTime ?? .distantPast).addingTimeInterval(TimeInterval(a.timerDuration * 60))
+            let eb = (b.insertionTime ?? .distantPast).addingTimeInterval(TimeInterval(b.timerDuration * 60))
+            return ea < eb
+        }), let insertionTime = pouch.insertionTime else { return }
 
         // Use the pouch's specific duration (stored in minutes, convert to seconds)
         let actualDuration = TimeInterval(pouch.timerDuration * 60)
@@ -1210,11 +1220,10 @@ struct LogView: View {
         let remaining = max(actualDuration - elapsed, 0)
         let progress = min(max(elapsed / actualDuration, 0), 1)
 
-        let currentLevel = AbsorptionConstants.shared.calculateCurrentNicotineLevel(
-            nicotineContent: pouch.nicotineAmount,
-            elapsedTime: elapsed,
-            fullReleaseTime: actualDuration
-        )
+        // Report the SUM across all active/decaying pouches, mirroring the widget snapshot
+        // path (updateWidgetPersistenceHelper). The activity was created with the TOTAL
+        // nicotine, so a single pouch's level would under-report the multi-pouch total.
+        let currentLevel = await NicotineCalculator().calculateTotalNicotineLevel(context: ctx)
 
         let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
         
@@ -1274,6 +1283,9 @@ struct LogView: View {
                 await self.updateLiveActivityTickIfNeeded()
                 // Only reload widgets when UI actually changes or every 2 minutes
                 self.smartWidgetReload()
+                // Auto-remove a completed pouch if the user enabled it (previously a
+                // hidden side effect of checkIfPouchCompleted).
+                self.autoRemoveCompletedPouchIfNeeded()
             }
         }
         if let timer = optimizedTimer {
@@ -1325,22 +1337,22 @@ struct LogView: View {
         // Use the pouch's specific duration, not the app's default
         let actualDuration = TimeInterval(pouch.timerDuration * 60)  // Convert minutes to seconds
         let elapsed = Date().timeIntervalSince(insertionTime)
-        let delaySeconds = autoRemoveDelayMinutes * 60  // Convert delay to seconds
-        let totalDuration = actualDuration + delaySeconds
-        let remaining = max(actualDuration - elapsed, 0)
-        let isCompleted = remaining == 0
-        
-        // Auto-remove if enabled and delay period has passed
-        if autoRemovePouches && elapsed >= totalDuration && !LogView.pouchesBeingRemoved.contains(
-            pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
-        ) {
-            Task { @MainActor in
-                removePouch(pouch)
-                print("🔄 Auto-removed completed pouch from timer check after \(autoRemoveDelayMinutes) minute delay")
-            }
+        return elapsed >= actualDuration
+    }
+
+    /// Auto-removes the active pouch once its timer duration plus the user-configured
+    /// delay has fully elapsed. Split out from `checkIfPouchCompleted()` so the boolean
+    /// completion query no longer mutates state as a hidden side effect.
+    /// `PouchRemovalService` de-dups by id + removalTime, so calling this every tick is safe.
+    private func autoRemoveCompletedPouchIfNeeded() {
+        guard autoRemovePouches,
+              let pouch = activePouches.first,
+              let insertionTime = pouch.insertionTime else { return }
+        let totalDuration = TimeInterval(pouch.timerDuration * 60) + autoRemoveDelayMinutes * 60
+        if Date().timeIntervalSince(insertionTime) >= totalDuration {
+            removePouch(pouch)   // PouchRemovalService de-dups by id + removalTime
+            print("🔄 Auto-removed completed pouch from timer check after \(autoRemoveDelayMinutes) minute delay")
         }
-        
-        return isCompleted
     }
 
     func throttledWidgetReload(at now: Date) {
