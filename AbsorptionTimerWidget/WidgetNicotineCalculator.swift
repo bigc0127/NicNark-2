@@ -15,7 +15,9 @@ import os.log
 
 // MARK: - Widget Constants (mirrored from main app)
 
-/// Absorption fraction - 30% of nicotine gets absorbed
+/// Absorption fraction — estimated ~30% of stated mg reaches the bloodstream (a conservative
+/// product/population average, not an exact constant). Must match ABSORPTION_FRACTION in the
+/// main app's AbsorptionConstants.swift. See NICOTINE_CALCULATION_FORMULA.md for the derivation.
 private let WIDGET_ABSORPTION_FRACTION: Double = 0.30
 
 /// Dynamic absorption time based on user preference.

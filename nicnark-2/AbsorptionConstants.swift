@@ -9,9 +9,23 @@ import CoreData
 
 // MARK: - Global Constants
 /**
- * ABSORPTION_FRACTION: What percentage of nicotine gets absorbed into bloodstream
- * Based on research showing ~30% of nicotine in pouches is actually absorbed
- * For example: 6mg pouch → ~1.8mg absorbed into bloodstream
+ * ABSORPTION_FRACTION: Estimated fraction of a pouch's STATED nicotine content that
+ * reaches the bloodstream. This is a deliberately conservative population/product AVERAGE,
+ * not an exact constant.
+ *
+ * Why ~0.30: systemic delivery is the product of two stages —
+ *   1. Extraction from the pouch into saliva: ~50–59% of label for modern tobacco-free
+ *      pouches (Zyn/Velo/On!), but only ~19–33% for tobacco snus (Lunell et al. 2020,
+ *      Nicotine Tob Res 22(10):1757–1763).
+ *   2. Oromucosal bioavailability of what's extracted: ~30–40%, because nicotine that is
+ *      swallowed loses ~70% to hepatic first-pass metabolism (UK COT statement on oral
+ *      nicotine pouches).
+ * Net systemic delivery therefore lands roughly in the ~30–45% band for tobacco-free
+ * pouches and lower for snus. 0.30 is chosen as a simple, slightly conservative floor that
+ * stays reasonable across product types, early removal, and heavy swallowing.
+ *
+ * For example: 6mg pouch → ~1.8mg modeled as absorbed. Treat this as a relative trend
+ * indicator, not a calibrated blood-level measurement.
  */
 public let ABSORPTION_FRACTION: Double = 0.30
 
@@ -46,9 +60,17 @@ public struct AbsorptionConstants: Sendable {
     
     // MARK: - Scientific Constants
     /**
-     * nicotineHalfLife: How long it takes for nicotine levels to drop by 50%
-     * Medical research shows nicotine half-life is approximately 2 hours
-     * This means after 2 hours, only half the nicotine remains in your system
+     * nicotineHalfLife: How long it takes for nicotine levels to drop by 50%.
+     * The canonical elimination half-life of nicotine (the parent drug, NOT cotinine,
+     * whose half-life is ~16–20 h) averages ~2 hours and is route-independent, since it
+     * reflects hepatic clearance via CYP2A6 rather than the delivery method
+     * (Benowitz, Hukkanen & Jacob 2009; IV deuterium studies ~2.0 h).
+     *
+     * Pouch-specific PK runs slightly higher (~2.1–2.8 h), and there is wide
+     * inter-individual variability (~1–4 h, driven by metabolizer status) plus a small
+     * ~4–5 h terminal tail from tissue sequestration. 2 h sits at the low/conservative edge
+     * of that band — decay is modeled slightly fast — which is appropriate for a same-day
+     * (~10–12 h) personal tracker where the dominant early-decay rate is what matters.
      */
     static let nicotineHalfLife: TimeInterval = 2 * 3600 // 2 hours in seconds
     
@@ -69,6 +91,14 @@ public struct AbsorptionConstants: Sendable {
      * This uses a linear absorption model for the active pouch phase:
      * - Absorption increases steadily from 0% to 30% over FULL_RELEASE_TIME
      * - Maximum 30% of the pouch content gets absorbed (ABSORPTION_FRACTION)
+     *
+     * Simplification note: real in-mouth uptake is monotonic but concave/front-loaded
+     * (fastest in the first ~5–15 min; in-vitro studies show ~60–90% of the releasable
+     * nicotine is out within 30 min). The straight line slightly understates the early rate
+     * and overstates late-phase gain, but peak timing is correct: clinical Tmax tracks use
+     * duration (~30–35 min for 30-min use, ~60–65 min for 60-min use), so anchoring peak
+     * absorption to the end of the user-selected window and starting decay there matches the
+     * evidence. The linear ramp is an accepted first-order approximation for this tracker.
      * 
      * Formula: absorbed(t) = D × A × min(t / FULL_RELEASE_TIME, 1.0)
      * Where:

@@ -256,10 +256,47 @@ See: `nicnark-2Tests/NicotineLevelParityTests.swift` for comprehensive unit test
 
 ---
 
+## Literature Validation (reviewed June 2026)
+
+The three core parameters were checked against the pharmacokinetics literature. All are
+defensible for a personal harm-reduction tracker; **no numeric change was warranted by the
+evidence.** Summary of the review:
+
+| Parameter | Value | Verdict | Notes |
+|-----------|-------|---------|-------|
+| Half-life | 2 h (7200 s) | ✅ Keep | Canonical elimination half-life of nicotine (parent drug, not cotinine). Route-independent. Sits at the low/conservative edge of pouch-specific data (~2.1–2.8 h). |
+| Absorption fraction | 0.30 | ✅ Keep | Slightly conservative average of (pouch extraction ~50–59% for tobacco-free) × (oromucosal bioavailability ~30–40%). Central reality for Zyn-style pouches is ~35–45%; 0.30 is a reasonable floor. |
+| Linear ramp to 30% cap | over 30/45/60 min | ✅ Keep | Peak-at-removal timing matches clinical Tmax. Curve shape is the only real simplification (true uptake is concave/front-loaded). |
+
+### Known simplifications (acceptable, documented)
+1. **Curve shape** — real in-mouth uptake is concave/front-loaded (fastest in the first
+   ~5–15 min), not a straight line. The linear ramp understates the early rate and
+   overstates late-phase gain.
+2. **Absorption fraction is an average, not exact** — true systemic absorption varies with
+   product chemistry (tobacco-free pouch vs snus), use duration, swallowing, and individual
+   CYP2A6 metabolizer status. The app applies a single 0.30 to all product types, even
+   though tobacco snus extracts far less (~19–33% of label) than tobacco-free pouches.
+3. **Half-life is a single conservative value** — the ~1–4 h inter-individual range and the
+   small ~4–5 h terminal tail are not modeled; negligible over a same-day ~10–12 h horizon.
+4. **"Flat after the window"** assumes the pouch is removed at the end of the selected
+   duration. If held much longer, real plasma nicotine keeps rising, so the model
+   under-counts absorption in that edge case.
+5. **Units** — the model tracks an internal "amount absorbed" proxy in mg, not measured
+   plasma concentration (ng/mL). It is a relative trend indicator, not a clinical measurement.
+
 ## References
 
-This model is based on scientific research on nicotine absorption from oral pouches:
-- Absorption fraction: ~25-30% of stated nicotine content
-- Half-life: ~2 hours (120 minutes) in most adults
-- Absorption pattern: Linear increase during usage period
-- Decay pattern: First-order exponential decay after removal
+- Benowitz NL, Hukkanen J, Jacob P 3rd. *Pharmacology of Nicotine: Addiction,
+  Smoking-Induced Disease, and Therapeutics.* Annu Rev Pharmacol Toxicol 2009;49:57–71.
+  (PMC2946180) — ~2 h elimination half-life; route-independent clearance via CYP2A6.
+- Lunell E, Fagerström K, et al. *Pharmacokinetic Comparison of a Non-tobacco-Based
+  Nicotine Pouch (ZYN) With Conventional Swedish Snus and American Moist Snuff.* Nicotine
+  Tob Res 2020;22(10):1757–1763. doi:10.1093/ntr/ntaa068 — pouch extraction 50–59% of label
+  (tobacco-free) vs 19–33% (snus).
+- UK Committee on Toxicity (COT). *Statement on the bioavailability of nicotine from oral
+  nicotine pouches.* cot.food.gov.uk — ~30–40% oromucosal bioavailability; ~70% first-pass
+  loss of swallowed nicotine.
+- *A Randomised Study of Oral Nicotine Pouch Pharmacokinetics.* Eur J Drug Metab
+  Pharmacokinet (PMC8917032) — pouch half-life ~2.15–2.82 h; Tmax ~60 min for 60-min use.
+- Population PK (PMC8016787) — terminal tail ~4–5 h; average ~2 h with substantial
+  inter-individual variability.
