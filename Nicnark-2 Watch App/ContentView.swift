@@ -88,7 +88,11 @@ private func safeInt(_ value: Double) -> Int {
 /// Wraps a non-Sendable WatchConnectivity payload so it can cross from a `@Sendable`
 /// WCSession reply handler — which WatchConnectivity invokes on a BACKGROUND queue — into
 /// the `@MainActor` hop. WC payloads contain only plist types, so this is sound.
-private struct SendablePayload: @unchecked Sendable {
+///
+/// Marked `nonisolated` because this target builds with SWIFT_DEFAULT_ACTOR_ISOLATION =
+/// MainActor: without it, `init` would be main-actor-isolated and could not be called from
+/// the non-isolated reply handler.
+private nonisolated struct SendablePayload: @unchecked Sendable {
     let value: [String: Any]
     init(_ value: [String: Any]) { self.value = value }
 }
@@ -450,12 +454,16 @@ extension WatchDashboardViewModel {
 // MARK: - WCSession delegate (kept OFF the @MainActor view model)
 
 /// Dedicated `WCSession` delegate. `WCSessionDelegate` is an Objective-C protocol whose
-/// callbacks WatchConnectivity invokes on a background queue. Conforming the `@MainActor`
-/// view model to it directly made the watchOS 26 Swift runtime trap with an actor-isolation
-/// assertion (`EXC_BREAKPOINT`) the instant a payload was delivered — and marking the methods
-/// `nonisolated` was NOT enough to prevent it. This plain, non-isolated `NSObject` legally
-/// runs every callback on the WC queue and simply hops the work to the view model.
-final class WatchSessionDelegate: NSObject, WCSessionDelegate {
+/// callbacks WatchConnectivity invokes on a BACKGROUND queue. On the watchOS 26 / Swift 6
+/// runtime, a main-actor-isolated callback run off the main thread traps with an
+/// actor-isolation assertion (`EXC_BREAKPOINT`: swift_task_checkIsolated ->
+/// dispatch_assert_queue) the instant a payload is delivered.
+///
+/// CRITICAL: this target builds with SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor, so an
+/// unannotated class is implicitly @MainActor. The whole type MUST be marked `nonisolated`
+/// (not just decoupled from the view model) so its callbacks legally run on the WC queue;
+/// they then hop to the view model on the main actor via `Task { @MainActor in ... }`.
+nonisolated final class WatchSessionDelegate: NSObject, WCSessionDelegate {
     weak var viewModel: WatchDashboardViewModel?
 
     func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
