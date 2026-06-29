@@ -125,6 +125,17 @@ final class WatchDashboardViewModel: NSObject, ObservableObject {
     // real second pouch instead of being deduped against a stale "retry".
     private var lastLogFailedAt: Date?
 
+    // WCSessionDelegate is an Objective-C protocol whose callbacks fire on a background
+    // queue. Keep that conformance OFF this @MainActor type (see WatchSessionDelegate) to
+    // avoid the watchOS 26 actor-isolation trap, and retain the delegate here so it lives
+    // as long as the view model.
+    private let sessionDelegate = WatchSessionDelegate()
+
+    override init() {
+        super.init()
+        sessionDelegate.viewModel = self
+    }
+
     func start() {
         // onAppear fires on every re-appear; only activate once. (Set the flag AFTER the
         // isSupported check so an unsupported device isn't permanently latched.)
@@ -133,7 +144,7 @@ final class WatchDashboardViewModel: NSObject, ObservableObject {
         didStart = true
 
         let session = WCSession.default
-        session.delegate = self
+        session.delegate = sessionDelegate
         session.activate()
         self.session = session
 
@@ -377,53 +388,82 @@ final class WatchDashboardViewModel: NSObject, ObservableObject {
     }
 }
 
-extension WatchDashboardViewModel: WCSessionDelegate {
-    nonisolated func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
-        let reachable = session.isReachable
-        let activated = (activationState == .activated)
-        let errMsg = error?.localizedDescription
-        // [String: Any] isn't Sendable; wrap it to cross into the MainActor task safely
-        // (WC application-context values are plist types, so this is sound).
-        struct Box: @unchecked Sendable { let ctx: [String: Any] }
-        let box = Box(ctx: session.receivedApplicationContext)
-        Task { @MainActor in
-            isReachable = reachable
-            if activated { hasActivated = true }
-            if let errMsg {
-                errorMessage = errMsg
-            }
-            // Render whatever the iPhone last pushed, even if we can't reach it now.
-            if !box.ctx.isEmpty {
-                applyHomeReply(box.ctx)
-            }
-            // onAppear's refresh() bails before activation completes, so load now
-            // that the session is ready. (refresh() clears any stale error itself.)
-            if activated && reachable && !isLoading {
-                refresh()
-            }
+// MARK: - WCSession delegate handlers (run on the @MainActor view model)
+
+extension WatchDashboardViewModel {
+    func handleActivation(reachable: Bool, activated: Bool, errorMessage errMsg: String?, context: [String: Any]) {
+        isReachable = reachable
+        if activated { hasActivated = true }
+        if let errMsg {
+            errorMessage = errMsg
+        }
+        // Render whatever the iPhone last pushed, even if we can't reach it now.
+        if !context.isEmpty {
+            applyHomeReply(context)
+        }
+        // onAppear's refresh() bails before activation completes, so load now that the
+        // session is ready. (refresh() clears any stale error itself.)
+        if activated && reachable && !isLoading {
+            refresh()
         }
     }
 
-    nonisolated func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
+    func handleReceivedContext(_ context: [String: Any]) {
         // The iPhone proactively pushed a fresh watch-home snapshot (e.g. after a pouch was
         // logged or removed on the phone). Apply it so the watch updates passively without
         // the user needing to be reachable or to tap Refresh.
+        applyHomeReply(context)
+    }
+
+    func handleReachabilityChange(reachable: Bool) {
+        let wasReachable = isReachable
+        isReachable = reachable
+        // Becoming reachable (e.g. after a cold launch) should auto-fetch.
+        if reachable && !wasReachable && !isLoading {
+            refresh()
+        }
+    }
+}
+
+// MARK: - WCSession delegate (kept OFF the @MainActor view model)
+
+/// Dedicated `WCSession` delegate. `WCSessionDelegate` is an Objective-C protocol whose
+/// callbacks WatchConnectivity invokes on a background queue. Conforming the `@MainActor`
+/// view model to it directly made the watchOS 26 Swift runtime trap with an actor-isolation
+/// assertion (`EXC_BREAKPOINT`) the instant a payload was delivered — and marking the methods
+/// `nonisolated` was NOT enough to prevent it. This plain, non-isolated `NSObject` legally
+/// runs every callback on the WC queue and simply hops the work to the view model.
+final class WatchSessionDelegate: NSObject, WCSessionDelegate {
+    weak var viewModel: WatchDashboardViewModel?
+
+    func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
+        let reachable = session.isReachable
+        let activated = (activationState == .activated)
+        let errMsg = error?.localizedDescription
+        // [String: Any] isn't Sendable; wrap it to cross into the MainActor hop safely
+        // (WC application-context values are plist types, so this is sound).
         struct Box: @unchecked Sendable { let ctx: [String: Any] }
-        let box = Box(ctx: applicationContext)
+        let box = Box(ctx: session.receivedApplicationContext)
+        let vm = viewModel
         Task { @MainActor in
-            applyHomeReply(box.ctx)
+            vm?.handleActivation(reachable: reachable, activated: activated, errorMessage: errMsg, context: box.ctx)
         }
     }
 
-    nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
-        let reachable = session.isReachable
+    func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
+        struct Box: @unchecked Sendable { let ctx: [String: Any] }
+        let box = Box(ctx: applicationContext)
+        let vm = viewModel
         Task { @MainActor in
-            let wasReachable = isReachable
-            isReachable = reachable
-            // Becoming reachable (e.g. after a cold launch) should auto-fetch.
-            if reachable && !wasReachable && !isLoading {
-                refresh()
-            }
+            vm?.handleReceivedContext(box.ctx)
+        }
+    }
+
+    func sessionReachabilityDidChange(_ session: WCSession) {
+        let reachable = session.isReachable
+        let vm = viewModel
+        Task { @MainActor in
+            vm?.handleReachabilityChange(reachable: reachable)
         }
     }
 }
