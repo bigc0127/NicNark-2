@@ -85,6 +85,14 @@ private func safeInt(_ value: Double) -> Int {
     return Int(rounded)
 }
 
+/// Wraps a non-Sendable WatchConnectivity payload so it can cross from a `@Sendable`
+/// WCSession reply handler — which WatchConnectivity invokes on a BACKGROUND queue — into
+/// the `@MainActor` hop. WC payloads contain only plist types, so this is sound.
+private struct SendablePayload: @unchecked Sendable {
+    let value: [String: Any]
+    init(_ value: [String: Any]) { self.value = value }
+}
+
 // MARK: - ViewModel
 
 @MainActor
@@ -192,17 +200,24 @@ final class WatchDashboardViewModel: NSObject, ObservableObject {
 
         isLoading = true
 
+        // The reply/error handlers MUST be @Sendable: WatchConnectivity invokes them on a
+        // background queue, and a @MainActor-isolated closure (the default for a closure
+        // written inside this @MainActor method) traps on watchOS 26 when run off the main
+        // thread (swift_task_checkIsolated -> dispatch_assert_queue). @Sendable makes them
+        // non-isolated; they hop to the MainActor explicitly via Task.
         session.sendMessage(
             ["action": "getWatchHome"],
-            replyHandler: { [weak self] reply in
+            replyHandler: { @Sendable [weak self] reply in
+                let payload = SendablePayload(reply)
                 Task { @MainActor in
-                    self?.applyHomeReply(reply)
+                    self?.applyHomeReply(payload.value)
                     self?.isLoading = false
                 }
             },
-            errorHandler: { [weak self] error in
+            errorHandler: { @Sendable [weak self] error in
+                let message = error.localizedDescription
                 Task { @MainActor in
-                    self?.errorMessage = error.localizedDescription
+                    self?.errorMessage = message
                     self?.isLoading = false
                 }
             }
@@ -262,22 +277,29 @@ final class WatchDashboardViewModel: NSObject, ObservableObject {
         // Prefer immediate send+reply when possible.
         if session.isReachable {
             isLoading = true
+            // Extract Sendable values up front so the @Sendable handlers below don't capture
+            // the non-Sendable `message` dictionary. The handlers MUST be @Sendable because
+            // WatchConnectivity calls them on a background queue; a @MainActor closure would
+            // trap on watchOS 26 (swift_task_checkIsolated -> dispatch_assert_queue).
+            let isLogAction = (message["action"] as? String) == "logPouchFromCanId"
+            let logCanId = message["canId"] as? String
             session.sendMessage(
                 message,
-                replyHandler: { [weak self] reply in
+                replyHandler: { @Sendable [weak self] reply in
+                    let payload = SendablePayload(reply)
                     Task { @MainActor in
-                        self?.applyActionReply(reply)
+                        self?.applyActionReply(payload.value)
                         self?.isLoading = false
                     }
                 },
-                errorHandler: { [weak self] error in
+                errorHandler: { @Sendable [weak self] error in
+                    let message = error.localizedDescription
                     Task { @MainActor in
-                        self?.errorMessage = error.localizedDescription
+                        self?.errorMessage = message
                         self?.isLoading = false
                         // Record a failed log send so a deliberate re-tap of the SAME can
                         // reuses its request id (retry dedup); a fresh tap still mints a new id.
-                        if message["action"] as? String == "logPouchFromCanId",
-                           let canId = message["canId"] as? String {
+                        if isLogAction, let canId = logCanId {
                             self?.lastLogFailedCanId = canId
                             self?.lastLogFailedAt = Date()
                         }
