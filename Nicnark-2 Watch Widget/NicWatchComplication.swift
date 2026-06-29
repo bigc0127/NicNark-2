@@ -139,20 +139,22 @@ struct NicComplicationEntryView: View {
         .gaugeStyle(.accessoryCircular)
     }
 
-    // Corner of round faces: big number is the current level; the curved bezel label shows
-    // the live pouch countdown while one is active, otherwise a short "mg in body" unit
-    // (no leading number — it duplicated the big value and overran the curve).
+    // Corner of round faces: the live pouch countdown sits in the corner; the current level
+    // ("<n> mg in body") wraps around the bezel as the curved label, where it was before.
+    // With no active pouch the corner shows a pill glyph instead of repeating the level.
     private var cornerView: some View {
-        Text(levelString(entry.level))
-            .font(.title2)
-            .minimumScaleFactor(0.5)
-            .widgetLabel {
-                if hasActivePouch, let removal = entry.soonestRemoval {
-                    Text(timerInterval: entry.date...removal, countsDown: true)
-                } else {
-                    Text("mg in body")
-                }
+        Group {
+            if hasActivePouch, let removal = entry.soonestRemoval {
+                Text(timerInterval: entry.date...removal, countsDown: true)
+                    .minimumScaleFactor(0.5)
+            } else {
+                Image(systemName: "pills.fill")
             }
+        }
+        .font(.title2)
+        .widgetLabel {
+            Text("\(levelString(entry.level)) mg in body")
+        }
     }
 
     // Large slot: both the level and the live pouch countdown.
