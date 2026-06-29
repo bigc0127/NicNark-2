@@ -145,13 +145,19 @@ struct NicComplicationEntryView: View {
     private var cornerView: some View {
         Group {
             if hasActivePouch, let removal = entry.soonestRemoval {
+                // The corner content slot is tiny; a full MM:SS / H:MM:SS countdown overflows
+                // at .title2 and gets clipped. Use a compact, monospaced font that scales down
+                // to fit the corner WITHOUT changing its position (still the corner glyph; the
+                // level still wraps the bezel as the widgetLabel below).
                 Text(timerInterval: entry.date...removal, countsDown: true)
-                    .minimumScaleFactor(0.5)
+                    .font(.system(.footnote, design: .rounded).monospacedDigit())
+                    .minimumScaleFactor(0.3)
+                    .lineLimit(1)
             } else {
                 Image(systemName: "pills.fill")
+                    .font(.title3)
             }
         }
-        .font(.title2)
         .widgetLabel {
             Text("\(levelString(entry.level)) mg in body")
         }
