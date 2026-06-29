@@ -91,6 +91,12 @@ private func levelString(_ level: Double) -> String {
     return String(format: "%.2f", max(0, level))
 }
 
+/// Compact one-decimal level for the tiny flat corner slot (e.g. "7.0").
+private func cornerLevelString(_ level: Double) -> String {
+    guard level.isFinite else { return "0" }
+    return String(format: "%.1f", max(0, level))
+}
+
 /// Gauge fills against a fixed, readable scale; the numeric label always shows the true value.
 private let gaugeMax: Double = 6.0
 
@@ -139,19 +145,17 @@ struct NicComplicationEntryView: View {
         .gaugeStyle(.accessoryCircular)
     }
 
-    // Corner of round faces: the live pouch countdown sits in the corner; the current level
-    // ("<n> mg in body") wraps around the bezel as the curved label, where it was before.
-    // With no active pouch the corner shows a pill glyph instead of repeating the level.
+    // Corner of round faces. watchOS gives an accessoryCorner exactly two slots: the curved
+    // bezel text (`widgetLabel`) and the flat corner glyph. Only ONE thing can curve. When a
+    // pouch is active we put the live COUNTDOWN on the curved bezel (like the AQI/temperature
+    // complications) and the current level in the flat corner; with no active pouch there's no
+    // timer, so the bezel falls back to "<n> mg in body" and the corner shows a pill glyph.
     private var cornerView: some View {
         Group {
-            if hasActivePouch, let removal = entry.soonestRemoval {
-                // The corner content slot is tiny; a full MM:SS / H:MM:SS countdown overflows
-                // at .title2 and gets clipped. Use a compact, monospaced font that scales down
-                // to fit the corner WITHOUT changing its position (still the corner glyph; the
-                // level still wraps the bezel as the widgetLabel below).
-                Text(timerInterval: entry.date...removal, countsDown: true)
-                    .font(.system(.footnote, design: .rounded).monospacedDigit())
-                    .minimumScaleFactor(0.3)
+            if hasActivePouch {
+                Text(cornerLevelString(entry.level))
+                    .font(.system(.title3, design: .rounded))
+                    .minimumScaleFactor(0.5)
                     .lineLimit(1)
             } else {
                 Image(systemName: "pills.fill")
@@ -159,7 +163,11 @@ struct NicComplicationEntryView: View {
             }
         }
         .widgetLabel {
-            Text("\(levelString(entry.level)) mg in body")
+            if hasActivePouch, let removal = entry.soonestRemoval {
+                Text(timerInterval: entry.date...removal, countsDown: true)
+            } else {
+                Text("\(levelString(entry.level)) mg in body")
+            }
         }
     }
 
