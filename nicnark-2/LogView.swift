@@ -44,25 +44,6 @@ import Combine      // For handling data streams and notifications
  * • Widget timeline updates (triggered on pouch events)
  * • CloudKit sync status overlay (shows when syncing across devices)
  */
-/**
- * DummySyncState: Fallback sync state for iOS versions that don't support CloudKit sync features.
- * 
- * On iOS 16.1+, the app uses CloudKitSyncState for real sync monitoring.
- * On older iOS versions, this dummy class provides the same interface but with no-op implementations.
- * This allows the UI code to work consistently across iOS versions without #available checks everywhere.
- */
-class DummySyncState: ObservableObject {
-    @Published var isSyncing = false        // Always false - no real syncing on older iOS
-    @Published var syncCompleted = true     // Always true - simulates completed state
-    @Published var syncProgress: Double = 1.0  // Always 100% complete
-    @Published var syncMessage = "Ready"    // Static ready message
-    var isCloudKitEnabled = false           // CloudKit features not available
-    
-    func startInitialSync() async {
-        // No-op for older iOS versions - no actual sync performed
-    }
-}
-
 struct LogView: View {
     // MARK: - Core Data Properties
     // @Environment gets values from the SwiftUI environment that are shared across views
@@ -398,14 +379,12 @@ struct LogView: View {
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 16)
-                .background(Color(.systemBackground))
+                .background(.regularMaterial)
             }
             
             // Sync overlay - only shows when syncing and iCloud is enabled
-            if #available(iOS 16.1, *) {
-                if CloudKitSyncState.shared.isCloudKitEnabled && CloudKitSyncState.shared.isSyncing {
-                    syncOverlay
-                }
+            if CloudKitSyncState.shared.isCloudKitEnabled && CloudKitSyncState.shared.isSyncing {
+                syncOverlay
             }
         }
         .navigationTitle("NicNark")
@@ -421,16 +400,12 @@ struct LogView: View {
                 }
             }
             
-            if #available(iOS 16.1, *) {
-                let authInfo = ActivityAuthorizationInfo()
-                print("📱 Live Activities enabled: \(authInfo.areActivitiesEnabled)")
-                
-                // Start initial sync if needed
-                Task {
-                    if #available(iOS 16.1, *) {
-                        await CloudKitSyncState.shared.startInitialSync()
-                    }
-                }
+            let authInfo = ActivityAuthorizationInfo()
+            print("📱 Live Activities enabled: \(authInfo.areActivitiesEnabled)")
+
+            // Start initial sync if needed
+            Task {
+                await CloudKitSyncState.shared.startInitialSync()
             }
             WidgetReloadCoordinator.reload()
         }
@@ -617,8 +592,7 @@ struct LogView: View {
                     }
                 }
                 .padding(12)
-                .background(Color(.secondarySystemBackground))
-                .cornerRadius(10)
+                .glassEffect(.regular, in: .rect(cornerRadius: 10))
             )
         } else {
             return AnyView(EmptyView())
@@ -642,11 +616,9 @@ struct LogView: View {
             .font(.headline)
             .frame(maxWidth: .infinity)
             .padding()
-            .background(Color.red)
-            .foregroundColor(.white)
-            .cornerRadius(12)
-            .shadow(radius: 4)
         }
+        .buttonStyle(.glass)
+        .tint(.red)
     }
     
     var startTimerButton: some View {
@@ -658,26 +630,23 @@ struct LogView: View {
                         .fontWeight(.semibold)
                 }
                 .font(.title2)
-                
+
                 Text("\(totalLoadedPouches) pouch\(totalLoadedPouches == 1 ? "" : "es") • \(String(format: "%.1f", totalNicotine))mg")
                     .font(.caption)
-                
+
                 Text("Estimated absorption: \(String(format: "%.2f", estimatedTotalAbsorption)) mg")
                     .font(.caption2)
-                    .foregroundColor(.white.opacity(0.9))
-                
+
                 // Show estimated nicotine level
                 if let estimatedLevel = estimatedNicotineLevel {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack {
                             Text("Est. Level")
                                 .font(.caption2)
-                                .foregroundColor(.white.opacity(0.7))
                             Spacer()
                             Text(String(format: "%.3f mg", estimatedLevel))
                                 .font(.caption2)
                                 .fontWeight(.medium)
-                                .foregroundColor(.white.opacity(0.9))
                         }
                     }
                 }
@@ -688,11 +657,9 @@ struct LogView: View {
             }
             .frame(maxWidth: .infinity)
             .padding()
-            .background(Color.blue)
-            .foregroundColor(.white)
-            .cornerRadius(12)
-            .shadow(radius: 4)
         }
+        .buttonStyle(.glassProminent)
+        .tint(.blue)
         .disabled(!canStartTimer)
     }
 
@@ -872,8 +839,7 @@ struct LogView: View {
             .opacity(shouldDisableRemoveButton ? 0.5 : 1.0)
         }
         .padding(12)
-        .background(Color(.secondarySystemBackground))
-        .cornerRadius(10)
+        .glassEffect(.regular, in: .rect(cornerRadius: 10))
     }
 
     @ViewBuilder
@@ -1018,17 +984,15 @@ struct LogView: View {
         if successCount > 0, let pouchId = longestPouchId {
             // Clear loaded pouches
             loadedPouches.removeAll()
-            
+
             // Create ONE Live Activity for the longest timer
-            if #available(iOS 16.1, *) {
-                Task {
-                    _ = await LiveActivityManager.startLiveActivity(
-                        for: pouchId,
-                        nicotineAmount: totalNicotine,  // Show total nicotine
-                        insertionTime: Date.now,
-                        duration: longestDuration
-                    )
-                }
+            Task {
+                _ = await LiveActivityManager.startLiveActivity(
+                    for: pouchId,
+                    nicotineAmount: totalNicotine,  // Show total nicotine
+                    insertionTime: Date.now,
+                    duration: longestDuration
+                )
             }
             
             // Schedule completion notification for longest timer
@@ -1191,7 +1155,6 @@ struct LogView: View {
     }
 
     private func endLiveActivityIfNeeded(for pouch: PouchLog) {
-        guard #available(iOS 16.1, *) else { return }
         liveTimer?.invalidate()
         liveTimer = nil
         let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
@@ -1202,7 +1165,6 @@ struct LogView: View {
     }
 
     private func updateLiveActivityTick() async {
-        guard #available(iOS 16.1, *) else { return }
         // startTimerWithLoadedPouches() creates ONE Live Activity for the LONGEST-running
         // pouch (by end time), not the newest. Driving updates off activePouches.first
         // (newest) would target the wrong pouchId in multi-can batches and silently freeze
@@ -1532,7 +1494,6 @@ struct LogView: View {
     
     // MARK: - Sync Overlay
     
-    @available(iOS 16.1, *)
     private var syncOverlay: some View {
         let syncState = CloudKitSyncState.shared
         return ZStack {
@@ -1578,11 +1539,7 @@ struct LogView: View {
                 }
             }
             .padding(30)
-            .background(
-                RoundedRectangle(cornerRadius: 20)
-                    .fill(.regularMaterial)
-                    .shadow(radius: 10)
-            )
+            .glassEffect(.regular, in: .rect(cornerRadius: 20))
             .scaleEffect(syncState.syncCompleted ? 1.05 : 1.0)
             .animation(.spring(response: 0.3, dampingFraction: 0.7), value: syncState.syncCompleted)
         }
@@ -1591,11 +1548,8 @@ struct LogView: View {
     // MARK: - Computed Properties
     
     private var shouldDisableRemoveButton: Bool {
-        if #available(iOS 16.1, *) {
-            // Disable button if CloudKit is enabled and we haven't completed initial sync
-            return CloudKitSyncState.shared.isCloudKitEnabled && !CloudKitSyncState.shared.syncCompleted
-        }
-        return false
+        // Disable button if CloudKit is enabled and we haven't completed initial sync
+        return CloudKitSyncState.shared.isCloudKitEnabled && !CloudKitSyncState.shared.syncCompleted
     }
     
     // MARK: - Special handling for removal to sync with widget

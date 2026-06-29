@@ -353,18 +353,16 @@ struct SmallWidgetView: View {
             
             // Add refresh button when no active pouches
             if !entry.hasActivePouches {
-                if #available(iOS 17.0, *) {
-                    Button(intent: RefreshWidgetIntent()) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.caption2)
-                            Text("Sync")
-                                .font(.caption2)
-                        }
+                Button(intent: RefreshWidgetIntent()) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.caption2)
+                        Text("Sync")
+                            .font(.caption2)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.mini)
                 }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.mini)
             }
         }
         .padding()
@@ -415,18 +413,16 @@ struct MediumWidgetView: View {
                 
                 // Add refresh button when no active pouches
                 if !entry.hasActivePouches {
-                    if #available(iOS 17.0, *) {
-                        Button(intent: RefreshWidgetIntent()) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "arrow.clockwise")
-                                    .font(.caption)
-                                Text("Sync Data")
-                                    .font(.caption)
-                            }
+                    Button(intent: RefreshWidgetIntent()) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.caption)
+                            Text("Sync Data")
+                                .font(.caption)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
                     }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
                 }
             }
             
@@ -545,22 +541,16 @@ struct LargeWidgetView: View {
                 
                 // Add refresh button when no active pouches
                 if !entry.hasActivePouches {
-                    if #available(iOS 17.0, *) {
-                        Button(intent: RefreshWidgetIntent()) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "arrow.clockwise")
-                                    .font(.caption)
-                                Text("Sync")
-                                    .font(.caption)
-                            }
+                    Button(intent: RefreshWidgetIntent()) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.caption)
+                            Text("Sync")
+                                .font(.caption)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                    } else {
-                        Text("Last 6 Hours")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
                     }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
                 } else {
                     Text("Last 6 Hours")
                         .font(.caption2)
@@ -599,7 +589,6 @@ private func levelColor(for level: Double) -> Color {
 }
 
 // MARK: - Widget Refresh Intent
-@available(iOS 17.0, *)
 struct RefreshWidgetIntent: AppIntent {
     static let title: LocalizedStringResource = "Refresh Widget"
     static let description = IntentDescription("Force refresh the widget data")

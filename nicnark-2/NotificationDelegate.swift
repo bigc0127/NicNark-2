@@ -53,11 +53,9 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
                     NotificationManager.handlePouchRemovalAction(pouchId: id)
 
                     // Keep badge/state aligned with current activities
-                    if #available(iOS 16.1, *) {
-                        let count = Activity<PouchActivityAttributes>.activities.count
-                        // Update the shared manager the UI actually observes.
-                        LiveActivityManager.shared.hasActiveNotification = (count > 0)
-                    }
+                    let count = Activity<PouchActivityAttributes>.activities.count
+                    // Update the shared manager the UI actually observes.
+                    LiveActivityManager.shared.hasActiveNotification = (count > 0)
                     t.c()
                 }
             } else {

@@ -214,11 +214,7 @@ enum NotificationManager {
         // Check if user enabled high-priority notifications in settings
         let priorityEnabled = UserDefaults.standard.bool(forKey: "priorityNotifications")
         if priorityEnabled {
-            // Set interruption level to break through Focus modes and Do Not Disturb
-            if #available(iOS 15.0, *) {
-                content.interruptionLevel = .timeSensitive
-            }
-            // Give this notification higher priority in iOS notification ranking
+            content.interruptionLevel = .timeSensitive
             content.relevanceScore = 1.0
         }
 
@@ -271,10 +267,8 @@ enum NotificationManager {
         logger.info("Handling pouch removal: \(pouchId)")
 
         // End Live Activity (if present) and cancel any pending completion notifications.
-        if #available(iOS 16.1, *) {
-            Task { @MainActor in
-                await LiveActivityManager.endLiveActivity(for: pouchId)
-            }
+        Task { @MainActor in
+            await LiveActivityManager.endLiveActivity(for: pouchId)
         }
         cancelAlert(id: pouchId)
 

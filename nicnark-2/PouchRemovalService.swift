@@ -54,9 +54,7 @@ enum PouchRemovalService {
 
         // End the Live Activity only after a confirmed save: the store now shows the
         // pouch inactive, so a background sync cannot re-create the activity.
-        if #available(iOS 16.1, *) {
-            await LiveActivityManager.endLiveActivity(for: pouchId)
-        }
+        await LiveActivityManager.endLiveActivity(for: pouchId)
 
         // Cancel completion notification
         NotificationManager.cancelAlert(id: pouchId)
@@ -120,9 +118,7 @@ enum PouchRemovalService {
 
         // End any Live Activities and cancel completion notifications for the removed pouches.
         for pouchId in removedIds {
-            if #available(iOS 16.1, *) {
-                await LiveActivityManager.endLiveActivity(for: pouchId)
-            }
+            await LiveActivityManager.endLiveActivity(for: pouchId)
             NotificationManager.cancelAlert(id: pouchId)
         }
 

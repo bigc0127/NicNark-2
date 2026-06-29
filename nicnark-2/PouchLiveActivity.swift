@@ -4,7 +4,6 @@ import ActivityKit
 import WidgetKit
 import SwiftUI
 
-@available(iOS 16.1, *)
 struct PouchLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: PouchActivityAttributes.self) { context in
@@ -67,7 +66,6 @@ struct PouchLiveActivity: Widget {
     }
 }
 
-@available(iOS 16.1, *)
 struct PouchLiveActivityView: View {
     let context: ActivityViewContext<PouchActivityAttributes>
 

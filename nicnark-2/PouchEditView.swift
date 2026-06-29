@@ -60,13 +60,13 @@ struct PouchEditView: View {
             .navigationTitle("Edit Pouch")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
+                ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") {
                         dismiss()
                     }
                 }
-                
-                ToolbarItem(placement: .navigationBarTrailing) {
+
+                ToolbarItem(placement: .topBarTrailing) {
                     Button("Save") {
                         savePouch()
                     }
@@ -199,7 +199,7 @@ struct PouchEditView: View {
             try viewContext.save()
             
             // If this is an active pouch and the start time changed, update the Live Activity
-            if #available(iOS 16.1, *), hasActivePouch && startTimeChanged {
+            if hasActivePouch && startTimeChanged {
                 let pouchId = pouchLog.pouchId?.uuidString ?? pouchLog.objectID.uriRepresentation().absoluteString
                 Task {
                     await LiveActivityManager.updateLiveActivityStartTime(

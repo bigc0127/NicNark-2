@@ -139,12 +139,7 @@ struct CanCardView: View {
             }
         }
         .padding()
-        .background(loadedCount > 0 ? Color.blue.opacity(0.1) : Color(.secondarySystemBackground))
-        .cornerRadius(12)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(loadedCount > 0 ? Color.blue : (can.isEmpty ? Color.red.opacity(0.5) : Color.clear), lineWidth: loadedCount > 0 ? 2 : 1)
-        )
+        .glassEffect(loadedCount > 0 ? .regular.tint(.blue) : .regular, in: .rect(cornerRadius: 12))
         .opacity(can.isEmpty ? 0.6 : 1.0)
         .contextMenu {
             if let onEdit = onEdit {

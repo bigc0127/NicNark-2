@@ -126,11 +126,9 @@ struct ContentView: View {
                 print("Failed to configure TipKit: \(error)")
             }
 
-            // Set up background tasks for Live Activity updates (iOS 16.1+ only)
-            if #available(iOS 16.1, *) {
-                await BackgroundMaintainer.shared.registerIfNeeded()  // Register background task types
-                await BackgroundMaintainer.shared.scheduleRegular()   // Schedule recurring updates
-            }
+            // Set up background tasks for Live Activity updates
+            await BackgroundMaintainer.shared.registerIfNeeded()  // Register background task types
+            await BackgroundMaintainer.shared.scheduleRegular()   // Schedule recurring updates
         }
         
         // MARK: - Scene Phase Changes

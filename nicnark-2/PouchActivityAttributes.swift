@@ -3,7 +3,6 @@
 import ActivityKit
 import Foundation
 
-@available(iOS 16.1, *)
 struct PouchActivityAttributes: ActivityAttributes {
 
     struct ContentState: Codable, Hashable {

@@ -178,28 +178,26 @@ enum LogService {
         // STEP 7: Use the calculated duration for Live Activities and notifications
         // (Already calculated in STEP 4)
         let duration = durationSeconds
-        
-        // STEP 8: Start Live Activity for real-time tracking (iOS 16.1+)
+
+        // Use UUID as identifier for consistency across devices and app launches
+        let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
+
+        // STEP 8: Start Live Activity for real-time tracking
         // Live Activities show on the Lock Screen and Dynamic Island with a countdown timer
-        // 
+        //
         // CRITICAL: We pass the pouch's actual insertion time from Core Data to ensure the
         // Live Activity countdown matches exactly what's displayed in-app and in widgets.
         // Without this, the timer would restart from 30 minutes whenever the activity refreshes.
-        if #available(iOS 16.1, *) {
-            // Use UUID as identifier for consistency across devices and app launches
-            let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
-            Task {
-                _ = await LiveActivityManager.startLiveActivity(
-                    for: pouchId, 
-                    nicotineAmount: mg,
-                    insertionTime: pouch.insertionTime,  // Pass actual insertion time for accurate countdown
-                    duration: duration  // How long the absorption should take
-                )
-            }
+        Task {
+            _ = await LiveActivityManager.startLiveActivity(
+                for: pouchId,
+                nicotineAmount: mg,
+                insertionTime: pouch.insertionTime,  // Pass actual insertion time for accurate countdown
+                duration: duration  // How long the absorption should take
+            )
         }
-        
+
         // STEP 9: Schedule completion notification to alert user when absorption is done
-        let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
         let fireDate = Date().addingTimeInterval(duration)  // When to show the notification
         NotificationManager.scheduleCompletionAlert(
             id: pouchId,                                     // Unique ID to cancel later if needed
@@ -237,9 +235,7 @@ enum LogService {
         
         // STEP 13: Schedule background task to keep Live Activity updated
         // This ensures the countdown timer stays accurate even when the app is backgrounded
-        if #available(iOS 16.1, *) {
-            Task { await BackgroundMaintainer.shared.scheduleSoon() }
-        }
+        Task { await BackgroundMaintainer.shared.scheduleSoon() }
         
         return true
     }

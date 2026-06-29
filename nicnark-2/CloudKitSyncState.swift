@@ -11,7 +11,6 @@ import CloudKit
 import CoreData
 import os.log
 
-@available(iOS 16.1, *)
 @MainActor
 class CloudKitSyncState: ObservableObject {
     static let shared = CloudKitSyncState()

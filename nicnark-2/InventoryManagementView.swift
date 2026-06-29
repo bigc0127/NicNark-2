@@ -207,7 +207,7 @@ struct InventoryManagementView: View {
             Spacer()
         }
         .padding()
-        .background(Color(.systemGray6))
+        .background(.regularMaterial)
     }
     
     /**
@@ -240,13 +240,13 @@ struct InventoryManagementView: View {
                     Label("Add Can", systemImage: "plus.circle")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                
+                .buttonStyle(.glassProminent)
+
                 Button(action: { showingBarcodeScanner = true }) {
                     Label("Scan", systemImage: "barcode.viewfinder")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
             }
             .padding(.horizontal, 40)
             
@@ -282,7 +282,7 @@ struct InventoryManagementView: View {
             }
             .onDelete(perform: deleteItems)
         }
-        .listStyle(InsetGroupedListStyle())
+        .listStyle(.insetGrouped)
     }
     
     // MARK: - Computed Properties

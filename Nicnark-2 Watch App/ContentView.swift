@@ -582,6 +582,7 @@ struct ContentView: View {
                 }
 
                 Button("Refresh") { vm.refresh() }
+                    .buttonStyle(.glass)
             }
 
             if !vm.activePouches.isEmpty {
@@ -634,6 +635,7 @@ struct ContentView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
+                        .buttonStyle(.glass)
                     }
                 }
             }

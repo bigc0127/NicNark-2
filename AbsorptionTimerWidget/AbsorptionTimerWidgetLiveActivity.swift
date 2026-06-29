@@ -4,7 +4,6 @@ import ActivityKit
 import WidgetKit
 import SwiftUI
 
-@available(iOS 16.1, *)
 struct AbsorptionTimerWidgetLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: PouchActivityAttributes.self) { context in
@@ -39,7 +38,8 @@ struct AbsorptionTimerWidgetLiveActivity: Widget {
                 let maxAbsorption = context.attributes.totalNicotine * 0.30 // 30% absorption rate
                 let frac = maxAbsorption > 0 ? min(1.0, context.state.currentNicotineLevel / maxAbsorption) : 0
                 ProgressView(value: frac, total: 1.0)
-                    .progressViewStyle(LinearProgressViewStyle(tint: .blue))
+                    .progressViewStyle(.linear)
+                    .tint(.blue)
                     .scaleEffect(y: 2)
 
                 HStack {
@@ -77,7 +77,8 @@ struct AbsorptionTimerWidgetLiveActivity: Widget {
                     let frac = maxAbsorption > 0 ? min(1.0, context.state.currentNicotineLevel / maxAbsorption) : 0
                     VStack(spacing: 6) {
                         ProgressView(value: frac, total: 1.0)
-                            .progressViewStyle(LinearProgressViewStyle(tint: .blue))
+                            .progressViewStyle(.linear)
+                            .tint(.blue)
                         HStack {
                             Text("Absorbed:").font(.caption2).foregroundColor(.secondary)
                             Spacer()

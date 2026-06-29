@@ -962,15 +962,8 @@ private struct PouchCard: View {
         }
         .padding(10)
         .frame(width: 150)  // Narrower fixed width for better fit
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color(.secondarySystemBackground))
-                .scaleEffect(isPressed ? 0.95 : 1.0)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Color(.separator), lineWidth: 0.5)
-        )
+        .glassEffect(.regular, in: .rect(cornerRadius: 10))
+        .scaleEffect(isPressed ? 0.95 : 1.0)
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
             // Double tap to edit (temporary for debugging)
@@ -1011,9 +1004,6 @@ private struct EmptyHourPill: View {
             .foregroundColor(.secondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color(.tertiarySystemFill))
-            )
+            .glassEffect(.regular, in: .rect(cornerRadius: 10))
     }
 }

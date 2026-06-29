@@ -168,21 +168,20 @@ struct SettingsView: View {
             }
         }
         .sheet(isPresented: $showingDiagnostics) {
-            NavigationView {
+            NavigationStack {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(diagnosticsResult)
                             .font(.system(.caption, design: .monospaced))
                             .padding()
-                            .background(Color(.secondarySystemBackground))
-                            .cornerRadius(8)
+                            .glassEffect(in: RoundedRectangle(cornerRadius: 8))
                     }
                     .padding()
                 }
                 .navigationTitle("CloudKit Diagnostics")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    ToolbarItemGroup(placement: .topBarTrailing) {
                         Button("Copy Container ID") {
                             #if canImport(UIKit)
                             UIPasteboard.general.string = "iCloud.ConnorNeedling.nicnark-2"
@@ -196,7 +195,7 @@ struct SettingsView: View {
             }
         }
         .sheet(isPresented: $showingEventLog) {
-            NavigationView {
+            NavigationStack {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(eventLogText)
@@ -204,15 +203,14 @@ struct SettingsView: View {
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding()
-                            .background(Color(.secondarySystemBackground))
-                            .cornerRadius(8)
+                            .glassEffect(in: RoundedRectangle(cornerRadius: 8))
                     }
                     .padding()
                 }
                 .navigationTitle("CloudKit Event Log")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    ToolbarItemGroup(placement: .topBarTrailing) {
                         Button("Copy") {
                             #if canImport(UIKit)
                             UIPasteboard.general.string = eventLogText
@@ -229,20 +227,19 @@ struct SettingsView: View {
         }
         #if DEBUG
         .sheet(isPresented: $showingDeploymentChecklist) {
-            NavigationView {
+            NavigationStack {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(deploymentChecklistText)
                             .font(.system(.caption, design: .monospaced))
                             .padding()
-                            .background(Color(.secondarySystemBackground))
-                            .cornerRadius(8)
+                            .glassEffect(in: RoundedRectangle(cornerRadius: 8))
                     }
                     .padding()
                 }
                 .navigationTitle("Production Deployment Checklist")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Done") { showingDeploymentChecklist = false } } }
+                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { showingDeploymentChecklist = false } } }
             }
         }
         #endif
@@ -822,8 +819,7 @@ struct SettingsView: View {
                         Text(result)
                             .font(.system(.caption, design: .monospaced))
                             .padding(8)
-                            .background(Color(.secondarySystemBackground))
-                            .cornerRadius(8)
+                            .glassEffect(in: RoundedRectangle(cornerRadius: 8))
                     }
                     .frame(maxHeight: 220)
                 }
@@ -1021,9 +1017,7 @@ struct SettingsView: View {
     
     private func endAllLiveActivities() async {
         #if canImport(ActivityKit)
-        if #available(iOS 16.1, *) {
-            await LiveActivityManager.endAllLiveActivities()
-        }
+        await LiveActivityManager.endAllLiveActivities()
         #endif
     }
     

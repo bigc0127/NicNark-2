@@ -71,7 +71,7 @@ class BarcodeScannerViewController: UIViewController {
 
         if let connection = previewLayer?.connection {
             let angle: CGFloat
-            switch view.window?.windowScene?.interfaceOrientation {
+            switch view.window?.windowScene?.effectiveGeometry.interfaceOrientation {
             case .landscapeLeft:  angle = 180
             case .landscapeRight: angle = 0
             case .portraitUpsideDown: angle = 270

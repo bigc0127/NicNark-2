@@ -139,7 +139,7 @@ struct NotificationManagementView: View {
                     Text("0.3mg").tag(0.3)
                     Text("0.5mg").tag(0.5)
                 }
-                .pickerStyle(SegmentedPickerStyle())
+                .pickerStyle(.segmented)
                 .onChange(of: settings.nicotineAlertThreshold) {
                     NotificationManager.rescheduleNotifications()
                 }
@@ -243,16 +243,12 @@ struct NotificationManagementView: View {
     // MARK: - Helper Methods
     
     private func formatTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
+        date.formatted(date: .omitted, time: .shortened)
     }
 }
 
-struct NotificationManagementView_Previews: PreviewProvider {
-    static var previews: some View {
-        NavigationView {
-            NotificationManagementView()
-        }
+#Preview {
+    NavigationStack {
+        NotificationManagementView()
     }
 }

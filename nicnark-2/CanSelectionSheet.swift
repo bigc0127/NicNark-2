@@ -25,7 +25,7 @@ struct CanSelectionSheet: View {
     ) private var activeCans: FetchedResults<Can>
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             VStack(spacing: 0) {
                 // Header explanation
                 VStack(spacing: 8) {
@@ -85,8 +85,7 @@ struct CanSelectionSheet: View {
                                         .foregroundColor(.secondary)
                                 }
                                 .padding()
-                                .background(Color(.secondarySystemBackground))
-                                .cornerRadius(10)
+                                .glassEffect(.regular, in: .rect(cornerRadius: 10))
                             }
                             .buttonStyle(PlainButtonStyle())
                         }
@@ -117,8 +116,7 @@ struct CanSelectionSheet: View {
                                     .foregroundColor(.secondary)
                             }
                             .padding()
-                            .background(Color(.tertiarySystemBackground))
-                            .cornerRadius(10)
+                            .glassEffect(.regular, in: .rect(cornerRadius: 10))
                         }
                         .buttonStyle(PlainButtonStyle())
                     }

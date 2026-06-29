@@ -1,6 +1,6 @@
 // LiveActivityManager.swift
 //
-// Live Activities Management for iOS 16.1+
+// Live Activities Management
 //
 // Live Activities appear on the Lock Screen and Dynamic Island showing real-time pouch countdown.
 // This manager handles the complete lifecycle:
@@ -41,10 +41,8 @@ import WidgetKit      // Widget timeline management
  * The manager is thread-safe and prevents duplicate activities while handling
  * complex scenarios like device syncing, app backgrounding, and activity restoration.
  * 
- * @available(iOS 16.1, *) ensures this only compiles and runs on supported iOS versions
  * @MainActor ensures all UI updates happen on the main thread
  */
-@available(iOS 16.1, *)
 @MainActor
 class LiveActivityManager: ObservableObject {
     /// Shared singleton so non-View callers (e.g. NotificationDelegate) mutate the
@@ -481,7 +479,6 @@ class LiveActivityManager: ObservableObject {
 
 // MARK: - BackgroundMaintainer: BGTaskScheduler-based local updates
 
-@available(iOS 16.1, *)
 @MainActor
 class BackgroundMaintainer {
     static let shared = BackgroundMaintainer()

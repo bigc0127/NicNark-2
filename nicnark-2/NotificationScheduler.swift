@@ -90,9 +90,7 @@ class NotificationScheduler: ObservableObject {
                     content.categoryIdentifier = "CAN_INVENTORY"
                     
                     if UserDefaults.standard.bool(forKey: "priorityNotifications") {
-                        if #available(iOS 15.0, *) {
-                            content.interruptionLevel = .timeSensitive
-                        }
+                        content.interruptionLevel = .timeSensitive
                     }
                     
                     let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
@@ -243,9 +241,7 @@ class NotificationScheduler: ObservableObject {
                 
                 // Apply priority settings if enabled
                 if UserDefaults.standard.bool(forKey: "priorityNotifications") {
-                    if #available(iOS 15.0, *) {
-                        content.interruptionLevel = .timeSensitive
-                    }
+                    content.interruptionLevel = .timeSensitive
                 }
                 
                 let trigger = UNTimeIntervalNotificationTrigger(timeInterval: timeInterval, repeats: false)
@@ -273,9 +269,7 @@ class NotificationScheduler: ObservableObject {
         
         // Apply priority settings if enabled
         if UserDefaults.standard.bool(forKey: "priorityNotifications") {
-            if #available(iOS 15.0, *) {
-                content.interruptionLevel = .timeSensitive
-            }
+            content.interruptionLevel = .timeSensitive
         }
         
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)

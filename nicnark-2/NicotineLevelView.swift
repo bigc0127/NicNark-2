@@ -307,8 +307,7 @@ struct NicotineLevelView: View {
                     }
                 }
                 .padding()
-                .background(Color(.systemGray6))
-                .cornerRadius(16)
+                .glassEffect(.regular, in: .rect(cornerRadius: 16))
             } else {
                 Text("Tap and drag on the chart to explore data")
                     .font(.caption)
@@ -353,8 +352,7 @@ struct NicotineLevelView: View {
             }
             .padding(.vertical, 8)
             .padding(.horizontal, 12)
-            .background(Color(.systemGray6))
-            .cornerRadius(8)
+            .glassEffect(.regular, in: .rect(cornerRadius: 8))
             
             // Per-pouch absorption rates
             if !absorption.pouches.isEmpty {
@@ -389,8 +387,7 @@ struct NicotineLevelView: View {
                         }
                         .padding(.vertical, 6)
                         .padding(.horizontal, 10)
-                        .background(Color(.systemGray6))
-                        .cornerRadius(6)
+                        .glassEffect(.regular, in: .rect(cornerRadius: 6))
                     }
                 }
             }
@@ -434,8 +431,7 @@ struct NicotineLevelView: View {
                     }
                     .padding(.vertical, 8)
                     .padding(.horizontal, 12)
-                    .background(Color(.systemGray6))
-                    .cornerRadius(8)
+                    .glassEffect(.regular, in: .rect(cornerRadius: 8))
                 }
             }
         }

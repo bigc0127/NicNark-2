@@ -50,10 +50,8 @@ import os.log
  * - Maintaining consistent UI state across all devices
  * - Handling network failures and sync conflicts gracefully
  * 
- * @available(iOS 16.1, *) because Live Activity coordination requires this iOS version
  * @MainActor ensures all UI updates happen on the main thread
  */
-@available(iOS 16.1, *)
 @MainActor
 class CloudKitSyncManager: ObservableObject {
     /// Shared singleton instance used throughout the app
