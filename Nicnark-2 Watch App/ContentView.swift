@@ -9,6 +9,7 @@ import SwiftUI
 import Combine
 import WatchConnectivity
 import Charts
+import WidgetKit
 
 // MARK: - Models
 
@@ -407,10 +408,33 @@ final class WatchDashboardViewModel: NSObject, ObservableObject {
         if let session {
             updateReachability(from: session)
         }
+
+        // Hand the latest state to the watch-face complication (separate process), then ask
+        // WidgetKit to rebuild the timeline so the face updates promptly.
+        updateComplicationSnapshot()
     }
 
     private func updateReachability(from session: WCSession) {
         isReachable = session.isReachable
+    }
+
+    /// Writes the current level + active-pouch countdown + near-future decay samples to the
+    /// shared App Group so the complication can render them, and reloads its timelines.
+    private func updateComplicationSnapshot() {
+        let soonestRemoval = activePouches
+            .map { $0.removalDate }
+            .filter { $0 > Date() }
+            .min()
+        let points = graphPoints.map { WatchComplicationSnapshot.Point(t: $0.time, level: $0.level) }
+        let snapshot = WatchComplicationSnapshot(
+            updatedAt: Date(),
+            currentLevel: level,
+            activePouchCount: activePouchCount,
+            soonestRemoval: soonestRemoval,
+            points: points
+        )
+        snapshot.save()
+        WidgetCenter.shared.reloadAllTimelines()
     }
 }
 

@@ -11,6 +11,7 @@
 		C84224212E4FCBE5003E73E3 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C8D96E442E40739E002AA8C9 /* SwiftUI.framework */; };
 		C84224242E4FCBE7003E73E3 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C8D96E422E40739E002AA8C9 /* WidgetKit.framework */; };
 		D1A0DEAD000000000000000C /* Nicnark-2 Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = D1A0DEAD0000000000000001 /* Nicnark-2 Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		D1C0DEAD000000000000000C /* Nicnark-2 Watch Widget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = D1C0DEAD0000000000000002 /* Nicnark-2 Watch Widget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -27,6 +28,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = C8E7BAB72F50B2CD00182F5E;
 			remoteInfo = "Nicnark-2 Watch App";
+		};
+		D1C0DEAD000000000000000E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C8E730542E405AC700F0C29D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D1C0DEAD0000000000000001;
+			remoteInfo = "Nicnark-2 Watch Widget";
 		};
 /* End PBXContainerItemProxy section */
 
@@ -51,6 +59,15 @@
 			name = "Embed Watch Content";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D1C0DEAD000000000000000B /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			dstPath = "";
+			dstSubfolder = PlugIns;
+			files = (
+				D1C0DEAD000000000000000C /* Nicnark-2 Watch Widget.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
@@ -60,6 +77,9 @@
 		C8D96E682E40800B002AA8C9 /* AbsorptionTimerWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AbsorptionTimerWidgetExtension.entitlements; sourceTree = "<group>"; };
 		C8E7305C2E405AC700F0C29D /* nicnark-2.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "nicnark-2.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		D1A0DEAD0000000000000001 /* Nicnark-2 Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Nicnark-2 Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		D1C0DEAD0000000000000002 /* Nicnark-2 Watch Widget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Nicnark-2 Watch Widget.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
+		D1C0DEAD000000000000000A /* Nicnark-2 Watch Widget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Nicnark-2 Watch Widget.entitlements"; sourceTree = "<group>"; };
+		D1C0DEAD0000000000000011 /* Nicnark-2 Watch App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Nicnark-2 Watch App.entitlements"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -94,6 +114,13 @@
 			);
 			target = C8D96E3F2E40739E002AA8C9 /* AbsorptionTimerWidgetExtension */;
 		};
+		D1C0DEAD0000000000000012 /* Exceptions for "Nicnark-2 Watch Widget" folder in "Nicnark-2 Watch Widget" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = D1C0DEAD0000000000000001 /* Nicnark-2 Watch Widget */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -120,6 +147,14 @@
 			path = "Nicnark-2 Watch App";
 			sourceTree = "<group>";
 		};
+		D1C0DEAD0000000000000009 /* Nicnark-2 Watch Widget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				D1C0DEAD0000000000000012 /* Exceptions for "Nicnark-2 Watch Widget" folder in "Nicnark-2 Watch Widget" target */,
+			);
+			path = "Nicnark-2 Watch Widget";
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -136,6 +171,13 @@
 			);
 		};
 		D1A0DEAD0000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D1C0DEAD0000000000000004 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -161,6 +203,9 @@
 				C8E7305E2E405AC700F0C29D /* nicnark-2 */,
 				C8D96E462E40739E002AA8C9 /* AbsorptionTimerWidget */,
 				D1A0DEAD0000000000000008 /* Nicnark-2 Watch App */,
+				D1C0DEAD0000000000000009 /* Nicnark-2 Watch Widget */,
+				D1C0DEAD000000000000000A /* Nicnark-2 Watch Widget.entitlements */,
+				D1C0DEAD0000000000000011 /* Nicnark-2 Watch App.entitlements */,
 				C8D96E412E40739E002AA8C9 /* Frameworks */,
 				C8E7305D2E405AC700F0C29D /* Products */,
 			);
@@ -172,6 +217,7 @@
 				C8E7305C2E405AC700F0C29D /* nicnark-2.app */,
 				C8D96E402E40739E002AA8C9 /* AbsorptionTimerWidgetExtension.appex */,
 				D1A0DEAD0000000000000001 /* Nicnark-2 Watch App.app */,
+				D1C0DEAD0000000000000002 /* Nicnark-2 Watch Widget.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -228,10 +274,12 @@
 				D1A0DEAD0000000000000002 /* Sources */,
 				D1A0DEAD0000000000000003 /* Frameworks */,
 				D1A0DEAD0000000000000004 /* Resources */,
+				D1C0DEAD000000000000000B /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				D1C0DEAD000000000000000D /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				D1A0DEAD0000000000000008 /* Nicnark-2 Watch App */,
@@ -240,6 +288,26 @@
 			productName = "Nicnark-2 Watch App";
 			productReference = D1A0DEAD0000000000000001 /* Nicnark-2 Watch App.app */;
 			productType = "com.apple.product-type.application";
+		};
+		D1C0DEAD0000000000000001 /* Nicnark-2 Watch Widget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D1C0DEAD0000000000000006 /* Build configuration list for PBXNativeTarget "Nicnark-2 Watch Widget" */;
+			buildPhases = (
+				D1C0DEAD0000000000000003 /* Sources */,
+				D1C0DEAD0000000000000004 /* Frameworks */,
+				D1C0DEAD0000000000000005 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				D1C0DEAD0000000000000009 /* Nicnark-2 Watch Widget */,
+			);
+			name = "Nicnark-2 Watch Widget";
+			productName = "Nicnark-2 Watch Widget";
+			productReference = D1C0DEAD0000000000000002 /* Nicnark-2 Watch Widget.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -258,6 +326,9 @@
 						CreatedOnToolsVersion = 16.4;
 					};
 					C8E7BAB72F50B2CD00182F5E = {
+						CreatedOnToolsVersion = 26.6;
+					};
+					D1C0DEAD0000000000000001 = {
 						CreatedOnToolsVersion = 26.6;
 					};
 				};
@@ -279,6 +350,7 @@
 				C8E7305B2E405AC700F0C29D /* nicnark-2 */,
 				C8D96E3F2E40739E002AA8C9 /* AbsorptionTimerWidgetExtension */,
 				C8E7BAB72F50B2CD00182F5E /* Nicnark-2 Watch App */,
+				D1C0DEAD0000000000000001 /* Nicnark-2 Watch Widget */,
 			);
 		};
 /* End PBXProject section */
@@ -295,6 +367,13 @@
 			);
 		};
 		D1A0DEAD0000000000000004 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D1C0DEAD0000000000000005 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -321,6 +400,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D1C0DEAD0000000000000003 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -334,6 +420,12 @@
 			name = "Nicnark-2 Watch App";
 			target = C8E7BAB72F50B2CD00182F5E /* Nicnark-2 Watch App */;
 			targetProxy = D1A0DEAD000000000000000A /* PBXContainerItemProxy */;
+		};
+		D1C0DEAD000000000000000D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = "Nicnark-2 Watch Widget";
+			target = D1C0DEAD0000000000000001 /* Nicnark-2 Watch Widget */;
+			targetProxy = D1C0DEAD000000000000000E /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -622,6 +714,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Nicnark-2 Watch App.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 88;
 				DEVELOPMENT_TEAM = 69LLXLJW63;
@@ -654,6 +747,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Nicnark-2 Watch App.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 88;
 				DEVELOPMENT_TEAM = 69LLXLJW63;
@@ -668,6 +762,66 @@
 				);
 				MARKETING_VERSION = 2.5;
 				PRODUCT_BUNDLE_IDENTIFIER = "ConnorNeedling.nicnark-2.watchkitapp";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Release;
+		};
+		D1C0DEAD0000000000000007 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "Nicnark-2 Watch Widget.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 88;
+				DEVELOPMENT_TEAM = 69LLXLJW63;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Nicnark-2 Watch Widget/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Nicotine;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 2.5;
+				PRODUCT_BUNDLE_IDENTIFIER = "ConnorNeedling.nicnark-2.watchkitapp.watchwidget";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Debug;
+		};
+		D1C0DEAD0000000000000008 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "Nicnark-2 Watch Widget.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 88;
+				DEVELOPMENT_TEAM = 69LLXLJW63;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Nicnark-2 Watch Widget/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Nicotine;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 2.5;
+				PRODUCT_BUNDLE_IDENTIFIER = "ConnorNeedling.nicnark-2.watchkitapp.watchwidget";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
 				SKIP_INSTALL = YES;
@@ -713,6 +867,14 @@
 			buildConfigurations = (
 				D1A0DEAD0000000000000006 /* Debug */,
 				D1A0DEAD0000000000000007 /* Release */,
+			);
+			defaultConfigurationName = Debug;
+		};
+		D1C0DEAD0000000000000006 /* Build configuration list for PBXNativeTarget "Nicnark-2 Watch Widget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D1C0DEAD0000000000000007 /* Debug */,
+				D1C0DEAD0000000000000008 /* Release */,
 			);
 			defaultConfigurationName = Debug;
 		};
