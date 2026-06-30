@@ -164,7 +164,9 @@ struct NicComplicationEntryView: View {
         }
         .widgetLabel {
             if hasActivePouch, let removal = entry.soonestRemoval {
-                Text(timerInterval: entry.date...removal, countsDown: true)
+                // pauseTime: removal freezes the countdown at 00:00 when the pouch timer
+                // ends, instead of the default behaviour of ticking past zero and counting up.
+                Text(timerInterval: entry.date...removal, pauseTime: removal, countsDown: true)
             } else {
                 Text("\(levelString(entry.level)) mg in body")
             }
@@ -184,8 +186,9 @@ struct NicComplicationEntryView: View {
             if hasActivePouch, let removal = entry.soonestRemoval {
                 HStack(spacing: 4) {
                     Image(systemName: "timer")
-                    // Self-updating countdown to the active pouch's removal time.
-                    Text(timerInterval: entry.date...removal, countsDown: true)
+                    // Self-updating countdown; pauseTime freezes it at 00:00 at the end
+                    // rather than counting up past zero.
+                    Text(timerInterval: entry.date...removal, pauseTime: removal, countsDown: true)
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
