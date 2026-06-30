@@ -659,6 +659,10 @@ struct LogView: View {
             .padding()
         }
         .buttonStyle(.glassProminent)
+        // The glass button style defaults to a full capsule; on this large content card the
+        // pill sides bow into the text. Use a rounded rectangle (matching the pouch cards'
+        // radius 20) so it reads as a card, not a pill.
+        .buttonBorderShape(.roundedRectangle(radius: 20))
         .tint(.blue)
         .disabled(!canStartTimer)
     }
