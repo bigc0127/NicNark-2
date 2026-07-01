@@ -97,9 +97,17 @@ struct InsightsView: View {
     // with the @FetchRequest results and the live setting @States. `refreshNonce` is read here
     // purely so a manual refresh forces a fresh `Date()` evaluation.
 
-    private var data: InsightsData {
-        _ = refreshNonce   // dependency so refresh recomputes "today"
-        return InsightsData.build(
+    // The aggregate is STORED, not recomputed on every access. The previous computed-property
+    // version rebuilt InsightsData over the FULL history on every single `data.` read — and it's
+    // read dozens of times per render across all the sections — which pinned the CPU (lag +
+    // device heat). Now it's built once and rebuilt only when an input actually changes.
+    @State private var data: InsightsData = .empty
+    @State private var hasLoaded = false
+
+    /// Rebuild the aggregate from the current fetch + settings. Called on appear and on input
+    /// changes only — never per render/access.
+    private func recompute() {
+        data = InsightsData.build(
             from: Array(recentLogs),
             now: Date(),
             calendar: .current,
@@ -108,13 +116,17 @@ struct InsightsView: View {
             pouchesPerTin: pouchesPerTin,
             currencySymbol: currencySymbol
         )
+        hasLoaded = true
     }
 
     // MARK: Body
 
     var body: some View {
         ScrollView {
-            if data.totalPouches == 0 {
+            if !hasLoaded {
+                ProgressView()
+                    .padding(.top, 60)
+            } else if data.totalPouches == 0 {
                 emptyState
                     .padding(.top, 60)
             } else {
@@ -136,8 +148,16 @@ struct InsightsView: View {
                 Button("Done") { dismiss() }
             }
         }
+        // Build once on appear, then only when the fetch or a setting actually changes —
+        // NOT on every render. This is what keeps the CPU (and phone temperature) down.
+        .task { recompute() }
+        .onChange(of: recentLogs.count) { _, _ in recompute() }
+        .onChange(of: dailyGoal) { _, _ in recompute() }
+        .onChange(of: pricePerTin) { _, _ in recompute() }
+        .onChange(of: pouchesPerTin) { _, _ in recompute() }
         .refreshable {
             refreshNonce &+= 1
+            recompute()
         }
     }
 

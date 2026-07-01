@@ -59,8 +59,12 @@ private extension Array where Element == PouchLog {
                 removal: log.removalTime,
                 mg: log.nicotineAmount,
                 timerMin: Int(log.timerDuration),
-                brand: log.can?.brand ?? "",
-                flavor: log.can?.flavor ?? ""
+                // brand/flavor intentionally blank: nothing in the Insights stats/CSV/summary
+                // uses them, and touching the `can` relationship here fired a Core Data fault
+                // PER ROW (thousands of tiny fetches over a full history) — a major source of
+                // the lag and device heat. Omitting it makes the reduce ~free.
+                brand: "",
+                flavor: ""
             )
         }
         .sorted { $0.insertion < $1.insertion }
@@ -468,7 +472,9 @@ struct InsightsData {
 
         // 11) Milestones (pouch thresholds + day thresholds).
         let pouchThresholds: [(Int, String)] = [
-            (10, "10.circle"), (50, "50.circle"), (100, "100.circle.fill"),
+            // NB: SF Symbols only has numbered "N.circle" up to 50, so 100 uses a themed icon
+            // (100.circle.fill does not exist and rendered blank).
+            (10, "10.circle"), (50, "50.circle"), (100, "rosette"),
             (500, "star.circle"), (1000, "crown")
         ]
         let dayThresholds: [(Int, String)] = [
