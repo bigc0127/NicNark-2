@@ -212,6 +212,10 @@ struct LogView: View {
         ZStack {
             ScrollView {
                 VStack(spacing: 16) {
+                    // Today's progress toward the user's daily goal. Renders nothing until a
+                    // goal is set in Insights, so it stays out of the way otherwise.
+                    DailyGoalCard()
+
                     // Loading interface
                     Text("Load Pouches")
                         .font(.headline)

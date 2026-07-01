@@ -23,6 +23,8 @@ struct ContentView: View {
     @State private var selectedTab: Int = 0        // Which tab is currently selected (0=Log, 1=Levels, 2=Usage)
     @State private var showingSettings = false     // Whether the settings sheet is shown
     @State private var showingFirstRunDisclaimer = false  // Whether to show the first-run disclaimer
+    @State private var showingInsights = false     // Whether the Insights hub sheet is shown
+    @State private var showingWhatsNew = false      // Whether the What's New greeter is shown
     
     // MARK: - Device Layout Properties
     // Track device orientation and size for better iPad support
@@ -42,6 +44,13 @@ struct ContentView: View {
                 LogView()  // The main view where users log pouches
                     .environmentObject(liveActivityManager)  // Pass the live activity manager to LogView
                     .toolbar {  // Add toolbar items to the navigation bar
+                        ToolbarItem(placement: .navigationBarLeading) {  // Insights hub button (left)
+                            Button {
+                                showingInsights = true
+                            } label: {
+                                Image(systemName: "chart.bar.xaxis")
+                            }
+                        }
                         ToolbarItem(placement: .navigationBarTrailing) {  // Put item on right side of nav bar
                             Button {
                                 // When button is tapped, show the settings sheet
@@ -65,6 +74,12 @@ struct ContentView: View {
                                 Button("Done") { showingSettings = false }
                             }
                         }
+                }
+            }
+            // Insights hub (the 5 new features live here), opened from the toolbar chart button.
+            .sheet(isPresented: $showingInsights) {
+                NavigationStack {
+                    InsightsView()
                 }
             }
             .tabItem {  // Define what appears in the tab bar for this tab
@@ -98,6 +113,16 @@ struct ContentView: View {
         .sheet(isPresented: $showingFirstRunDisclaimer) {
             FirstRunDisclaimerView(isPresented: $showingFirstRunDisclaimer)
         }
+        // What's New greeter for this update. On a fresh install it appears right after the
+        // disclaimer is dismissed; on an update it's triggered from .task below.
+        .sheet(isPresented: $showingWhatsNew) {
+            WhatsNewView(isPresented: $showingWhatsNew)
+        }
+        .onChange(of: showingFirstRunDisclaimer) { _, isShowing in
+            if !isShowing && !UserDefaults.standard.hasShownWhatsNew_v2_6 {
+                showingWhatsNew = true
+            }
+        }
         
         // URL scheme handling (nicnark2://log?mg=6) is registered ONCE at the app
         // level in nicnark_2App.body. It was previously also registered here, which
@@ -114,6 +139,11 @@ struct ContentView: View {
                 // Delay slightly to ensure UI is ready
                 try? await Task.sleep(for: .seconds(0.5))
                 showingFirstRunDisclaimer = true
+            } else if !UserDefaults.standard.hasShownWhatsNew_v2_6 {
+                // Disclaimer was accepted on a previous launch; show the What's New greeter
+                // for this update instead.
+                try? await Task.sleep(for: .seconds(0.5))
+                showingWhatsNew = true
             }
             
             // Configure TipKit for in-app tips and tutorials
