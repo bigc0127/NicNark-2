@@ -385,7 +385,13 @@ struct LogView: View {
                 .padding(.bottom, 16)
                 .background(.regularMaterial)
             }
-            
+            // Pin this overlay to the bottom. Without an explicit full-height, bottom-aligned
+            // frame the container occasionally failed to fill the ZStack after returning from
+            // the background — collapsing the Spacer above and leaving the "Remove All / timers"
+            // panel floating mid-screen. The Spacer area stays transparent (only the inner panel
+            // has the material background), so scrolling behind it is unaffected.
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+
             // Sync overlay - only shows when syncing and iCloud is enabled
             if CloudKitSyncState.shared.isCloudKitEnabled && CloudKitSyncState.shared.isSyncing {
                 syncOverlay
