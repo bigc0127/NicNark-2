@@ -474,8 +474,8 @@ struct InsightsData {
         let pouchThresholds: [(Int, String)] = [
             // NB: SF Symbols only has numbered "N.circle" up to 50, so 100 uses a themed icon
             // (100.circle.fill does not exist and rendered blank).
-            (10, "10.circle"), (50, "50.circle"), (100, "rosette"),
-            (500, "star.circle"), (1000, "crown")
+            (10, "10.circle"), (50, "50.circle"), (100, "star.circle"),
+            (500, "rosette"), (1000, "crown")
         ]
         let dayThresholds: [(Int, String)] = [
             (7, "calendar"), (30, "calendar.circle"),
