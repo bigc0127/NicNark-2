@@ -69,14 +69,17 @@ struct InsightsView: View {
 
     /// Callable simply as `InsightsView()`.
     init() {
-        // Fetch the last ~60 days of pouches, newest handling done inside the foundation.
-        let calendar = Calendar.current
-        let sixtyDaysAgo = calendar.date(byAdding: .day, value: -60, to: Date()) ?? Date(timeIntervalSince1970: 0)
-
+        // Fetch ALL logged pouches — NOT a recent window. The all-time stats (Total Pouches,
+        // Days Tracked, milestone badges, best goal streak) must see every pouch; a 60-day
+        // window made them wildly undercount (e.g. 358 instead of 2000+). The rolling-window
+        // cards (today / 7d / 30d, the 14-day chart, the 30-day longest gap) each filter by
+        // date INSIDE InsightsData.build(), so feeding the full history keeps them correct
+        // while fixing the totals. `insertionTime != nil` drops incomplete rows (reducedToPoints
+        // guards this too). A few thousand value-typed rows is cheap to aggregate.
         self._recentLogs = FetchRequest<PouchLog>(
             entity: PouchLog.entity(),
             sortDescriptors: [NSSortDescriptor(keyPath: \PouchLog.insertionTime, ascending: true)],
-            predicate: NSPredicate(format: "insertionTime >= %@", sixtyDaysAgo as NSDate)
+            predicate: NSPredicate(format: "insertionTime != nil")
         )
 
         // Seed the live-editable state from persisted settings.
@@ -90,7 +93,7 @@ struct InsightsView: View {
 
     // MARK: Derived aggregate
     //
-    // Rebuilt on every render. Cheap for a 60-day window and keeps the UI perfectly in sync
+    // Rebuilt on every render. Cheap even over full history (a few thousand rows) and keeps the UI perfectly in sync
     // with the @FetchRequest results and the live setting @States. `refreshNonce` is read here
     // purely so a manual refresh forces a fresh `Date()` evaluation.
 
