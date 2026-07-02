@@ -117,7 +117,8 @@ struct CanCardView: View {
                     Text("\(loadedCount)")
                         .font(.system(.title3, design: .rounded))
                         .fontWeight(.bold)
-                        .foregroundColor(loadedCount > 0 ? .blue : .secondary)
+                        // High-contrast on the amber loaded state so the count clearly stands out.
+                        .foregroundColor(loadedCount > 0 ? .primary : .secondary)
                         .frame(minWidth: 30)
                     
                     // Plus button
@@ -139,7 +140,7 @@ struct CanCardView: View {
             }
         }
         .padding()
-        .glassEffect(loadedCount > 0 ? .regular.tint(.blue) : .regular, in: .rect(cornerRadius: 12))
+        .glassEffect(loadedCount > 0 ? .regular.tint(loadedTint) : .regular, in: .rect(cornerRadius: 12))
         .opacity(can.isEmpty ? 0.6 : 1.0)
         .contextMenu {
             if let onEdit = onEdit {
@@ -156,6 +157,11 @@ struct CanCardView: View {
         }
     }
     
+    /// Warm amber tint applied to a can card while pouches are loaded from it (replaces the
+    /// old blue). Bright and clearly "armed", while staying light enough that the dark card
+    /// text/badges keep high contrast on top of the translucent glass.
+    private var loadedTint: Color { Color(red: 1.0, green: 0.72, blue: 0.0) }
+
     private var strengthColor: Color {
         switch can.strength {
         case 0..<4:
