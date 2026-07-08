@@ -43,8 +43,29 @@ public struct PouchEvent: Identifiable, Hashable {
     public let id: UUID
     public let objectID: NSManagedObjectID   // stable identity even when pouchId is nil
     public let name: String
+    public let brand: String                 // owning can's brand ("" if logged without a can)
+    public let flavor: String                // owning can's flavor ("" if none)
     public let removedAt: Date   // removalTime or fallback to insertionTime
     public let nicotineMg: Double
+
+    /// Title line: prefer the can's flavor, then brand, then the generic "<mg>mg Pouch".
+    public var primaryLabel: String {
+        let f = flavor.trimmingCharacters(in: .whitespaces)
+        let b = brand.trimmingCharacters(in: .whitespaces)
+        if !f.isEmpty { return f }
+        if !b.isEmpty { return b }
+        return name
+    }
+
+    /// Detail line: the brand (when it isn't already the title) plus the strength.
+    public var secondaryLabel: String {
+        let f = flavor.trimmingCharacters(in: .whitespaces)
+        let b = brand.trimmingCharacters(in: .whitespaces)
+        var parts: [String] = []
+        if !f.isEmpty && !b.isEmpty { parts.append(b) }
+        parts.append(String(format: "%.0fmg", nicotineMg))
+        return parts.joined(separator: " • ")
+    }
 }
 
 /**
@@ -133,7 +154,9 @@ final class UsageGraphViewModel: ObservableObject {
             let eventId = row.pouchId ?? UUID()
             let mg = max(0, row.nicotineAmount)
             let title = String(format: "%.0fmg Pouch", mg)
-            return PouchEvent(id: eventId, objectID: row.objectID, name: title, removedAt: ts, nicotineMg: mg)
+            return PouchEvent(id: eventId, objectID: row.objectID, name: title,
+                              brand: row.can?.brand ?? "", flavor: row.can?.flavor ?? "",
+                              removedAt: ts, nicotineMg: mg)
         }
 
         // Filter last 24 hours and sort newest first
@@ -931,9 +954,18 @@ private struct PouchCard: View {
             // Title row
             HStack(spacing: 8) {
                 Label {
-                    Text(event.name)
-                        .font(.subheadline)
-                        .foregroundColor(.primary)
+                    VStack(alignment: .leading, spacing: 1) {
+                        // Brand/flavor of the logged pouch (falls back to "<mg>mg Pouch").
+                        Text(event.primaryLabel)
+                            .font(.subheadline)
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                        Text(event.secondaryLabel)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
                 } icon: {
                     Image(systemName: "pills.fill")
                         .symbolRenderingMode(.palette)
