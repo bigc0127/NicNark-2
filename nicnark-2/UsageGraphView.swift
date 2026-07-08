@@ -47,6 +47,7 @@ public struct PouchEvent: Identifiable, Hashable {
     public let flavor: String                // owning can's flavor ("" if none)
     public let removedAt: Date   // removalTime or fallback to insertionTime
     public let nicotineMg: Double
+    public let canImageID: UUID?             // owning can's id, for loading its photo in the log
 
     /// Title line: prefer the can's flavor, then brand, then the generic "<mg>mg Pouch".
     public var primaryLabel: String {
@@ -156,7 +157,7 @@ final class UsageGraphViewModel: ObservableObject {
             let title = String(format: "%.0fmg Pouch", mg)
             return PouchEvent(id: eventId, objectID: row.objectID, name: title,
                               brand: row.can?.brand ?? "", flavor: row.can?.flavor ?? "",
-                              removedAt: ts, nicotineMg: mg)
+                              removedAt: ts, nicotineMg: mg, canImageID: row.can?.id)
         }
 
         // Filter last 24 hours and sort newest first
@@ -422,6 +423,9 @@ struct UsageGraphView: View {
     private func setupView() {
         UsageGraphViewModel.contextProvider = { viewContext }
         viewContext.automaticallyMergesChangesFromParent = true
+        // Ensure can photos (local or synced in from CloudKit) are in the id-keyed cache so the
+        // log cells below can display them — the events only carry a can id, not the Can object.
+        CanImageStore.reconcile(context: viewContext)
         applyFetchToVM()
     }
     
@@ -863,21 +867,27 @@ private struct HourRowView: View {
                     .font(.subheadline)
                     .foregroundColor(.primary)
 
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        if bucket.events.isEmpty {
-                            EmptyHourPill()
-                        } else {
+                if bucket.events.isEmpty {
+                    EmptyHourPill()
+                } else if bucket.events.count == 1, let event = bucket.events.first {
+                    // Lone pouch: let the card use the whole row width so long flavor names fit.
+                    PouchCard(event: event, onEdit: { onEditPouch(event) })
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    // Several pouches this hour: scroll horizontally, each a comfortably wide card.
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
                             ForEach(bucket.events) { event in
                                 PouchCard(event: event, onEdit: {
                                     onEditPouch(event)
                                 })
+                                .frame(width: 240)
                             }
                         }
+                        .padding(.trailing, 12)  // Add trailing padding for scrolling
                     }
-                    .padding(.trailing, 12)  // Add trailing padding for scrolling
+                    .frame(maxWidth: .infinity, alignment: .leading)  // ScrollView takes full width
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)  // ScrollView takes full width
             }
             .layoutPriority(1)  // Give VStack priority to expand
         }
@@ -959,19 +969,28 @@ private struct PouchCard: View {
                         Text(event.primaryLabel)
                             .font(.subheadline)
                             .foregroundColor(.primary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.8)
                         Text(event.secondaryLabel)
                             .font(.caption2)
                             .foregroundColor(.secondary)
                             .lineLimit(1)
                     }
                 } icon: {
-                    Image(systemName: "pills.fill")
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(.white, .white)
-                        .padding(6)
-                        .background(Circle().fill(Color.blue))
+                    // Show the can's photo if one is attached; otherwise the pills glyph.
+                    if let id = event.canImageID, let photo = CanImageStore.loadImage(for: id) {
+                        Image(uiImage: photo)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 32, height: 32)
+                            .clipShape(Circle())
+                    } else {
+                        Image(systemName: "pills.fill")
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.white, .white)
+                            .padding(6)
+                            .background(Circle().fill(Color.blue))
+                    }
                 }
                 .labelStyle(.titleAndIcon)
             }
@@ -993,7 +1012,9 @@ private struct PouchCard: View {
             }
         }
         .padding(10)
-        .frame(width: 150)  // Narrower fixed width for better fit
+        // Fill the width handed to us by HourRowView (full row for a lone pouch, a fixed wide
+        // card when several share an hour) so flavor names aren't clipped.
+        .frame(maxWidth: .infinity, alignment: .leading)
         .glassEffect(.regular, in: .rect(cornerRadius: 10))
         .scaleEffect(isPressed ? 0.95 : 1.0)
         .contentShape(Rectangle())
