@@ -47,6 +47,7 @@ public struct PouchEvent: Identifiable, Hashable {
     public let flavor: String                // owning can's flavor ("" if none)
     public let removedAt: Date   // removalTime or fallback to insertionTime
     public let nicotineMg: Double
+    public let canImageID: UUID?             // owning can's id, for loading its photo in the log
 
     /// Title line: prefer the can's flavor, then brand, then the generic "<mg>mg Pouch".
     public var primaryLabel: String {
@@ -156,7 +157,7 @@ final class UsageGraphViewModel: ObservableObject {
             let title = String(format: "%.0fmg Pouch", mg)
             return PouchEvent(id: eventId, objectID: row.objectID, name: title,
                               brand: row.can?.brand ?? "", flavor: row.can?.flavor ?? "",
-                              removedAt: ts, nicotineMg: mg)
+                              removedAt: ts, nicotineMg: mg, canImageID: row.can?.id)
         }
 
         // Filter last 24 hours and sort newest first
@@ -967,11 +968,20 @@ private struct PouchCard: View {
                             .lineLimit(1)
                     }
                 } icon: {
-                    Image(systemName: "pills.fill")
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(.white, .white)
-                        .padding(6)
-                        .background(Circle().fill(Color.blue))
+                    // Show the can's photo if one is attached; otherwise the pills glyph.
+                    if let id = event.canImageID, let photo = CanImageStore.loadImage(for: id) {
+                        Image(uiImage: photo)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 32, height: 32)
+                            .clipShape(Circle())
+                    } else {
+                        Image(systemName: "pills.fill")
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.white, .white)
+                            .padding(6)
+                            .background(Circle().fill(Color.blue))
+                    }
                 }
                 .labelStyle(.titleAndIcon)
             }

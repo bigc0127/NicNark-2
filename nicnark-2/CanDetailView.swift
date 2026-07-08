@@ -7,6 +7,7 @@
 
 import SwiftUI
 import CoreData
+import UIKit
 
 struct CanDetailView: View {
     @Environment(\.managedObjectContext) private var viewContext
@@ -24,7 +25,8 @@ struct CanDetailView: View {
     @State private var showingBarcodeScanner = false
     @State private var hasCustomDuration = false
     @State private var duration: Int = 30  // Default 30 minutes
-    
+    @State private var canImage: UIImage?  // Attached can photo; persisted via CanImageStore on Save
+
     init(editingCan: Can? = nil, barcode: String? = nil) {
         self.editingCan = editingCan
         self.initialBarcode = barcode
@@ -33,6 +35,10 @@ struct CanDetailView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section(header: Text("Photo (Optional)")) {
+                    CanImagePicker(image: $canImage)
+                }
+
                 Section(header: Text("Brand Information")) {
                     TextField("Brand Name", text: $brand)
                         .textInputAutocapitalization(.words)
@@ -151,6 +157,8 @@ struct CanDetailView: View {
                     hasCustomDuration = true
                     duration = Int(can.duration)
                 }
+                // Load any existing attached photo for this can.
+                canImage = CanImageStore.loadImage(for: can.id)
             } else if let initialBarcode = initialBarcode {
                 // Pre-fill barcode if provided
                 barcode = initialBarcode
@@ -261,9 +269,13 @@ struct CanDetailView: View {
             } catch {
                 print("Failed to update can: \(error)")
             }
+            // Persist (or clear) the attached photo, keyed by the can's stable id.
+            if let id = can.id {
+                CanImageStore.save(canImage, for: id)
+            }
         } else {
             // Create new can (createCan already handles CanTemplate creation)
-            _ = canManager.createCan(
+            let newCan = canManager.createCan(
                 brand: brand,
                 flavor: flavor.isEmpty ? nil : flavor,
                 strength: round(strength),  // Round to avoid floating-point precision issues
@@ -274,6 +286,10 @@ struct CanDetailView: View {
             )
             // Check inventory levels for notifications
             NotificationManager.checkCanInventory(context: viewContext)
+            // Persist the attached photo against the new can's id.
+            if let id = newCan.id {
+                CanImageStore.save(canImage, for: id)
+            }
         }
         
         canManager.fetchActiveCans(context: viewContext)
