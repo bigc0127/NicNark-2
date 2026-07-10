@@ -115,18 +115,6 @@ struct CanCardView: View {
             
             // Right side: Always show +/- controls (timers will be displayed at bottom)
             VStack(spacing: 4) {
-                // Visible edit affordance (the context-menu "Edit Can" was undiscoverable).
-                if let onEdit = onEdit {
-                    Button(action: onEdit) {
-                        Image(systemName: "square.and.pencil")
-                            .font(.system(size: 18))
-                            .foregroundColor(.blue)
-                    }
-                    .buttonStyle(.plain)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .accessibilityLabel("Edit can")
-                }
-
                 HStack(spacing: 12) {
                     // Minus button
                     Button(action: onDecrement) {
@@ -166,12 +154,7 @@ struct CanCardView: View {
         .glassEffect(loadedCount > 0 ? .regular.tint(loadedTint) : .regular, in: .rect(cornerRadius: 12))
         .opacity(can.isEmpty ? 0.6 : 1.0)
         .contextMenu {
-            if let onEdit = onEdit {
-                Button(action: onEdit) {
-                    Label("Edit Can", systemImage: "pencil")
-                }
-            }
-            
+            // Editing cans lives only in Settings → Inventory Management, not on the Log screen.
             Button(role: .destructive) {
                 canManager.deleteCan(can, context: viewContext)
             } label: {
