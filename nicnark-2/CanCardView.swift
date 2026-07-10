@@ -115,6 +115,18 @@ struct CanCardView: View {
             
             // Right side: Always show +/- controls (timers will be displayed at bottom)
             VStack(spacing: 4) {
+                // Visible edit affordance (the context-menu "Edit Can" was undiscoverable).
+                if let onEdit = onEdit {
+                    Button(action: onEdit) {
+                        Image(systemName: "square.and.pencil")
+                            .font(.system(size: 18))
+                            .foregroundColor(.blue)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .accessibilityLabel("Edit can")
+                }
+
                 HStack(spacing: 12) {
                     // Minus button
                     Button(action: onDecrement) {

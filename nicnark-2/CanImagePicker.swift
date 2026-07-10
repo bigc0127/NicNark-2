@@ -2,9 +2,11 @@
 //  CanImagePicker.swift
 //  nicnark-2
 //
-//  Reusable control for attaching / replacing / removing a photo on a can. It binds an
+//  Reusable control for attaching / cropping / replacing / removing a photo on a can. It binds an
 //  in-memory UIImage; the parent editor persists it via CanImageStore on Save (so a brand-new
-//  can — whose UUID doesn't exist until it's created — is handled correctly).
+//  can — whose UUID doesn't exist until it's created — is handled correctly). Newly picked photos
+//  are routed through ImageCropView so the user can frame a clean square; an existing photo can be
+//  re-cropped from the "Crop" button.
 //
 
 import SwiftUI
@@ -15,6 +17,8 @@ struct CanImagePicker: View {
     @Binding var image: UIImage?
 
     @State private var selection: PhotosPickerItem?
+    @State private var imageToCrop: UIImage?     // image handed to the cropper sheet
+    @State private var showingCropper = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -48,7 +52,15 @@ struct CanImagePicker: View {
                     Label(image == nil ? "Choose Photo" : "Replace Photo", systemImage: "photo")
                 }
 
-                if image != nil {
+                if let current = image {
+                    Spacer()
+                    Button {
+                        imageToCrop = current
+                        showingCropper = true
+                    } label: {
+                        Label("Crop", systemImage: "crop")
+                    }
+
                     Spacer()
                     Button(role: .destructive) {
                         image = nil
@@ -67,8 +79,26 @@ struct CanImagePicker: View {
                 // actor (this view is @MainActor), so nothing non-Sendable crosses a boundary.
                 if let data = try? await newValue.loadTransferable(type: Data.self),
                    let ui = UIImage(data: data) {
-                    image = ui
+                    // Route every newly picked photo through the square cropper before keeping it.
+                    imageToCrop = ui
+                    showingCropper = true
                 }
+            }
+        }
+        .fullScreenCover(isPresented: $showingCropper) {
+            if let cropTarget = imageToCrop {
+                ImageCropView(
+                    image: cropTarget,
+                    onCancel: {
+                        showingCropper = false
+                        imageToCrop = nil
+                    },
+                    onCrop: { cropped in
+                        image = cropped
+                        showingCropper = false
+                        imageToCrop = nil
+                    }
+                )
             }
         }
     }
