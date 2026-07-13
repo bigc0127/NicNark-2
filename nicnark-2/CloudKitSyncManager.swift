@@ -166,6 +166,13 @@ class CloudKitSyncManager: ObservableObject {
         // Update widgets with new data
         await updateWidgetsAfterSync()
 
+        // Re-strip any Can.imageData that arrived from older devices still holding photos.
+        await MainActor.run {
+            DataHygiene.stripRetiredCanPhotosIfNeeded(
+                context: PersistenceController.shared.container.viewContext
+            )
+        }
+
         logger.info("🔄 Remote data sync completed")
     }
     
@@ -330,32 +337,20 @@ class CloudKitSyncManager: ObservableObject {
         }
         
         logger.info("🚀 Triggering initial CloudKit sync")
-        
-        // Initialize CloudKit schema
-        await initializeCloudKitSchema()
-        
+
+        // Schema init intentionally skipped: app forces CloudKit Production (see entitlements).
+        // `initializeCloudKitSchema` only targets Development and would fail every DEBUG launch.
+        // Deploy schema via CloudKit Dashboard → Production. Connectivity probe only:
+        do { _ = try await container.userRecordID() } catch {
+            logger.warning("⚠️ CloudKit userRecordID probe failed: \(error.localizedDescription, privacy: .public)")
+        }
+
         // Force a comprehensive sync to ensure data consistency.
         // triggerManualSync() already calls handleRemoteDataChanges(), so we don't
         // duplicate that work here.
         await triggerManualSync()
 
         logger.info("✅ Initial sync completed")
-    }
-    
-    private func initializeCloudKitSchema() async {
-        #if DEBUG
-        let coreDataContainer = PersistenceController.shared.container
-        do {
-            try coreDataContainer.initializeCloudKitSchema(options: [])
-            logger.info("🧱 CloudKit schema initialized (or already present)")
-        } catch {
-            logger.warning("⚠️ initializeCloudKitSchema failed: \(error.localizedDescription, privacy: .public). Falling back to connectivity check.")
-            // Fallback: touch user record to ensure container access
-            do { _ = try await container.userRecordID() } catch { }
-        }
-        #else
-        logger.info("ℹ️ Skipping schema init in non-DEBUG build")
-        #endif
     }
     
     // MARK: - UUID Migration
@@ -399,13 +394,18 @@ class CloudKitSyncManager: ObservableObject {
         diagnostics.append("Generated: \(Date().formatted(.dateTime))")
         diagnostics.append("")
         
-        // 1. Build/Schema Environment
+        // 1. Build configuration vs CloudKit container environment (they are NOT the same).
+        // Entitlements force Production for all configs — see nicnark_2.entitlements.
         #if DEBUG
-        let buildEnv = "Development"
+        let xcodeConfig = "Debug"
         #else
-        let buildEnv = "Production"
+        let xcodeConfig = "Release"
         #endif
-        diagnostics.append("🏷️ Build: \(buildEnv)")
+        diagnostics.append("🏷️ Xcode configuration: \(xcodeConfig)")
+        diagnostics.append("☁️ CloudKit container environment: Production (forced by entitlements)")
+        diagnostics.append("   Container: iCloud.ConnorNeedling.nicnark-2")
+        diagnostics.append("   Verify exports: Console filter CloudKitEvents / Settings → Event Log")
+        diagnostics.append("   Env flip recovery: Settings → Sync Status (tap 5×) → Reset Zone & Re-upload")
         
         // 2. Device Information
         diagnostics.append("📱 DEVICE INFO:")

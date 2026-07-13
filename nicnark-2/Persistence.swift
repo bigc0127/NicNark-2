@@ -121,16 +121,14 @@ print("📍 Store URL: \(storeDescription.url?.absoluteString ?? "Unknown")")
                     Self.ensureSQLiteStoreIsAccessibleWhileLocked(storeURL: url)
                 }
                 #endif
-                
-                // Ensure CloudKit schema exists in development env so sync can begin
-                #if DEBUG
-                do {
-                    try persistentContainer.initializeCloudKitSchema(options: [])
-                    print("🧱 CloudKit schema initialized (or already present)")
-                } catch {
-                    print("⚠️ CloudKit schema initialization skipped/failed: \(error.localizedDescription)")
-                }
-                #endif
+
+                // NOTE: `initializeCloudKitSchema` is intentionally NOT called.
+                // Entitlements force CloudKit *Production* even on debug installs
+                // (`com.apple.developer.icloud-container-environment=Production`). Schema init
+                // only works against the Development environment and would fail every launch
+                // with noisy logs while silently killing the old dev→promote workflow.
+                // Schema changes: CloudKit Dashboard → Deploy Schema to Production.
+                // Stuck export after env flip: Settings → Sync Status (5×) → Reset Zone & Re-upload.
             }
         }
 
@@ -142,6 +140,10 @@ print("📍 Store URL: \(storeDescription.url?.absoluteString ?? "Unknown")")
         // reach the CloudKit *Production* environment. Real store only (no CloudKit in previews).
         if !inMemory {
             CloudKitEventMonitor.start(for: container)
+            // Bulk-null retired Can.imageData + wipe App Group CanImages/ (state that outlives code).
+            Task { @MainActor in
+                DataHygiene.stripRetiredCanPhotosIfNeeded(context: persistentContainer.viewContext)
+            }
         }
 
         // Check CloudKit account status on init

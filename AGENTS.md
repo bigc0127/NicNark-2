@@ -42,3 +42,12 @@ See `CLAUDE.md` for full map. Hard rules:
 - Do not claim tests passed without running them.
 - After camera/concurrency changes: scan build log for isolation warnings.
 - Simulator ≠ Live Activity / real widget validation.
+
+## CloudKit Production (this app)
+
+- Entitlement forces Production for debug + release. Dashboard deploy for schema.
+- `initializeCloudKitSchema` is **not** used (Development-only API).
+- After feature removals that touched synced fields: `DataHygiene` bulk-migrates local
+  rows + wipes App Group caches; re-run on remote merge so imported legacy blobs die.
+- Env-flip / stalled-export recovery: Settings → Sync Status (tap 5×) → Reset Zone &
+  Re-upload (CSV backup first). Verify: Event Log export succeeded + other device sees pouch.

@@ -906,12 +906,13 @@ struct SettingsView: View {
         var lines: [String] = []
         
         #if DEBUG
-        let buildEnv = "Development"
+        let xcodeConfig = "Debug"
         #else
-        let buildEnv = "Production"
+        let xcodeConfig = "Release"
         #endif
         lines.append("=== CloudKit Schema Checklist ===")
-        lines.append("Build: \(buildEnv)")
+        lines.append("Xcode configuration: \(xcodeConfig)")
+        lines.append("CloudKit environment: Production (entitlement-forced)")
         lines.append("Container: iCloud.ConnorNeedling.nicnark-2")
         
         // 1) Account status
@@ -955,14 +956,15 @@ struct SettingsView: View {
     private var deploymentChecklistText: String {
         """
         === PRODUCTION DEPLOYMENT CHECKLIST ===
-        1) Build: Use a Release configuration (or Archive for TestFlight/App Store).
+        1) CloudKit environment is Production for ALL builds (entitlement-forced), including Xcode debug.
         2) CloudKit Dashboard → Container: iCloud.ConnorNeedling.nicnark-2
-           - Schema tab: verify record types CD_PouchLog and CD_CustomButton.
-           - If not deployed, click "Deploy to Production".
-        3) Reinstall the app from TestFlight/App Store on a clean device.
-        4) Log a pouch → confirm sync works across devices.
-        5) Settings → Diagnose: Build shows "Production" and Sync Status is healthy.
-        6) If a device used a prior build before schema was deployed, delete/reinstall once.
+           - Schema tab: verify CD_PouchLog, CD_Can, CD_CustomButton, etc. Deploy Schema to Production when model changes.
+           - initializeCloudKitSchema is NOT used (Development-only API).
+        3) Log a pouch on this device → confirm it appears on other Production clients (iPad / NotchNest).
+        4) Settings → Diagnose: "CloudKit container environment: Production" + healthy account status.
+        5) Settings → Event Log: look for export events with succeeded=true after a save.
+        6) If this device previously wrote Development data only, or exports stall after an env flip:
+           Export CSV backup → Sync Status (tap 5×) → Reset Zone & Re-upload → force-quit & reopen.
         === END CHECKLIST ===
         """
     }
