@@ -60,8 +60,6 @@ class CanManager: ObservableObject {
      * - Returns: The newly created Can on success, or `nil` if save failed
      *   (context is rolled back; do not use a failed insert).
      */
-    /// - Parameter imageData: Optional photo bytes included in the **same** save as the can
-    ///   (avoids a second save that can fail after the can is already committed).
     @discardableResult
     func createCan(
         brand: String,
@@ -70,7 +68,6 @@ class CanManager: ObservableObject {
         pouchCount: Int,
         barcode: String? = nil,
         duration: Int = 0,
-        imageData: Data? = nil,
         context: NSManagedObjectContext
     ) -> Can? {
         let can = Can(context: context)
@@ -83,7 +80,8 @@ class CanManager: ObservableObject {
         can.barcode = barcode
         can.dateAdded = Date()
         can.duration = Int32(duration)
-        can.imageData = imageData
+        // Can photos removed; keep imageData nil (attr retained for CloudKit schema compat).
+        can.imageData = nil
 
         if let barcode = barcode, !barcode.isEmpty {
             upsertCanTemplateWithoutSave(

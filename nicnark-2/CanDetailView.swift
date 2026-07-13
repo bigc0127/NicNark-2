@@ -7,7 +7,6 @@
 
 import SwiftUI
 import CoreData
-import UIKit
 
 struct CanDetailView: View {
     @Environment(\.managedObjectContext) private var viewContext
@@ -25,7 +24,6 @@ struct CanDetailView: View {
     @State private var showingBarcodeScanner = false
     @State private var hasCustomDuration = false
     @State private var duration: Int = 30  // Default 30 minutes
-    @State private var canImage: UIImage?  // Attached can photo; persisted via CanImageStore on Save
 
     init(editingCan: Can? = nil, barcode: String? = nil) {
         self.editingCan = editingCan
@@ -35,10 +33,6 @@ struct CanDetailView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section(header: Text("Photo (Optional)")) {
-                    CanImagePicker(image: $canImage)
-                }
-
                 Section(header: Text("Brand Information")) {
                     TextField("Brand Name", text: $brand)
                         .textInputAutocapitalization(.words)
@@ -157,8 +151,6 @@ struct CanDetailView: View {
                     hasCustomDuration = true
                     duration = Int(can.duration)
                 }
-                // Load any existing attached photo for this can (Core Data → cache fallback).
-                canImage = CanImageStore.image(for: can)
             } else if let initialBarcode = initialBarcode {
                 // Pre-fill barcode if provided
                 barcode = initialBarcode
@@ -240,10 +232,6 @@ struct CanDetailView: View {
     }
     
     private func saveCan() {
-        // Encode once: the same downscaled JPEG bytes go into Core Data (the CloudKit-synced
-        // source of truth) and into the fast id-keyed disk cache. nil = photo removed.
-        let encodedImage = CanImageStore.encodedJPEG(from: canImage)
-
         if let can = editingCan {
             // Update existing can
             can.brand = brand
@@ -253,7 +241,8 @@ struct CanDetailView: View {
             can.initialCount = max(can.initialCount, Int32(pouchCount))  // keep denominator >= count so progress bars never exceed 100%
             can.barcode = barcode.isEmpty ? nil : barcode
             can.duration = hasCustomDuration ? Int32(duration) : 0
-            can.imageData = encodedImage  // synced across devices via CloudKit
+            // Drop legacy can photos (feature removed); leave Core Data attr for CloudKit schema.
+            can.imageData = nil
 
             // Also update CanTemplate if barcode is provided
             if let barcode = can.barcode, !barcode.isEmpty {
@@ -274,29 +263,20 @@ struct CanDetailView: View {
             } catch {
                 print("Failed to update can: \(error)")
             }
-            // Mirror the saved photo (or its removal) into the fast id-keyed cache.
-            if let id = can.id {
-                CanImageStore.store(data: encodedImage, for: id)
-            }
         } else {
-            // One save: can + template + photo. nil = total failure (nothing committed).
-            guard let newCan = canManager.createCan(
+            guard canManager.createCan(
                 brand: brand,
                 flavor: flavor.isEmpty ? nil : flavor,
                 strength: round(strength),
                 pouchCount: pouchCount,
                 barcode: barcode.isEmpty ? nil : barcode,
                 duration: hasCustomDuration ? duration : 0,
-                imageData: encodedImage,
                 context: viewContext
-            ) else {
+            ) != nil else {
                 print("Failed to create can")
                 return
             }
             NotificationManager.checkCanInventory(context: viewContext)
-            if let id = newCan.id {
-                CanImageStore.store(data: encodedImage, for: id)
-            }
         }
 
         canManager.fetchActiveCans(context: viewContext)

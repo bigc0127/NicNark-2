@@ -14,6 +14,13 @@
 	<array>
 		<string>iCloud.ConnorNeedling.nicnark-2</string>
 	</array>
+	<!-- Force Production even for Xcode/debug installs. Without this, development
+	     signing writes to the Development environment while NotchNest (Developer ID
+	     + Production entitlement) only reads Production — pouches appear on the
+	     phone but never reach the Mac notch. Personal multi-device setup needs one
+	     shared environment; TestFlight/App Store already used Production. -->
+	<key>com.apple.developer.icloud-container-environment</key>
+	<string>Production</string>
 	<key>com.apple.developer.icloud-services</key>
 	<array>
 		<string>CloudKit</string>

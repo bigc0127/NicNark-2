@@ -8,7 +8,6 @@
 import SwiftUI
 import CoreData
 import WidgetKit
-import UIKit
 
 struct CanCardView: View {
     let can: Can
@@ -31,16 +30,6 @@ struct CanCardView: View {
     
     var body: some View {
         HStack(spacing: 12) {
-            // Attached can photo (if one has been added for this can). Reads Core Data so a
-            // photo that synced in from another device shows without waiting for a reconcile.
-            if let photo = CanImageStore.image(for: can) {
-                Image(uiImage: photo)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 46, height: 46)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-            }
-
             // Left: Can info
             VStack(alignment: .leading, spacing: 6) {
                 // Brand/Flavor with Maps tap for low inventory

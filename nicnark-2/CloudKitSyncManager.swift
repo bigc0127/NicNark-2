@@ -166,10 +166,6 @@ class CloudKitSyncManager: ObservableObject {
         // Update widgets with new data
         await updateWidgetsAfterSync()
 
-        // Mirror any can photos that just arrived from CloudKit into the id-keyed disk cache so
-        // the Usage log (which only has a can id, not the Can object) can render them.
-        CanImageStore.reconcile(context: PersistenceController.shared.container.viewContext)
-
         logger.info("🔄 Remote data sync completed")
     }
     
