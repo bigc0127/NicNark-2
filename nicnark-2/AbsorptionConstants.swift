@@ -220,6 +220,11 @@ public struct AbsorptionConstants: Sendable {
 
 // MARK: - Core Data Extensions
 extension PouchLog {
+    /// Configured absorption window in seconds (per-pouch timer; falls back to global setting).
+    var effectiveDurationSeconds: TimeInterval {
+        timerDuration > 0 ? TimeInterval(timerDuration) * 60 : FULL_RELEASE_TIME
+    }
+
     /// Returns the duration the pouch was/is in mouth
     var duration: TimeInterval {
         guard let insertion = self.insertionTime else { return 0 }
@@ -232,16 +237,20 @@ extension PouchLog {
         return self.nicotineAmount
     }
 
-    /// Calculates absorbed nicotine for this pouch
+    /// Calculates absorbed nicotine for this pouch using its own timer duration.
     func calculateAbsorbedAmount() -> Double {
         return AbsorptionConstants.shared.calculateAbsorbedNicotine(
             nicotineContent: self.nicotineContent,
-            useTime: self.duration
+            useTime: self.duration,
+            fullReleaseTime: self.effectiveDurationSeconds
         )
     }
 
-    /// Calculates current absorption rate (0.0 to 1.0)
+    /// Calculates current absorption rate (0.0 to 1.0) using this pouch's timer duration.
     func calculateAbsorptionRate() -> Double {
-        return AbsorptionConstants.shared.calculateAbsorptionRate(elapsedTime: self.duration)
+        return AbsorptionConstants.shared.calculateAbsorptionRate(
+            elapsedTime: self.duration,
+            fullReleaseTime: self.effectiveDurationSeconds
+        )
     }
 }

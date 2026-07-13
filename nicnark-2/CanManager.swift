@@ -57,8 +57,12 @@ class CanManager: ObservableObject {
      *   - barcode: Scanned barcode for quick identification - optional
      *   - duration: Custom absorption time in minutes (0 = use default 30 minutes)
      *   - context: Core Data context for database operations
-     * - Returns: The newly created Can object
+     * - Returns: The newly created Can on success, or `nil` if save failed
+     *   (context is rolled back; do not use a failed insert).
      */
+    /// - Parameter imageData: Optional photo bytes included in the **same** save as the can
+    ///   (avoids a second save that can fail after the can is already committed).
+    @discardableResult
     func createCan(
         brand: String,
         flavor: String?,
@@ -66,40 +70,62 @@ class CanManager: ObservableObject {
         pouchCount: Int,
         barcode: String? = nil,
         duration: Int = 0,
+        imageData: Data? = nil,
         context: NSManagedObjectContext
-    ) -> Can {
-        // Create new Can entity and populate with provided data
+    ) -> Can? {
         let can = Can(context: context)
-        can.id = UUID()                        // Unique identifier for CloudKit sync
-        can.brand = brand                      // Manufacturer name
-        can.flavor = flavor                    // Flavor description (optional)
-        can.strength = round(strength)         // Nicotine mg per pouch (rounded to avoid precision issues)
-        can.pouchCount = Int32(pouchCount)     // Current remaining pouches
-        can.initialCount = Int32(pouchCount)   // Original pouch count (for analytics)
-        can.barcode = barcode                  // For barcode scanning (optional)
-        can.dateAdded = Date()                 // When this can was added to inventory
-        can.duration = Int32(duration)         // Custom timer duration in minutes
-        
-        // If this can has a barcode, save it as a template for easy restocking
-        // Templates remember can details so users don't have to re-enter everything
+        can.id = UUID()
+        can.brand = brand
+        can.flavor = flavor
+        can.strength = round(strength)
+        can.pouchCount = Int32(pouchCount)
+        can.initialCount = Int32(pouchCount)
+        can.barcode = barcode
+        can.dateAdded = Date()
+        can.duration = Int32(duration)
+        can.imageData = imageData
+
         if let barcode = barcode, !barcode.isEmpty {
-            createOrUpdateCanTemplate(
+            upsertCanTemplateWithoutSave(
                 barcode: barcode,
                 brand: brand,
                 flavor: flavor,
-                strength: round(strength),  // Use rounded strength for consistency
+                strength: round(strength),
                 duration: duration,
                 context: context
             )
         }
-        
+
         do {
             try context.save()
+            return can
         } catch {
             print("Failed to save can: \(error)")
+            context.rollback()
+            return nil
         }
-        
-        return can
+    }
+
+    /// Mutates/inserts a CanTemplate without saving — caller owns the context save.
+    private func upsertCanTemplateWithoutSave(
+        barcode: String,
+        brand: String,
+        flavor: String?,
+        strength: Double,
+        duration: Int,
+        context: NSManagedObjectContext
+    ) {
+        let template = findCanTemplateByBarcode(barcode, context: context) ?? CanTemplate(context: context)
+        if template.id == nil {
+            template.id = UUID()
+            template.barcode = barcode
+            template.dateCreated = Date()
+        }
+        template.brand = brand
+        template.flavor = flavor
+        template.strength = round(strength)
+        template.duration = Int32(duration)
+        template.lastUpdated = Date()
     }
     
     /**

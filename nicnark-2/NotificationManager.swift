@@ -170,64 +170,190 @@ enum NotificationManager {
      * 
      * - Parameter id: Unique identifier for the notification (usually pouch UUID)
      */
+    // MARK: - Grouped completion alerts
+    //
+    // Multi-pouch batches schedule ONE system notification per proximity cluster, but every
+    // member pouchId maps to that request so cancelAlert(pouchId) still works. Removing one
+    // member reschedules the remaining group with an updated body (or cancels if empty).
+
+    private static let pouchToRequestKey = "completionAlert.pouchToRequestId"
+    private static let requestMembersKey = "completionAlert.requestMembers" // requestId -> [pouchId]
+    private static let requestMetaKey = "completionAlert.requestMeta" // requestId -> [fire, mgs...]
+
+    /// Cancel pending/delivered alert for this pouch. If it was part of a multi-pouch
+    /// cluster, reschedule the remaining members so the banner text stays accurate.
     static func cancelAlert(id: String) {
+        let defaults = UserDefaults.standard
+        var pouchToRequest = defaults.dictionary(forKey: pouchToRequestKey) as? [String: String] ?? [:]
+        var requestMembers = defaults.dictionary(forKey: requestMembersKey) as? [String: [String]] ?? [:]
+        var requestMeta = defaults.dictionary(forKey: requestMetaKey) as? [String: [String: Any]] ?? [:]
+
+        let requestId = pouchToRequest[id] ?? id
         let c = UNUserNotificationCenter.current()
-        c.removePendingNotificationRequests(withIdentifiers: [id])  // Cancel if not yet fired
-        c.removeDeliveredNotifications(withIdentifiers: [id])       // Remove if currently visible
-        
-        // Smart badge management - only clear if no other notifications exist
+        c.removePendingNotificationRequests(withIdentifiers: [requestId, id])
+        c.removeDeliveredNotifications(withIdentifiers: [requestId, id])
+
+        pouchToRequest.removeValue(forKey: id)
+        var members = requestMembers[requestId] ?? []
+        members.removeAll { $0 == id }
+
+        if members.isEmpty {
+            requestMembers.removeValue(forKey: requestId)
+            requestMeta.removeValue(forKey: requestId)
+        } else {
+            requestMembers[requestId] = members
+            // Reschedule with remaining pouches so body doesn't still say "N pouches".
+            if let meta = requestMeta[requestId],
+               let fireTs = meta["fire"] as? Double,
+               let mgs = meta["mgs"] as? [String: Double] {
+                let fire = Date(timeIntervalSince1970: fireTs)
+                let remainingItems: [(id: String, mg: Double, fireDate: Date)] = members.compactMap { pid in
+                    guard let mg = mgs[pid] else { return nil }
+                    return (pid, mg, fire)
+                }
+                // Drop old maps for this request, then schedule fresh group.
+                for pid in members { pouchToRequest.removeValue(forKey: pid) }
+                requestMembers.removeValue(forKey: requestId)
+                requestMeta.removeValue(forKey: requestId)
+                defaults.set(pouchToRequest, forKey: pouchToRequestKey)
+                defaults.set(requestMembers, forKey: requestMembersKey)
+                defaults.set(requestMeta, forKey: requestMetaKey)
+                scheduleGroupedCompletionAlerts(remainingItems)
+                return
+            }
+        }
+
+        defaults.set(pouchToRequest, forKey: pouchToRequestKey)
+        defaults.set(requestMembers, forKey: requestMembersKey)
+        defaults.set(requestMeta, forKey: requestMetaKey)
+
         Task {
             let deliveredNotifications = await c.deliveredNotifications()
             if deliveredNotifications.isEmpty {
-                clearBadge()  // No more notifications, so clear the badge
+                clearBadge()
             }
         }
     }
 
     /**
-     * Schedules a notification to fire at a specific future time.
-     * 
-     * This is the core notification scheduling method used for pouch completion alerts.
-     * The notification includes:
-     * - Custom title and body text
-     * - Sound and badge increment
-     * - Optional priority boost for better delivery
-     * 
-     * Priority notifications (if enabled by user) get:
-     * - Time-sensitive interruption level (breaks through Focus/Do Not Disturb)
-     * - Higher relevance score for iOS notification ranking
-     * 
-     * - Parameters:
-     *   - id: Unique identifier for the notification (for later cancellation)
-     *   - title: Notification title (e.g., "Absorption complete")
-     *   - body: Notification body (e.g., "Your 6mg pouch has finished absorbing")
-     *   - fireDate: Exact time when notification should appear
+     * Schedules a single-pouch completion alert (request id == pouch id).
+     * Prefer `scheduleGroupedCompletionAlerts` for multi-pouch batches.
      */
     static func scheduleCompletionAlert(id: String, title: String, body: String, fireDate: Date) {
+        enqueueNotificationRequest(id: id, title: title, body: body, fireDate: fireDate)
+        rememberMapping(
+            pouchIds: [id],
+            requestId: id,
+            fire: fireDate,
+            mgs: [id: extractMg(from: body) ?? 0]
+        )
+    }
+
+    /// Cluster items whose fire dates are within `proximity` of the previous (sorted),
+    /// one system notification per cluster. Every pouchId maps to the cluster request id
+    /// so `cancelAlert` stays correct.
+    static func scheduleGroupedCompletionAlerts(
+        _ items: [(id: String, mg: Double, fireDate: Date)],
+        proximity: TimeInterval = 2.0
+    ) {
+        guard !items.isEmpty else { return }
+        let sorted = items.sorted { $0.fireDate < $1.fireDate }
+        var clusters: [[(id: String, mg: Double, fireDate: Date)]] = []
+        var current: [(id: String, mg: Double, fireDate: Date)] = []
+
+        for item in sorted {
+            if current.isEmpty {
+                current = [item]
+            } else if let last = current.last, item.fireDate.timeIntervalSince(last.fireDate) <= proximity {
+                current.append(item)
+            } else {
+                clusters.append(current)
+                current = [item]
+            }
+        }
+        if !current.isEmpty { clusters.append(current) }
+
+        for cluster in clusters {
+            let fire = cluster.map(\.fireDate).max() ?? cluster[0].fireDate
+            let requestId: String
+            let body: String
+            if cluster.count == 1 {
+                requestId = cluster[0].id
+                body = "Your \(Int(cluster[0].mg))mg pouch has finished absorbing."
+            } else {
+                requestId = "completion.group.\(UUID().uuidString)"
+                let totalMg = cluster.reduce(0.0) { $0 + $1.mg }
+                body = "Your \(cluster.count) pouches (\(Int(totalMg.rounded()))mg) have finished absorbing."
+            }
+            enqueueNotificationRequest(
+                id: requestId,
+                title: "Absorption complete",
+                body: body,
+                fireDate: fire
+            )
+            var mgs: [String: Double] = [:]
+            for p in cluster { mgs[p.id] = p.mg }
+            rememberMapping(pouchIds: cluster.map(\.id), requestId: requestId, fire: fire, mgs: mgs)
+        }
+    }
+
+    private static func enqueueNotificationRequest(id: String, title: String, body: String, fireDate: Date) {
         let content = UNMutableNotificationContent()
-        content.title = title        // Main notification text
-        content.body = body         // Detailed message
-        content.sound = .default    // Play notification sound
-        content.badge = 1          // Show red badge on app icon
-        content.categoryIdentifier = "POUCH_COMPLETION"  // Enables the "Remove" action button
-        
-        // Check if user enabled high-priority notifications in settings
+        content.title = title
+        content.body = body
+        content.sound = .default
+        content.badge = 1
+        content.categoryIdentifier = "POUCH_COMPLETION"
+
         let priorityEnabled = UserDefaults.standard.bool(forKey: "priorityNotifications")
         if priorityEnabled {
             content.interruptionLevel = .timeSensitive
             content.relevanceScore = 1.0
         }
 
-        // Calculate time until notification should fire (minimum 1 second)
         let interval = max(1, fireDate.timeIntervalSinceNow)
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
         let request = UNNotificationRequest(identifier: id, content: content, trigger: trigger)
-        
+
         UNUserNotificationCenter.current().add(request) { error in
-            if let error { 
-                logger.error("scheduleCompletionAlert failed: \(error.localizedDescription)") 
+            if let error {
+                logger.error("scheduleCompletionAlert failed: \(error.localizedDescription)")
             }
         }
+    }
+
+    private static func rememberMapping(
+        pouchIds: [String],
+        requestId: String,
+        fire: Date,
+        mgs: [String: Double]
+    ) {
+        let defaults = UserDefaults.standard
+        var pouchToRequest = defaults.dictionary(forKey: pouchToRequestKey) as? [String: String] ?? [:]
+        var requestMembers = defaults.dictionary(forKey: requestMembersKey) as? [String: [String]] ?? [:]
+        var requestMeta = defaults.dictionary(forKey: requestMetaKey) as? [String: [String: Any]] ?? [:]
+
+        for pid in pouchIds {
+            // Cancel any prior alert for this pouch before remapping.
+            if let old = pouchToRequest[pid], old != requestId {
+                UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [old])
+            }
+            pouchToRequest[pid] = requestId
+        }
+        requestMembers[requestId] = pouchIds
+        requestMeta[requestId] = [
+            "fire": fire.timeIntervalSince1970,
+            "mgs": mgs
+        ]
+        defaults.set(pouchToRequest, forKey: pouchToRequestKey)
+        defaults.set(requestMembers, forKey: requestMembersKey)
+        defaults.set(requestMeta, forKey: requestMetaKey)
+    }
+
+    private static func extractMg(from body: String) -> Double? {
+        // "Your 6mg pouch..." — best-effort for the single-alert convenience path.
+        guard let r = body.range(of: #"(\d+)mg"#, options: .regularExpression) else { return nil }
+        return Double(body[r].dropLast(2))
     }
 
     /**

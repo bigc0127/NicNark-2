@@ -213,130 +213,43 @@ class CloudKitSyncManager: ObservableObject {
                 }
             }
             
-            // STEP 2: Check if we still have any Live Activities after cleanup
-            let remainingActivities = Activity<PouchActivityAttributes>.activities
-            
-            // STEP 3: If a Live Activity already exists, don't create more (single-activity policy)
-            if !remainingActivities.isEmpty {
-                logger.info("✅ Live Activity already exists - maintaining single-activity policy (\(activePouches.count) active pouches)")
-                return
-            }
-            
-            // STEP 4: If no Live Activity exists but we have active pouches, create ONE
             guard !activePouches.isEmpty else {
                 logger.info("ℹ️ No active pouches - no Live Activity needed")
                 return
             }
-            
-            // STEP 5: Find the pouch with the longest remaining duration
-            let now = Date()
-            var longestPouch: PouchLog?
-            var longestRemainingTime: TimeInterval = -1  // sentinel: lets fully-elapsed (remaining == 0) pouches still win
-            var totalNicotine: Double = 0
 
-            for pouch in activePouches {
-                guard let insertionTime = pouch.insertionTime else { continue }
-
-                let duration = TimeInterval(pouch.timerDuration * 60)
-                let elapsed = now.timeIntervalSince(insertionTime)
-                let remaining = max(0, duration - elapsed)
-
-                // Total nicotine should reflect ALL active pouches, even UUID-less ones.
-                totalNicotine += pouch.nicotineAmount
-
-                // The representative MUST have a UUID — Live Activities are keyed on pouchId.
-                // Skipping nil-pouchId records prevents a single legacy/imported pouch from
-                // suppressing the Live Activity for every other valid active pouch.
-                guard pouch.pouchId != nil else { continue }
-
-                // Track longest remaining time
-                if remaining > longestRemainingTime {
-                    longestRemainingTime = remaining
-                    longestPouch = pouch
-                }
-            }
-            
-            // STEP 6: Create ONE Live Activity for the pouch with longest timer
-            guard let representativePouch = longestPouch,
-                  let pouchId = representativePouch.pouchId?.uuidString else {
+            // Shared aggregate: total mg + longest remaining timer (same rule as LogService).
+            guard let agg = LogService.aggregate(activePouches: activePouches) else {
                 logger.warning("⚠️ Could not determine representative pouch for Live Activity")
                 return
             }
-            
-            // Double-check the pouch is still active before creating
-            guard await LiveActivityManager.isPouchActive(pouchId) else {
-                logger.info("🚫 Skipping Live Activity - representative pouch no longer active: \(pouchId, privacy: .public)")
-                return
+
+            let remainingActivities = Activity<PouchActivityAttributes>.activities
+            // Skip rebuild if the single LA already matches the aggregate.
+            if let existing = remainingActivities.first {
+                let samePouch = existing.attributes.pouchId == agg.representativePouchId
+                let sameTotal = abs(existing.attributes.totalNicotine - agg.totalNicotine) < 0.01
+                if samePouch && sameTotal && remainingActivities.count == 1 {
+                    logger.info("✅ Live Activity already matches aggregate (\(agg.activeCount) pouches, \(agg.totalNicotine)mg)")
+                    return
+                }
             }
-            
-            logger.info("🆕 Creating single Live Activity for \(activePouches.count) active pouches (total: \(totalNicotine)mg, longest: \(longestRemainingTime/60)min)")
-            
-            let duration = TimeInterval(representativePouch.timerDuration * 60)
-            let success = await LiveActivityManager.startLiveActivity(
-                for: pouchId,
-                nicotineAmount: totalNicotine,  // Show TOTAL nicotine from all pouches
-                insertionTime: representativePouch.insertionTime,  // Use longest pouch's start time
-                duration: duration,  // Use longest pouch's duration
-                isFromSync: true  // Prevents ending existing activities
-            )
-            
-            if success {
-                logger.info("✅ Single Live Activity created for \(activePouches.count) pouches")
-            } else {
-                logger.error("❌ Failed to create Live Activity during sync")
-            }
-            
+
+            logger.info("🆕 Rebuilding single Live Activity for \(agg.activeCount) pouches (total: \(agg.totalNicotine)mg)")
+            // Serialized end→recreate (same chain as log/remove) with correct bloodstream seed.
+            await LogService.presentAggregatedLiveActivitySerialized(in: context)
+
         } catch {
             logger.error("❌ Failed to sync Live Activities: \(error.localizedDescription, privacy: .public)")
         }
     }
     
     private func updateWidgetsAfterSync() async {
-        // Update widget persistence helper with latest data
-        let helper = WidgetPersistenceHelper()
-        
         let context = PersistenceController.shared.container.viewContext
-        let fetchRequest: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
-        fetchRequest.predicate = NSPredicate(format: "removalTime == nil")
-        fetchRequest.fetchLimit = 1
-        fetchRequest.sortDescriptors = [NSSortDescriptor(keyPath: \PouchLog.insertionTime, ascending: false)]
-        
-        do {
-            let activePouches = try context.fetch(fetchRequest)
-            
-            if let activePouch = activePouches.first,
-               let insertionTime = activePouch.insertionTime {
-                
-                let elapsed = Date().timeIntervalSince(insertionTime)
-                let currentLevel = AbsorptionConstants.shared.calculateCurrentNicotineLevel(
-                    nicotineContent: activePouch.nicotineAmount,
-                    elapsedTime: elapsed
-                )
-                
-                // Use the pouch's specific duration, not the default
-                let pouchDuration = TimeInterval(activePouch.timerDuration * 60)
-                helper.setFromLiveActivity(
-                    level: currentLevel,
-                    peak: activePouch.nicotineAmount * ABSORPTION_FRACTION,
-                    pouchName: "\(Int(activePouch.nicotineAmount))mg pouch",
-                    endTime: insertionTime.addingTimeInterval(pouchDuration)
-                )
-                
-                // Nudge widgets
-                await MainActor.run {
-                    WidgetReloadCoordinator.reload()
-                }
-                
-                logger.info("📱 Widget data updated after sync")
-            } else {
-                helper.markActivityEnded()
-                await MainActor.run { WidgetReloadCoordinator.reload() }
-                logger.info("📱 Widget marked as ended after sync")
-            }
-            
-        } catch {
-            logger.error("❌ Failed to update widgets after sync: \(error.localizedDescription, privacy: .public)")
-        }
+        // Multi-pouch aggregate: total mg + longest remaining end time + full bloodstream level.
+        LogService.updateWidgetSnapshotForActivePouches(in: context)
+        WidgetReloadCoordinator.reload()
+        logger.info("📱 Widget data updated after sync (aggregated)")
     }
     
     // MARK: - Manual Sync

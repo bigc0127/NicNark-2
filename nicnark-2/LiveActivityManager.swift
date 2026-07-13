@@ -182,7 +182,16 @@ class LiveActivityManager: ObservableObject {
      * Important: Using the actual insertionTime keeps the Live Activity's countdown
      * perfectly aligned with the in‑app timer, widgets, and notifications.
      */
-    static func startLiveActivity(for pouchId: String, nicotineAmount: Double, insertionTime: Date? = nil, duration: TimeInterval? = nil, isFromSync: Bool = false) async -> Bool {
+    static func startLiveActivity(
+        for pouchId: String,
+        nicotineAmount: Double,
+        insertionTime: Date? = nil,
+        duration: TimeInterval? = nil,
+        isFromSync: Bool = false,
+        initialNicotineLevel: Double = 0,
+        absorptionProgress: Double = 0,
+        seedWidget: Bool = true
+    ) async -> Bool {
         let log = Logger(subsystem: "com.nicnark.nicnark-2", category: "LiveActivity")
         let auth = ActivityAuthorizationInfo()
         guard auth.areActivitiesEnabled else {
@@ -228,6 +237,8 @@ class LiveActivityManager: ObservableObject {
         let start = insertionTime ?? Date()
         let actualDuration = duration ?? FULL_RELEASE_TIME
         let end = start.addingTimeInterval(actualDuration)
+        let level = max(0, initialNicotineLevel)
+        let progress = min(max(absorptionProgress, 0), 1)
         let attributes = PouchActivityAttributes(
             pouchName: "\(Int(nicotineAmount))mg Pouch",
             totalNicotine: nicotineAmount,
@@ -238,9 +249,9 @@ class LiveActivityManager: ObservableObject {
         
         let initialState = PouchActivityAttributes.ContentState(
             timerInterval: start...end,
-            currentNicotineLevel: 0.0,
-            status: "Starting absorption...",
-            absorptionRate: 0.0,
+            currentNicotineLevel: level,
+            status: progress > 0 ? "Absorbing..." : "Starting absorption...",
+            absorptionRate: progress,
             lastUpdated: Date()
         )
         
@@ -255,15 +266,18 @@ class LiveActivityManager: ObservableObject {
             activeActivitiesByPouchId[pouchId] = newActivity.id
             log.info("🎆 Live Activity CREATED - ID: \(newActivity.id), PouchID: \(pouchId, privacy: .public), FromSync: \(isFromSync)")
             
-            // Seed widget snapshot immediately
-            let helper = WidgetPersistenceHelper()
-            helper.setFromLiveActivity(
-                level: 0,
-                peak: nicotineAmount * ABSORPTION_FRACTION,
-                pouchName: attributes.pouchName,
-                endTime: end
-            )
-            WidgetReloadCoordinator.reload()
+            // Optional widget seed. Callers that own an aggregate snapshot (LogService)
+            // pass seedWidget: false and write the correct multi-pouch level themselves.
+            if seedWidget {
+                let helper = WidgetPersistenceHelper()
+                helper.setFromLiveActivity(
+                    level: level,
+                    peak: nicotineAmount * ABSORPTION_FRACTION,
+                    pouchName: attributes.pouchName,
+                    endTime: end
+                )
+                WidgetReloadCoordinator.reload()
+            }
             
             // Foreground Live Activity updates are driven by LogView's timer while the app
             // is active; background refreshes by BackgroundMaintainer. We no longer spawn a
@@ -271,17 +285,6 @@ class LiveActivityManager: ObservableObject {
             // reloaded widgets every 30s).
             // Schedule an early background refresh in case the app soon goes inactive
             Task { await BackgroundMaintainer.shared.scheduleSoon() }
-            
-            // Force an immediate update to ensure the Live Activity is showing
-            Task {
-                try? await Task.sleep(nanoseconds: 1 * NSEC_PER_SEC) // Wait 1 second for activity to register
-                await updateLiveActivity(
-                    for: pouchId,
-                    timerInterval: start...end,
-                    absorptionProgress: 0.0,
-                    currentNicotineLevel: 0.0
-                )
-            }
             return true
         } catch {
             log.error("Start Live Activity failed: \(error.localizedDescription, privacy: .public)")
@@ -618,67 +621,102 @@ class BackgroundMaintainer {
             log.info("No active Live Activities to update")
             return
         }
-        
+
         log.info("🔄 Processing \(items.count) Live Activities for background update")
-        
-        // Process each Live Activity
+
+        // Full bloodstream level (all active + decaying pouches). LA attributes.totalNicotine
+        // may be an aggregate of stated mg; the displayed level must match the calculator.
+        let context = PersistenceController.shared.container.viewContext
+        let calculator = NicotineCalculator()
+        let recentPouches = (try? calculator.fetchRecentPouches(context: context, endingAt: now)) ?? []
+        let bloodstreamLevel = calculator.levelFromPouches(recentPouches, at: now)
+
+        // Aggregate for timer window (longest remaining) when multi-pouch is active.
+        let activeAgg = LogService.fetchActiveAggregate(in: context, at: now)
+
         for t in items {
-            // Stop promptly if the BG task's expiration handler cancelled us.
             if Task.isCancelled { break }
-            // Check if pouch is still active in Core Data
+
             let isPouchActive = await LiveActivityManager.isPouchActive(t.pouchId)
-            
             if !isPouchActive {
-                // Pouch was removed, end the Live Activity
                 log.info("📱 Ending Live Activity for removed pouch: \(t.pouchId, privacy: .public)")
                 await LiveActivityManager.endLiveActivity(for: t.pouchId)
+                // No Activity.request from BG — foreground / CloudKit sync rebuilds if needed.
                 continue
             }
-            
-            // Get actual pouch data to ensure we have the latest state
-            guard let actualPouchData = getActualPouchData(for: t.pouchId) else {
+
+            // Prefer live aggregate (multi-pouch totals) over single-row fetch.
+            let startTime: Date
+            let duration: TimeInterval
+            if let agg = activeAgg, agg.representativePouchId == t.pouchId {
+                startTime = agg.insertionTime
+                duration = agg.durationSeconds
+            } else if let row = getActualPouchData(for: t.pouchId) {
+                startTime = row.startTime
+                duration = row.duration
+            } else {
                 log.warning("Could not fetch pouch data for: \(t.pouchId, privacy: .public)")
                 continue
             }
-            
-            let effectiveStartTime = actualPouchData.startTime
-            let effectiveNicotineAmount = actualPouchData.nicotineAmount
-            let effectiveDuration = actualPouchData.duration  // Use pouch-specific duration
-            let elapsed = max(0, now.timeIntervalSince(effectiveStartTime))
-            let endTime = effectiveStartTime.addingTimeInterval(effectiveDuration)  // Use actual duration, not FULL_RELEASE_TIME
-            
-            // Decision matrix logging
+
+            let elapsed = max(0, now.timeIntervalSince(startTime))
+            let endTime = startTime.addingTimeInterval(duration)
             let isExpired = now >= endTime
-            log.info("📊 Pouch \(t.pouchId, privacy: .public): active=\(actualPouchData.isActive), expired=\(isExpired), elapsed=\(Int(elapsed))s, duration=\(Int(effectiveDuration))s")
-            
+            log.info("📊 Pouch \(t.pouchId, privacy: .public): expired=\(isExpired), elapsed=\(Int(elapsed))s, duration=\(Int(duration))s, level=\(String(format: "%.3f", bloodstreamLevel))mg")
+
             if isExpired {
-                log.info("⏰ Timer expired, ending Live Activity for: \(t.pouchId, privacy: .public)")
+                // Mark every overdue active pouch removed in Core Data. Without this the
+                // aggregate still counts them and LA "rebuild" tries Activity.request from a
+                // BGTask — which ActivityKit rejects. Widget + next foreground sync handle UX.
+                log.info("⏰ Timer expired — auto-removing overdue pouches, ending LA (no BG recreate)")
+                markOverdueActivePouchesRemoved(in: context, at: now)
                 await LiveActivityManager.endLiveActivity(for: t.pouchId)
+                // Do NOT call presentAggregatedLiveActivity here: Activity.request fails in BG.
             } else {
-                // Update the Live Activity with current state
-                let progress = min(max(elapsed / effectiveDuration, 0), 1)  // Use actual duration for progress
-                let currentLevel = AbsorptionConstants.shared
-                    .calculateCurrentNicotineLevel(
-                        nicotineContent: effectiveNicotineAmount,
-                        elapsedTime: elapsed,
-                        fullReleaseTime: effectiveDuration
-                    )
-                let timer = effectiveStartTime...endTime
-                
-                log.info("📱 Updating Live Activity: progress=\(Int(progress * 100))%, level=\(String(format: "%.3f", currentLevel))mg")
-                
+                let progress = min(max(elapsed / max(1, duration), 0), 1)
                 await LiveActivityManager.updateLiveActivity(
                     for: t.pouchId,
-                    timerInterval: timer,
+                    timerInterval: startTime...endTime,
                     absorptionProgress: progress,
-                    currentNicotineLevel: currentLevel
+                    currentNicotineLevel: bloodstreamLevel
                 )
             }
         }
-        
+
+        // Keep widget snapshot aligned with aggregate + bloodstream level.
+        LogService.updateWidgetSnapshotForActivePouches(in: context)
+
         log.info("✅ Background update complete at \(DateFormatter.localizedString(from: now, dateStyle: .none, timeStyle: .medium), privacy: .public)")
     }
-    
+
+    /// Sets `removalTime` on active pouches whose configured timer has elapsed.
+    /// Saves once. Safe on the main viewContext (BG handlers hop to MainActor).
+    private func markOverdueActivePouchesRemoved(in context: NSManagedObjectContext, at now: Date) {
+        let request: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
+        request.predicate = NSPredicate(format: "removalTime == nil")
+        guard let active = try? context.fetch(request) else { return }
+        var changed = false
+        for pouch in active {
+            guard let insertion = pouch.insertionTime else { continue }
+            let duration = pouch.effectiveDurationSeconds
+            if insertion.addingTimeInterval(duration) <= now {
+                pouch.removalTime = insertion.addingTimeInterval(duration)
+                if let id = pouch.pouchId?.uuidString {
+                    NotificationManager.cancelAlert(id: id)
+                }
+                changed = true
+            }
+        }
+        if changed {
+            do {
+                try context.save()
+            } catch {
+                log.error("Failed to save auto-removals: \(error.localizedDescription, privacy: .public)")
+                context.rollback()
+            }
+        }
+    }
+
     private func getActualPouchData(for pouchId: String) -> (startTime: Date, nicotineAmount: Double, isActive: Bool, duration: TimeInterval)? {
         let context = PersistenceController.shared.container.viewContext
 
@@ -689,7 +727,7 @@ class BackgroundMaintainer {
             do {
                 if let pouchLog = try context.fetch(fetch).first, let startTime = pouchLog.insertionTime {
                     let isActive = pouchLog.removalTime == nil
-                    let duration = TimeInterval(pouchLog.timerDuration * 60)
+                    let duration = pouchLog.effectiveDurationSeconds
                     return (startTime: startTime, nicotineAmount: pouchLog.nicotineAmount, isActive: isActive, duration: duration)
                 } else {
                     log.warning("UUID lookup failed or missing insertionTime for pouchId: \(uuid.uuidString, privacy: .public)")

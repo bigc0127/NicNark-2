@@ -279,26 +279,21 @@ struct CanDetailView: View {
                 CanImageStore.store(data: encodedImage, for: id)
             }
         } else {
-            // Create new can (createCan already handles CanTemplate creation + an initial save)
-            let newCan = canManager.createCan(
+            // One save: can + template + photo. nil = total failure (nothing committed).
+            guard let newCan = canManager.createCan(
                 brand: brand,
                 flavor: flavor.isEmpty ? nil : flavor,
-                strength: round(strength),  // Round to avoid floating-point precision issues
+                strength: round(strength),
                 pouchCount: pouchCount,
                 barcode: barcode.isEmpty ? nil : barcode,
                 duration: hasCustomDuration ? duration : 0,
+                imageData: encodedImage,
                 context: viewContext
-            )
-            // Attach the photo and persist it (createCan already saved the other fields).
-            newCan.imageData = encodedImage  // synced across devices via CloudKit
-            do {
-                try viewContext.save()
-            } catch {
-                print("Failed to save can photo: \(error)")
+            ) else {
+                print("Failed to create can")
+                return
             }
-            // Check inventory levels for notifications
             NotificationManager.checkCanInventory(context: viewContext)
-            // Mirror the saved photo into the fast id-keyed cache.
             if let id = newCan.id {
                 CanImageStore.store(data: encodedImage, for: id)
             }

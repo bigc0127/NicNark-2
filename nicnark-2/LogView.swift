@@ -933,122 +933,32 @@ struct LogView: View {
     
     func startTimerWithLoadedPouches() {
         guard canStartTimer else { return }
-        
-        // Haptic feedback
+
         let generator = UIImpactFeedbackGenerator(style: .medium)
         generator.impactOccurred()
-        
-        var successCount = 0
-        var longestDuration: TimeInterval = 0
-        var longestPouchId: String?
-        var totalNicotine: Double = 0
-        
-        // First, log all pouches WITHOUT starting Live Activities
-        // We'll manually create ONE Live Activity afterward
+
+        // Build (can, count) loads and route through LogService — single save, rollback,
+        // per-pouch completion alerts, aggregated Live Activity, Watch push, inventory alerts.
+        var loads: [(can: Can, count: Int)] = []
         for can in activeCans {
             guard let canId = can.id, let count = loadedPouches[canId], count > 0 else { continue }
-            
-            // Log each pouch from this can individually
-            for i in 0..<count {
-                // Create pouch without triggering Live Activity
-                let pouch = PouchLog(context: ctx)
-                pouch.pouchId = UUID()
-                // Add microsecond offset to prevent visual grouping in Usage view
-                // Each pouch gets a unique timestamp (0ms, 100ms, 200ms, etc.)
-                pouch.insertionTime = Date.now.addingTimeInterval(TimeInterval(i) * 0.1)
-                pouch.nicotineAmount = can.strength
-                
-                // Set duration
-                let durationSeconds: TimeInterval
-                if can.duration > 0 {
-                    durationSeconds = TimeInterval(can.duration * 60)
-                } else {
-                    durationSeconds = FULL_RELEASE_TIME
-                }
-                pouch.timerDuration = Int32(durationSeconds / 60)
-                
-                // Associate with can and decrement inventory
-                can.addToPouchLogs(pouch)
-                can.usePouch()
-                
-                totalNicotine += can.strength
-                
-                // Track longest duration pouch for Live Activity
-                if durationSeconds >= longestDuration {
-                    longestDuration = durationSeconds
-                    longestPouchId = pouch.pouchId?.uuidString
-                }
-                
-                successCount += 1
-                print("✅ Logged \(can.strength)mg pouch from \(can.brand ?? "Unknown")")
-            }
+            loads.append((can, count))
         }
-        
-        // Save all pouches
-        do {
-            try ctx.save()
-            print("✅ Saved \(successCount) pouches")
-        } catch {
-            print("❌ Failed to save pouches: \(error)")
-            let errorGenerator = UINotificationFeedbackGenerator()
-            errorGenerator.notificationOccurred(.error)
-            return
-        }
-        
-        if successCount > 0, let pouchId = longestPouchId {
-            // Clear loaded pouches
-            loadedPouches.removeAll()
 
-            // Create ONE Live Activity for the longest timer
-            Task {
-                _ = await LiveActivityManager.startLiveActivity(
-                    for: pouchId,
-                    nicotineAmount: totalNicotine,  // Show total nicotine
-                    insertionTime: Date.now,
-                    duration: longestDuration
-                )
-            }
-            
-            // Schedule completion notification for longest timer
-            let fireDate = Date().addingTimeInterval(longestDuration)
-            NotificationManager.scheduleCompletionAlert(
-                id: pouchId,
-                title: "Absorption complete",
-                body: "Your pouches have finished absorbing.",
-                fireDate: fireDate
-            )
-            
-            // Start Live Activity timer
-            // Update tick immediately to prevent UI freeze
+        let successCount = LogService.logPouchesFromCans(loads: loads, ctx: ctx)
+
+        if successCount > 0 {
+            loadedPouches.removeAll()
             tick = Date()
             startLiveTimerIfNeeded()
             startOptimizedTimer()
-            Task { await updateWidgetPersistenceHelper() }
-            
-            // Refresh can list
+            // Widget + LA already updated inside LogService.logPouchesFromCans.
             canManager.fetchActiveCans(context: ctx)
-
-            // Mirror LogService STEP 12 side effects for the multi-pouch path. This flow
-            // bypasses LogService.logPouch(), so without these the low-inventory alert and
-            // usage reminder that the single-pouch path fires would be silently skipped.
-            NotificationManager.checkCanInventory(context: ctx)
-            NotificationManager.scheduleUsageReminder(context: ctx)
-
-            // CloudKit export is scheduled automatically on save by the container.
-
-            // Update widgets
-            WidgetReloadCoordinator.reload()
-            
-            // Success haptic
             let successGenerator = UINotificationFeedbackGenerator()
             successGenerator.notificationOccurred(.success)
-            
-            print("✅ Started \(successCount) separate timers with ONE Live Activity (longest: \(longestDuration/60) min)")
         } else {
-            // Error haptic
             let errorGenerator = UINotificationFeedbackGenerator()
             errorGenerator.notificationOccurred(.error)
-            print("❌ Failed to start timers")
         }
     }
     

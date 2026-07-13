@@ -59,8 +59,12 @@ enum PouchRemovalService {
         // Cancel completion notification
         NotificationManager.cancelAlert(id: pouchId)
 
-        // Update widgets snapshot + reload timelines
-        await updateWidgetSnapshot(in: context)
+        // If other pouches are still active, rebuild ONE aggregated Live Activity
+        // (total mg + longest remaining). Serialized so log/remove cannot race.
+        await LogService.presentAggregatedLiveActivitySerialized(in: context)
+
+        // Widget snapshot (decay-aware even when none remain).
+        LogService.updateWidgetSnapshotForActivePouches(in: context)
         WidgetReloadCoordinator.reload()
         // CloudKit export is scheduled automatically by NSPersistentCloudKitContainer on save.
 
@@ -122,8 +126,8 @@ enum PouchRemovalService {
             NotificationManager.cancelAlert(id: pouchId)
         }
 
-        // Single widget snapshot refresh + one coalesced reload for the whole batch.
-        await updateWidgetSnapshot(in: context)
+        // All active pouches removed — no LA rebuild. Still write decay-aware level.
+        LogService.updateWidgetSnapshotForActivePouches(in: context)
         WidgetReloadCoordinator.reload()
 
         // Push the updated state to a paired Apple Watch so it reflects the removals even
@@ -152,30 +156,5 @@ enum PouchRemovalService {
         }
 
         return nil
-    }
-
-    private static func updateWidgetSnapshot(in context: NSManagedObjectContext) async {
-        let helper = WidgetPersistenceHelper()
-
-        // Check if there are any active pouches after removal
-        let request: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
-        request.predicate = NSPredicate(format: "removalTime == nil")
-        request.fetchLimit = 1
-
-        let hasActive: Bool
-        do {
-            hasActive = !(try context.fetch(request)).isEmpty
-        } catch {
-            hasActive = false
-        }
-
-        // Always update the current level snapshot so the widget reflects removal/decay.
-        let calculator = NicotineCalculator()
-        let currentLevel = await calculator.calculateTotalNicotineLevel(context: context, at: .now)
-        helper.updateSnapshot(level: currentLevel, isRunning: hasActive)
-
-        if !hasActive {
-            helper.markActivityEnded()
-        }
     }
 }

@@ -118,22 +118,13 @@ struct nicnark_2App: App {
                 // Handle custom URL schemes like "nicnark2://log?mg=6"
                 // This allows the app to be opened from Safari, shortcuts, or other apps
                 .onOpenURL { url in
-                    print("📱 Received URL: \(url)")  // Debug logging to console
-                    
-                    // All UI operations must happen on the main thread in iOS
-                    DispatchQueue.main.async {
-                        // LogPouchRouter parses the URL and extracts the nicotine amount
+                    Task { @MainActor in
                         let success = LogPouchRouter.handle(
                             url: url,
                             ctx: persistenceController.container.viewContext
                         )
-                        
                         if success {
-                            print("📱 Successfully handled URL: \(url)")
-                            // Tell all home screen widgets to refresh their data
                             WidgetReloadCoordinator.reload()
-                        } else {
-                            print("📱 Failed to handle URL: \(url)")
                         }
                     }
                 }

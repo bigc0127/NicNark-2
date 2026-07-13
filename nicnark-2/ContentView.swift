@@ -25,6 +25,7 @@ struct ContentView: View {
     @State private var showingFirstRunDisclaimer = false  // Whether to show the first-run disclaimer
     @State private var showingInsights = false     // Whether the Insights hub sheet is shown
     @State private var showingWhatsNew = false      // Whether the What's New greeter is shown
+    @State private var showingInventory = false    // Inventory from notification tap
     
     // MARK: - Device Layout Properties
     // Track device orientation and size for better iPad support
@@ -127,6 +128,37 @@ struct ContentView: View {
         // URL scheme handling (nicnark2://log?mg=6) is registered ONCE at the app
         // level in nicnark_2App.body. It was previously also registered here, which
         // double-logged every deep-linked pouch.
+
+        // Inventory (full can management), not Settings root — matches NavigateToCanManagement.
+        .sheet(isPresented: $showingInventory) {
+            NavigationStack {
+                InventoryManagementView()
+            }
+        }
+        // MARK: - Notification tap navigation
+        // NotificationDelegate posts these; wire them so taps actually switch tabs / open sheets.
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NavigateToCanManagement"))) { _ in
+            selectedTab = 0
+            // Dismiss any other modal first — presenting inventory while Settings/Insights
+            // is up is a no-op / presentation conflict on iOS.
+            showingSettings = false
+            showingInsights = false
+            showingWhatsNew = false
+            showingFirstRunDisclaimer = false
+            showingInventory = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowQuickLog"))) { _ in
+            selectedTab = 0
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NavigateToNicotineLevels"))) { _ in
+            selectedTab = 1
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NavigateToUsageStats"))) { _ in
+            selectedTab = 2
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NavigateToUsageGraph"))) { _ in
+            selectedTab = 2
+        }
 
         // MARK: - App Initialization
         // .task runs when the view appears (similar to viewDidLoad in UIKit)

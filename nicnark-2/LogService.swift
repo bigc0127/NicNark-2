@@ -3,278 +3,372 @@
 // nicnark-2
 //
 // Centralized service for logging nicotine pouch usage.
-// This is the single entry point for creating new PouchLog entries regardless of how the user initiates logging:
-// - Manual logging through the UI
-// - URL scheme calls (nicnark2://log?mg=6)
-// - Siri Shortcuts / iOS Shortcuts app
-// - Widget interactions
-//
-// The service handles all side effects of logging including:
-// - Creating/updating custom dosage buttons
-// - Triggering CloudKit sync
-// - Starting Live Activities (iOS 16.1+)
-// - Scheduling completion notifications
-// - Updating widgets
-// - Managing can inventory
+// Single entry point for UI, URL scheme, Shortcuts, Watch, and multi-pouch batch logging.
 //
 
 import Foundation
 import CoreData
 import WidgetKit
 
+/// Snapshot of all currently active pouches used to drive the single Live Activity + widget.
+struct ActivePouchAggregate {
+    /// Representative pouch id (longest remaining timer). Keys the Live Activity.
+    let representativePouchId: String
+    let insertionTime: Date
+    let durationSeconds: TimeInterval
+    /// Sum of stated mg across all active pouches.
+    let totalNicotine: Double
+    let activeCount: Int
+
+    var endTime: Date { insertionTime.addingTimeInterval(durationSeconds) }
+
+    var displayName: String {
+        if activeCount > 1 {
+            return "\(Int(totalNicotine.rounded()))mg (\(activeCount) pouches)"
+        }
+        return "\(Int(totalNicotine.rounded()))mg pouch"
+    }
+}
+
 /**
- * LogService: A utility enum (no instances) that provides static methods for pouch logging.
- * 
- * @MainActor ensures all methods run on the main thread since they interact with Core Data's
- * main context and trigger UI updates (widgets, notifications, Live Activities).
+ * LogService: static helpers for pouch logging + multi-pouch Live Activity policy.
+ *
+ * Policy: multiple pouches may be active, but exactly ONE Live Activity shows
+ * total nicotine + the longest remaining timer.
  */
 @MainActor
 enum LogService {
-    
-    /// The default dosage amounts (3mg, 6mg) that are always available.
-    /// Custom buttons are NOT created for these predefined amounts to avoid duplicates.
+
     private static let predefinedAmounts: Set<Double> = [3.0, 6.0]
-    
-    /**
-     * Calculates weighted average duration for multiple pouches.
-     * 
-     * When logging multiple pouches at once (e.g., 2 pouches from a 30-min can,
-     * 1 pouch from a 45-min can), this computes the weighted average based on
-     * nicotine content to determine the appropriate timer duration.
-     * 
-     * - Parameter pouches: Array of (nicotineAmount, duration) tuples
-     * - Returns: Weighted average duration in seconds
-     */
+
+    /// Serializes end→recreate Live Activity rebuilds so rapid log/remove cannot race.
+    private static var liveActivityPresentChain: Task<Void, Never>?
+
+    // MARK: - Duration helpers
+
+    /// Priority: customDuration > can.duration (minutes) > global FULL_RELEASE_TIME.
+    static func resolveDurationSeconds(can: Can? = nil, customDuration: TimeInterval? = nil) -> TimeInterval {
+        if let customDuration { return customDuration }
+        let canDuration = can?.duration ?? 0
+        if canDuration > 0 {
+            return TimeInterval(canDuration * 60)
+        }
+        return FULL_RELEASE_TIME
+    }
+
+    /// Store duration as rounded whole minutes (Core Data Int32).
+    static func minutesFromSeconds(_ seconds: TimeInterval) -> Int32 {
+        Int32((seconds / 60).rounded())
+    }
+
     static func calculateWeightedDuration(pouches: [(nicotineAmount: Double, duration: TimeInterval)]) -> TimeInterval {
         guard !pouches.isEmpty else { return FULL_RELEASE_TIME }
-        
         let totalNicotine = pouches.reduce(0) { $0 + $1.nicotineAmount }
         guard totalNicotine > 0 else { return FULL_RELEASE_TIME }
-        
-        // Weight each duration by its nicotine contribution
-        let weightedSum = pouches.reduce(0.0) { sum, pouch in
-            let weight = pouch.nicotineAmount / totalNicotine
-            return sum + (pouch.duration * weight)
+        return pouches.reduce(0.0) { sum, pouch in
+            sum + (pouch.duration * (pouch.nicotineAmount / totalNicotine))
         }
-        
-        return weightedSum
     }
-    
-/**
-     * Creates a CustomButton entity for non-standard dosage amounts.
-     * 
-     * Custom buttons allow users to quickly select frequently-used dosages that aren't
-     * part of the default 3mg/6mg options. For example, if a user logs 4mg, a custom
-     * button for 4mg will be created so they can easily select it again.
-     * 
-     * - Parameter amount: The nicotine amount in milligrams
-     * - Parameter ctx: Core Data context for database operations
-     */
+
+    // MARK: - Custom buttons
+
+    /// Inserts a CustomButton if missing. Does **not** call `ctx.save()` — callers
+    /// must save so multi-insert batches stay atomic with a single save/rollback.
     static func ensureCustomButton(for amount: Double, in ctx: NSManagedObjectContext) {
-        // Skip creating custom buttons for predefined amounts
         guard !predefinedAmounts.contains(amount) else { return }
-        
+
         let fetch: NSFetchRequest<CustomButton> = CustomButton.fetchRequest()
         fetch.predicate = NSPredicate(format: "nicotineAmount == %f", amount)
         fetch.fetchLimit = 1
-        
+
         if let found = try? ctx.fetch(fetch), found.first != nil { return }
-        
+
         let btn = CustomButton(context: ctx)
         btn.nicotineAmount = amount
-        do {
-            try ctx.save()
-            print("✅ CustomButton saved successfully for amount: \(amount)")
-        } catch {
-            print("❌ Failed to save CustomButton: \(error)")
+    }
+
+    // MARK: - Aggregation (single Live Activity policy)
+
+    /// Fetch active pouches and build the aggregate used by LA + widget.
+    static func fetchActiveAggregate(in ctx: NSManagedObjectContext, at now: Date = Date()) -> ActivePouchAggregate? {
+        let request: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
+        request.predicate = NSPredicate(format: "removalTime == nil")
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \PouchLog.insertionTime, ascending: true)]
+        let active = (try? ctx.fetch(request)) ?? []
+        return aggregate(activePouches: active, at: now)
+    }
+
+    static func aggregate(activePouches: [PouchLog], at now: Date = Date()) -> ActivePouchAggregate? {
+        guard !activePouches.isEmpty else { return nil }
+
+        var totalNicotine = 0.0
+        var bestRemaining: TimeInterval = -1
+        var bestPouch: PouchLog?
+
+        for pouch in activePouches {
+            totalNicotine += pouch.nicotineAmount
+            guard let insertion = pouch.insertionTime, pouch.pouchId != nil else { continue }
+            let duration = pouch.effectiveDurationSeconds
+            let remaining = max(0, duration - now.timeIntervalSince(insertion))
+            if remaining > bestRemaining {
+                bestRemaining = remaining
+                bestPouch = pouch
+            }
+        }
+
+        // Prefer longest remaining; fall back to any pouch with a UUID + insertion time.
+        guard let representative = bestPouch
+                ?? activePouches.first(where: { $0.pouchId != nil && $0.insertionTime != nil }),
+              let insertion = representative.insertionTime,
+              let pouchUUID = representative.pouchId
+        else { return nil }
+
+        return ActivePouchAggregate(
+            representativePouchId: pouchUUID.uuidString,
+            insertionTime: insertion,
+            durationSeconds: representative.effectiveDurationSeconds,
+            totalNicotine: totalNicotine,
+            activeCount: activePouches.count
+        )
+    }
+
+    /// Queue a serialized end→recreate of the single Live Activity for the current aggregate.
+    /// Safe to call from many sites; concurrent calls run strictly one after another.
+    /// Clears the chain head when done so completed Tasks are not retained forever.
+    static func schedulePresentAggregatedLiveActivity(in ctx: NSManagedObjectContext) {
+        let previous = liveActivityPresentChain
+        let task = Task { @MainActor in
+            _ = await previous?.value
+            await presentAggregatedLiveActivity(in: ctx)
+        }
+        liveActivityPresentChain = task
+        Task { @MainActor in
+            await task.value
+            if liveActivityPresentChain == task {
+                liveActivityPresentChain = nil
+            }
         }
     }
-    
-    /**
-     * The main pouch logging function - this is THE method that creates new pouch entries.
-     * 
-     * This function:
-     * 1. Checks if there's already an active pouch (prevents double-logging)
-     * 2. Creates a custom dosage button if needed
-     * 3. Creates and saves a new PouchLog to Core Data
-     * 4. Associates the pouch with a can (if provided) and decrements can inventory
-     * 5. Triggers CloudKit sync to share data across devices
-     * 6. Starts a Live Activity for real-time tracking (iOS 16.1+)
-     * 7. Schedules a completion notification
-     * 8. Updates widgets immediately
-     * 9. Checks for low inventory alerts
-     * 
-     * - Parameter mg: Nicotine amount in milligrams (e.g., 3.0, 6.0)
-     * - Parameter ctx: Core Data managed object context for database operations
-     * - Parameter can: Optional Can object if this pouch came from tracked inventory
-     * - Parameter customDuration: Optional custom absorption time (defaults to 30 minutes)
-     * - Returns: true if logging succeeded, false if failed or blocked
-     */
+
+    /// Same as `schedulePresentAggregatedLiveActivity` but awaits completion (removal/sync paths).
+    static func presentAggregatedLiveActivitySerialized(in ctx: NSManagedObjectContext) async {
+        let previous = liveActivityPresentChain
+        let task = Task { @MainActor in
+            _ = await previous?.value
+            await presentAggregatedLiveActivity(in: ctx)
+        }
+        liveActivityPresentChain = task
+        await task.value
+        if liveActivityPresentChain == task {
+            liveActivityPresentChain = nil
+        }
+    }
+
+    /// End any existing Live Activities and present ONE activity for the current aggregate.
+    /// Prefer `schedulePresentAggregatedLiveActivity` / `…Serialized` so rebuilds cannot race.
+    static func presentAggregatedLiveActivity(in ctx: NSManagedObjectContext) async {
+        guard let agg = fetchActiveAggregate(in: ctx) else { return }
+
+        let calculator = NicotineCalculator()
+        let recent = (try? calculator.fetchRecentPouches(context: ctx)) ?? []
+        let level = calculator.levelFromPouches(recent, at: Date())
+        let now = Date()
+        let elapsed = max(0, now.timeIntervalSince(agg.insertionTime))
+        let progress = min(max(elapsed / max(1, agg.durationSeconds), 0), 1)
+
+        // Attributes (total nicotine, start) are immutable — rebuild so multi-pouch totals stay correct.
+        await LiveActivityManager.endAllLiveActivities()
+
+        _ = await LiveActivityManager.startLiveActivity(
+            for: agg.representativePouchId,
+            nicotineAmount: agg.totalNicotine,
+            insertionTime: agg.insertionTime,
+            duration: agg.durationSeconds,
+            isFromSync: false,
+            initialNicotineLevel: level,
+            absorptionProgress: progress,
+            seedWidget: false
+        )
+
+        // Authoritative widget snapshot after LA exists (avoids level=0 seed race).
+        updateWidgetSnapshotForActivePouches(in: ctx)
+    }
+
+    /// Widget snapshot from the multi-pouch aggregate + full bloodstream level.
+    /// Always writes the decay-aware level — including when no pouches are active.
+    static func updateWidgetSnapshotForActivePouches(in ctx: NSManagedObjectContext) {
+        let helper = WidgetPersistenceHelper()
+        let calculator = NicotineCalculator()
+        let pouches = (try? calculator.fetchRecentPouches(context: ctx)) ?? []
+        let level = calculator.levelFromPouches(pouches, at: Date())
+
+        guard let agg = fetchActiveAggregate(in: ctx) else {
+            helper.updateSnapshot(level: level, isRunning: false)
+            helper.markActivityEnded()
+            return
+        }
+
+        helper.setFromLiveActivity(
+            level: level,
+            peak: agg.totalNicotine * ABSORPTION_FRACTION,
+            pouchName: agg.displayName,
+            endTime: agg.endTime
+        )
+    }
+
+    // MARK: - Single pouch log
+
     @discardableResult
-    static func logPouch(amount mg: Double, ctx: NSManagedObjectContext, can: Can? = nil, customDuration: TimeInterval? = nil) -> Bool {
-        // STEP 1: Allow multiple active pouches (removed restriction)
-        // Multiple pouches can now be active simultaneously with independent timers
-        
-        // STEP 2: Create custom dosage button for this amount (if not 3mg/6mg)
+    static func logPouch(
+        amount mg: Double,
+        ctx: NSManagedObjectContext,
+        can: Can? = nil,
+        customDuration: TimeInterval? = nil
+    ) -> Bool {
+        guard mg > 0 else { return false }
+
         ensureCustomButton(for: mg, in: ctx)
-        
-        // STEP 3: Create the new PouchLog entity
+
+        let pouchIdUUID = UUID()
         let pouch = PouchLog(context: ctx)
-        pouch.pouchId = UUID()           // Unique ID for CloudKit sync and cross-device identity
-        pouch.insertionTime = .now       // When the pouch was inserted (current timestamp)
-        pouch.nicotineAmount = mg        // How much nicotine (e.g., 3.0, 6.0)
-        
-        // STEP 4: Determine absorption duration (how long the pouch should be tracked)
-        // Priority: customDuration > can's custom duration > app default timer setting
-        let canDuration = can?.duration ?? 0  // Duration from can settings (in minutes)
-        let durationSeconds: TimeInterval
-        if let customDuration = customDuration {
-            // Explicit custom duration provided (e.g., multi-pouch weighted average)
-            durationSeconds = customDuration
-        } else if canDuration > 0 {
-            // Use can-specific duration (convert minutes to seconds)
-            durationSeconds = TimeInterval(canDuration * 60)
-        } else {
-            // Fall back to app's global timer setting
-            durationSeconds = FULL_RELEASE_TIME
+        pouch.pouchId = pouchIdUUID
+        pouch.insertionTime = .now
+        pouch.nicotineAmount = mg
+
+        let durationSeconds = resolveDurationSeconds(can: can, customDuration: customDuration)
+        pouch.timerDuration = minutesFromSeconds(durationSeconds)
+
+        if let can {
+            can.addToPouchLogs(pouch)
+            can.usePouch()
         }
-        // Store in Core Data as minutes. Round to the nearest minute instead of truncating:
-        // the multi-pouch weighted-average path can produce fractional minutes, and truncation
-        // always lost up to ~59s. (A fully exact fix would add an additive optional
-        // `timerDurationSeconds: Double` in a new Core Data model version — see
-        // OPTIMIZATION_NOTES.md; that requires an Xcode-side migration + device test.)
-        pouch.timerDuration = Int32((durationSeconds / 60).rounded())
-        
-        // STEP 5: Link to inventory and decrement pouch count (if logging from a tracked can)
-        if let can = can {
-            can.addToPouchLogs(pouch)  // Create relationship: this pouch belongs to this can
-            can.usePouch()             // Subtract one pouch from the can's inventory count
-            print("📦 Used pouch from can \(can.brand ?? "Unknown") - remaining: \(can.pouchCount)")
-        }
-        
-        // STEP 6: Save to Core Data and trigger CloudKit sync for cross-device sharing
+
         do {
             try ctx.save()
-            print("✅ PouchLog saved successfully: \(mg)mg at \(Date().formatted(.dateTime.hour().minute()))")
-            
-            // NSPersistentCloudKitContainer automatically schedules a CloudKit export
-            // after every ctx.save(), so other devices pick this up on their own. We used
-            // to fire BOTH triggerCloudKitSync() and triggerManualSync() here on every log
-            // (a full history fetch + accountStatus round-trip + reconcile) — pure overhead
-            // on the hot path with no functional benefit.
         } catch {
             print("❌ Failed to save PouchLog: \(error)")
-            print("❌ Error details: \(error.localizedDescription)")
-            // Discard the partial changes so a failed log leaves the shared
-            // viewContext clean. Without this, the orphaned PouchLog (active:
-            // insertionTime set, removalTime nil) and the can.usePouch()
-            // decrement stay pending and get silently committed by the next
-            // ctx.save() anywhere in the app — surfacing as a phantom active
-            // pouch with no Live Activity / completion alert plus lost inventory.
             ctx.rollback()
             return false
         }
-        
-        // STEP 7: Use the calculated duration for Live Activities and notifications
-        // (Already calculated in STEP 4)
-        let duration = durationSeconds
 
-        // Use UUID as identifier for consistency across devices and app launches
-        let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
+        let pouchId = pouchIdUUID.uuidString
 
-        // STEP 8: Start Live Activity for real-time tracking
-        // Live Activities show on the Lock Screen and Dynamic Island with a countdown timer
-        //
-        // CRITICAL: We pass the pouch's actual insertion time from Core Data to ensure the
-        // Live Activity countdown matches exactly what's displayed in-app and in widgets.
-        // Without this, the timer would restart from 30 minutes whenever the activity refreshes.
-        Task {
-            _ = await LiveActivityManager.startLiveActivity(
-                for: pouchId,
-                nicotineAmount: mg,
-                insertionTime: pouch.insertionTime,  // Pass actual insertion time for accurate countdown
-                duration: duration  // How long the absorption should take
-            )
-        }
-
-        // STEP 9: Schedule completion notification to alert user when absorption is done
-        let fireDate = Date().addingTimeInterval(duration)  // When to show the notification
         NotificationManager.scheduleCompletionAlert(
-            id: pouchId,                                     // Unique ID to cancel later if needed
-            title: "Absorption complete",                   // Notification title
-            body: "Your \(Int(mg))mg pouch has finished absorbing.",  // Notification body
-            fireDate: fireDate                              // Exactly when to fire
+            id: pouchId,
+            title: "Absorption complete",
+            body: "Your \(Int(mg))mg pouch has finished absorbing.",
+            fireDate: Date().addingTimeInterval(durationSeconds)
         )
-        
-        // STEP 10: Post notification for any observers (like UI components that need to refresh)
-        // This is Swift's NotificationCenter, NOT push notifications
-        NotificationCenter.default.post(name: NSNotification.Name("PouchLogged"),
-                                      object: nil,
-                                      userInfo: ["mg": mg])  // Pass the dosage amount to observers
-        
-        // STEP 11: Update home screen widgets with the new pouch data
-        updateWidgetPersistenceHelperAfterLogging(pouch: pouch, ctx: ctx)  // Store widget-specific data
-        WidgetReloadCoordinator.reload()                          // Tell iOS to refresh widgets
 
-        // Push the new state to a paired Apple Watch so it updates passively (the watch
-        // can't reach the phone when it's backgrounded). No-op if no watch is paired.
+        NotificationCenter.default.post(
+            name: NSNotification.Name("PouchLogged"),
+            object: nil,
+            userInfo: ["mg": mg]
+        )
+
+        schedulePresentAggregatedLiveActivity(in: ctx)
+        updateWidgetSnapshotForActivePouches(in: ctx)
+        WidgetReloadCoordinator.reload()
+
         #if os(iOS)
         Task { @MainActor in await WatchConnectivityBridge.shared.pushHomeToWatch() }
         #endif
-        
-        // STEP 12: Check for additional notifications (inventory alerts, usage reminders)
+
         Task {
-            // If we used a can, check if we're running low on pouches
             if can != nil {
                 NotificationManager.checkCanInventory(context: ctx)
             }
-            
-            // Schedule reminders based on user's notification preferences
             NotificationManager.scheduleUsageReminder(context: ctx)
         }
-        
-        // STEP 13: Schedule background task to keep Live Activity updated
-        // This ensures the countdown timer stays accurate even when the app is backgrounded
+
         Task { await BackgroundMaintainer.shared.scheduleSoon() }
-        
+
         return true
     }
-    
-    // MARK: - Widget Data Management
-    
-    /**
-     * Updates widget-specific data storage after logging a new pouch.
-     * 
-     * Widgets can't directly access Core Data due to iOS limitations, so we use
-     * WidgetPersistenceHelper to store simplified data that widgets can read.
-     * This includes current nicotine level, peak absorption, and timing info.
-     * 
-     * - Parameter pouch: The newly logged pouch
-     * - Parameter ctx: Core Data context (unused here, but available for future enhancements)
-     */
-    private static func updateWidgetPersistenceHelperAfterLogging(pouch: PouchLog, ctx: NSManagedObjectContext) {
-        let helper = WidgetPersistenceHelper()
-        
-        // Calculate initial nicotine level (since we just logged, elapsed time is essentially 0)
-        let currentLevel = AbsorptionConstants.shared.calculateCurrentNicotineLevel(
-            nicotineContent: pouch.nicotineAmount,
-            elapsedTime: 0  // Just started, no time has passed
+
+    // MARK: - Multi-pouch batch log
+
+    /// Logs multiple pouches from cans in one save, one aggregated Live Activity, full side effects.
+    /// - Parameter loads: can → count of pouches to log from that can
+    /// - Returns: number of pouches successfully logged (0 on failure)
+    @discardableResult
+    static func logPouchesFromCans(
+        loads: [(can: Can, count: Int)],
+        ctx: NSManagedObjectContext
+    ) -> Int {
+        var created: [(pouchId: String, mg: Double, duration: TimeInterval, insertion: Date)] = []
+        var index = 0
+        var amountsForButtons = Set<Double>()
+
+        for entry in loads {
+            let can = entry.can
+            let count = entry.count
+            guard count > 0 else { continue }
+
+            for _ in 0..<count {
+                let pouch = PouchLog(context: ctx)
+                pouch.pouchId = UUID()
+                // Stagger timestamps slightly so Usage graph doesn't stack identical times.
+                pouch.insertionTime = Date.now.addingTimeInterval(TimeInterval(index) * 0.1)
+                pouch.nicotineAmount = can.strength
+
+                let durationSeconds = resolveDurationSeconds(can: can)
+                pouch.timerDuration = minutesFromSeconds(durationSeconds)
+
+                can.addToPouchLogs(pouch)
+                can.usePouch()
+
+                if let id = pouch.pouchId?.uuidString, let insertion = pouch.insertionTime {
+                    created.append((id, can.strength, durationSeconds, insertion))
+                }
+                amountsForButtons.insert(can.strength)
+                index += 1
+            }
+        }
+
+        guard !created.isEmpty else { return 0 }
+
+        for amount in amountsForButtons {
+            ensureCustomButton(for: amount, in: ctx)
+        }
+
+        do {
+            try ctx.save()
+        } catch {
+            print("❌ Failed to save multi-pouch batch: \(error)")
+            ctx.rollback()
+            return 0
+        }
+
+        // Proximity-clustered completion alerts (one banner per cluster; every pouchId maps
+        // to the request so cancelAlert still works and body reschedules on partial remove).
+        let alertItems = created.map { item in
+            (id: item.pouchId, mg: item.mg, fireDate: item.insertion.addingTimeInterval(item.duration))
+        }
+        NotificationManager.scheduleGroupedCompletionAlerts(alertItems)
+
+        let totalMg = created.reduce(0.0) { $0 + $1.mg }
+        NotificationCenter.default.post(
+            name: NSNotification.Name("PouchLogged"),
+            object: nil,
+            userInfo: ["mg": totalMg, "count": created.count]
         )
-        
-        // Format display name for the widget
-        let pouchName = "\(Int(pouch.nicotineAmount))mg pouch"
-        
-        // IMPORTANT: Use the pouch's actual duration for widget end time calculation.
-        // Previously used FULL_RELEASE_TIME which could mismatch if pouch has custom duration.
-        let pouchDuration = TimeInterval(pouch.timerDuration * 60)  // Convert stored minutes to seconds
-        let endTime = pouch.insertionTime?.addingTimeInterval(pouchDuration)  // Accurate completion time
-        
-        // Store all the data widgets need to display current status
-        helper.setFromLiveActivity(
-            level: currentLevel,                                    // Current nicotine level
-            peak: pouch.nicotineAmount * ABSORPTION_FRACTION,      // Maximum absorption (30% of total)
-            pouchName: pouchName,                                  // Display name (e.g., "6mg pouch")
-            endTime: endTime                                       // When the countdown ends
-        )
+
+        schedulePresentAggregatedLiveActivity(in: ctx)
+        updateWidgetSnapshotForActivePouches(in: ctx)
+        WidgetReloadCoordinator.reload()
+
+        #if os(iOS)
+        Task { @MainActor in await WatchConnectivityBridge.shared.pushHomeToWatch() }
+        #endif
+
+        Task {
+            NotificationManager.checkCanInventory(context: ctx)
+            NotificationManager.scheduleUsageReminder(context: ctx)
+        }
+
+        Task { await BackgroundMaintainer.shared.scheduleSoon() }
+
+        return created.count
     }
 }

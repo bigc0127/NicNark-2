@@ -46,6 +46,22 @@ private struct PouchPoint {
     /// Brand/flavor are only needed for the detailed CSV export.
     let brand: String
     let flavor: String
+
+    /// Total absorbed at use end (or `now` if still active) — matches AbsorptionConstants,
+    /// not stated-mg × 0.30. Early removal reduces the result.
+    func absorbedMg(at now: Date) -> Double {
+        let fullRelease = timerMin > 0
+            ? TimeInterval(timerMin) * 60
+            : FULL_RELEASE_TIME
+        let end = removal ?? now
+        let useTime = max(0, min(end.timeIntervalSince(insertion), fullRelease))
+        let value = AbsorptionConstants.shared.calculateAbsorbedNicotine(
+            nicotineContent: mg,
+            useTime: useTime,
+            fullReleaseTime: fullRelease
+        )
+        return value.isFinite ? value : 0
+    }
 }
 
 private extension Array where Element == PouchLog {
@@ -350,10 +366,9 @@ struct InsightsData {
         let prior7Count = points.filter { $0.insertion >= priorSevenStart && $0.insertion < sevenAgo }.count
         let prior30Count = points.filter { $0.insertion >= priorThirtyStart && $0.insertion < thirtyAgo }.count
 
-        // 3) Absorbed mg per window.
+        // 3) Absorbed mg per window (use-time × absorption model, not stated × 0.30).
         func absorbed(_ predicate: (PouchPoint) -> Bool) -> Double {
-            let sum = points.filter(predicate).reduce(0.0) { $0 + $1.mg }
-            let result = sum * ABSORPTION_FRACTION
+            let result = points.filter(predicate).reduce(0.0) { $0 + $1.absorbedMg(at: now) }
             return result.isFinite ? result : 0
         }
         let todayAbsorbedMg = absorbed { $0.insertion >= startOfToday && $0.insertion <= now }
@@ -596,8 +611,7 @@ struct NicStats {
         let totalPouches = points.count
 
         func absorbed(_ predicate: (PouchPoint) -> Bool) -> Double {
-            let sum = points.filter(predicate).reduce(0.0) { $0 + $1.mg }
-            let r = sum * ABSORPTION_FRACTION
+            let r = points.filter(predicate).reduce(0.0) { $0 + $1.absorbedMg(at: now) }
             return r.isFinite ? r : 0
         }
         let estAbsorbedMgToday = absorbed { $0.insertion >= startOfToday && $0.insertion <= now }

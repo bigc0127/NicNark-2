@@ -104,6 +104,19 @@ struct InsightsView: View {
     @State private var data: InsightsData = .empty
     @State private var hasLoaded = false
 
+    /// Cheap content fingerprint so edits (same count, different mg/times) recompute.
+    /// Samples first/last/mid insertion + total mg — enough to catch typical mutations.
+    private var insightsFingerprint: String {
+        let logs = recentLogs
+        guard !logs.isEmpty else { return "0" }
+        let first = logs.first?.insertionTime?.timeIntervalSince1970 ?? 0
+        let last = logs.last?.insertionTime?.timeIntervalSince1970 ?? 0
+        let mid = logs[logs.count / 2].insertionTime?.timeIntervalSince1970 ?? 0
+        let sumMg = logs.reduce(0.0) { $0 + $1.nicotineAmount }
+        let removed = logs.filter { $0.removalTime != nil }.count
+        return "\(logs.count)|\(first)|\(mid)|\(last)|\(sumMg)|\(removed)|\(refreshNonce)"
+    }
+
     /// Rebuild the aggregate from the current fetch + settings. Called on appear and on input
     /// changes only — never per render/access.
     private func recompute() {
@@ -148,13 +161,18 @@ struct InsightsView: View {
                 Button("Done") { dismiss() }
             }
         }
-        // Build once on appear, then only when the fetch or a setting actually changes —
-        // NOT on every render. This is what keeps the CPU (and phone temperature) down.
+        // Build once on appear, then when inputs change — NOT on every render.
+        // Count alone is insufficient (edit amount/time keeps count stable → stale KPIs).
         .task { recompute() }
         .onChange(of: recentLogs.count) { _, _ in recompute() }
+        .onChange(of: insightsFingerprint) { _, _ in recompute() }
         .onChange(of: dailyGoal) { _, _ in recompute() }
         .onChange(of: pricePerTin) { _, _ in recompute() }
         .onChange(of: pouchesPerTin) { _, _ in recompute() }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchLogged"))) { _ in recompute() }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchRemoved"))) { _ in recompute() }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchEdited"))) { _ in recompute() }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchDeleted"))) { _ in recompute() }
         .refreshable {
             refreshNonce &+= 1
             recompute()

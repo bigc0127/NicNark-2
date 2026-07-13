@@ -2,6 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**Agent working rules, communication prefs, and product context:** see `AGENTS.md`
+(applies to every agent — Claude, Grok, etc.).
+
 ## Build & Run
 
 This is a pure Xcode project with no package manager or CLI build tooling.
@@ -14,7 +17,8 @@ open nicnark-2.xcodeproj   # Open in Xcode, then ⌘+R to build/run
 
 Tests are in the `nicnark-2Tests` target. Run with ⌘+U in Xcode or:
 ```bash
-xcodebuild test -project nicnark-2.xcodeproj -scheme nicnark-2 -destination 'platform=iOS Simulator,name=iPhone 16'
+# Use a simulator that exists on this machine (names change with Xcode/iOS versions)
+xcodebuild test -project nicnark-2.xcodeproj -scheme nicnark-2 -destination 'platform=iOS Simulator,name=iPhone 17'
 ```
 
 ## Targets
@@ -36,16 +40,20 @@ When setting up a new dev environment, update these identifiers to match your te
 
 ### Data Flow
 
-All pouch logging — regardless of origin (UI tap, Siri Shortcut, URL scheme `nicnark2://log?mg=6`, or Watch via `WatchConnectivityBridge`) — must go through `LogService.logPouch()`. This function orchestrates the full side-effect chain: Core Data save → CloudKit sync → Live Activity start → completion notification → widget timeline reload.
+All pouch logging — regardless of origin (UI tap, multi-can load, Siri Shortcut, URL scheme `nicnark2://log?mg=6`, or Watch via `WatchConnectivityBridge`) — must go through `LogService` (`logPouch` or `logPouchesFromCans`). Removals go through `PouchRemovalService`. Do not write `PouchLog` from views.
+
+Side-effect chain: Core Data save → (CloudKit auto-export) → serialized aggregated Live Activity → completion notification(s) → widget snapshot → optional Watch push.
 
 ```
-User action / Shortcut / URL / Watch
+User action / Shortcut / URL / Watch / multi-can load
        ↓
-   LogService.logPouch()         ← single entry point
+   LogService.logPouch() / logPouchesFromCans()
        ↓              ↓              ↓              ↓
   CoreData      LiveActivity   Notification    WidgetKit
-  + CloudKit      Manager        Manager      reloadAll
+  + CloudKit   (1 LA, total mg)  Manager      snapshot
 ```
+
+**Multi-pouch policy:** many active pouches allowed; exactly **one** Live Activity shows summed stated mg + longest remaining timer. Widget level uses full bloodstream calc (`NicotineCalculator`), not single-pouch-only absorption.
 
 ### Core Data Model (`nicnark_2.xcdatamodeld`)
 
@@ -88,7 +96,8 @@ Timer duration is user-configurable (30/45/60 min) via `TimerSettings`, stored i
 | Class | Responsibility |
 |-------|---------------|
 | `PersistenceController.shared` | `NSPersistentCloudKitContainer` setup; App Group store path; CloudKit remote-change → Live Activity sync |
-| `LiveActivityManager` | ActivityKit lifecycle — start/update/end; deduplication via `activeActivitiesByPouchId` dict |
+| `LiveActivityManager` | ActivityKit lifecycle — start/update/end; dedup via `activeActivitiesByPouchId`. Prefer `LogService.schedulePresentAggregatedLiveActivity` / `…Serialized` for end→recreate |
+| `LogService` | Single write path for log + multi-pouch batch; aggregate LA + widget snapshot |
 | `BackgroundMaintainer` | BGTaskScheduler registration and scheduling for two task IDs: `bg.refresh` and `bg.process` |
 | `WatchConnectivityBridge` | iPhone side of WCSession; dispatches Watch messages (`logPouch`, `removePouch`, `fetchStatus`) to `LogService` / `PouchRemovalService` |
 | `CanManager` | Inventory CRUD; barcode scanning integration |
