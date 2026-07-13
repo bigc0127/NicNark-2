@@ -81,6 +81,11 @@ See `CLAUDE.md` for full map. Hard rules:
 13. New Xcode targets: copy sibling settings, then diff. Exception: unit-test targets
     should **not** force `SWIFT_DEFAULT_ACTOR_ISOLATION=MainActor` (breaks `XCTestCase` inits).
 14. Delete dead code you notice (identical branches, unreachable fallbacks) — don't add more.
+15. **Every fix must include:** grep for **all consumers** of the thing you changed
+    (IDs, notification names, saved state, value *meanings*), and check the
+    **execution context** (foreground/background, actor, BGTask) of any system
+    API you call or move. Named-bug-only patches that skip "who else touches
+    this?" are how cancel paths, ActivityKit-from-BG, and sheet conflicts slip through.
 
 ### Verification
 
