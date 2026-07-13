@@ -80,6 +80,60 @@ enum PouchRemovalService {
         return true
     }
 
+    /// Batch-remove specific pouches by id (one save, one LA end pass, one watch push).
+    /// Used by group completion "Remove" so N members ≠ N full side-effect chains.
+    @discardableResult
+    static func removePouches(withIds ids: [String], in context: NSManagedObjectContext) async -> Int {
+        let unique = Array(Set(ids.filter { !$0.isEmpty }))
+        guard !unique.isEmpty else { return 0 }
+
+        let removalTime = Date.now
+        var removedIds: [String] = []
+        var marked: [PouchLog] = []
+
+        for pouchId in unique {
+            guard !pouchesBeingRemoved.contains(pouchId) else { continue }
+            guard let pouch = fetchPouch(withId: pouchId, in: context), pouch.removalTime == nil else {
+                continue
+            }
+            pouchesBeingRemoved.insert(pouchId)
+            pouch.removalTime = removalTime
+            removedIds.append(pouchId)
+            marked.append(pouch)
+        }
+        defer { removedIds.forEach { pouchesBeingRemoved.remove($0) } }
+        guard !removedIds.isEmpty else { return 0 }
+
+        do {
+            try context.save()
+        } catch {
+            print("❌ Failed to save batch pouch removal: \(error.localizedDescription)")
+            marked.forEach { $0.removalTime = nil }
+            return 0
+        }
+
+        for pouchId in removedIds {
+            await LiveActivityManager.endLiveActivity(for: pouchId)
+            NotificationManager.cancelAlert(id: pouchId)
+        }
+
+        await LogService.presentAggregatedLiveActivitySerialized(in: context)
+        LogService.updateWidgetSnapshotForActivePouches(in: context)
+        WidgetReloadCoordinator.reload()
+
+        NotificationCenter.default.post(
+            name: NSNotification.Name("PouchRemoved"),
+            object: nil,
+            userInfo: ["count": removedIds.count, "ids": removedIds]
+        )
+
+        #if os(iOS)
+        await WatchConnectivityBridge.shared.pushHomeToWatch()
+        #endif
+
+        return removedIds.count
+    }
+
     /// Removes all active pouches (`removalTime == nil`). Returns count removed.
     static func removeAllActivePouches(in context: NSManagedObjectContext) async -> Int {
         let request: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()

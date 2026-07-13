@@ -66,8 +66,8 @@ struct InventoryManagementView: View {
     @State private var scannedBarcode: String?
     /// Pending barcode action after scanner sheet fully dismisses (no stacked present).
     @State private var barcodePendingAfterScan: String?
-    @State private var selectedCan: Can?
-    @State private var showingEditCan = false
+    /// `sheet(item:)` target — never empty ProgressView flash on edit.
+    @State private var editItem: InventoryCanEditItem?
     @State private var showingDeleteConfirmation = false
     @State private var canToDelete: Can?
     @State private var searchText = ""
@@ -95,7 +95,10 @@ struct InventoryManagementView: View {
                         Button(action: { showingAddCan = true }) {
                             Label("Add Can Manually", systemImage: "plus.circle")
                         }
-                        Button(action: { showingBarcodeScanner = true }) {
+                        Button(action: {
+                            barcodePendingAfterScan = nil
+                            showingBarcodeScanner = true
+                        }) {
                             Label("Scan Barcode", systemImage: "barcode.viewfinder")
                         }
                     } label: {
@@ -115,27 +118,23 @@ struct InventoryManagementView: View {
                     canManager.fetchActiveCans(context: viewContext)
                 }
             }
-            // Edit sheet: do NOT nil selectedCan in content onDisappear — that dismisses mid-present.
-            .sheet(isPresented: $showingEditCan) {
-                if let can = selectedCan {
-                    CanDetailView(editingCan: can)
-                        .environment(\.managedObjectContext, viewContext)
-                } else {
-                    ProgressView()
-                        .onAppear { showingEditCan = false }
-                }
+            .sheet(item: $editItem) { item in
+                CanDetailView(editingCan: item.can)
+                    .environment(\.managedObjectContext, viewContext)
             }
-            .onChange(of: showingEditCan) { _, isShowing in
-                if !isShowing {
-                    selectedCan = nil
+            .onChange(of: editItem) { _, newValue in
+                if newValue == nil {
                     canManager.fetchActiveCans(context: viewContext)
                 }
             }
             .sheet(isPresented: $showingBarcodeScanner, onDismiss: {
-                // Present add/edit only after scanner is gone (avoids stacked-sheet freeze).
+                // Present add/edit only after scanner fully gone.
                 guard let barcode = barcodePendingAfterScan else { return }
                 barcodePendingAfterScan = nil
-                handleScannedBarcode(barcode)
+                // Short delay beyond one runloop — dismiss animation ~0.35s.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    handleScannedBarcode(barcode)
+                }
             }) {
                 BarcodeScannerView { barcode in
                     barcodePendingAfterScan = barcode
@@ -156,14 +155,19 @@ struct InventoryManagementView: View {
                     Text("Delete \(can.brand ?? "this can") \(can.flavor ?? "")? This action cannot be undone.")
                 }
             }
+            .onAppear {
+                // Drop stale pending scan from a prior cancelled session.
+                if !showingBarcodeScanner {
+                    barcodePendingAfterScan = nil
+                }
+            }
         }
     }
 
     private func handleScannedBarcode(_ barcode: String) {
         scannedBarcode = barcode
         if let existingCan = canManager.findCanByBarcode(barcode, context: viewContext) {
-            selectedCan = existingCan
-            showingEditCan = true
+            editItem = InventoryCanEditItem(can: existingCan)
         } else {
             showingAddCan = true
         }
@@ -280,9 +284,8 @@ struct InventoryManagementView: View {
             ForEach(filteredCans) { can in
                 CanRowView(
                     can: can,
-                    onEdit: { 
-                        selectedCan = can
-                        showingEditCan = true
+                    onEdit: {
+                        editItem = InventoryCanEditItem(can: can)
                     },
                     onDelete: {
                         canToDelete = can
@@ -355,6 +358,23 @@ struct InventoryManagementView: View {
     private func deleteCan(_ can: Can) {
         canManager.deleteCan(can, context: viewContext)
         canToDelete = nil
+    }
+}
+
+// MARK: - Edit sheet identity
+
+/// Stable `sheet(item:)` payload so edit never presents empty content / ProgressView flash.
+private struct InventoryCanEditItem: Identifiable, Equatable {
+    let id: NSManagedObjectID
+    let can: Can
+
+    init(can: Can) {
+        self.id = can.objectID
+        self.can = can
+    }
+
+    static func == (lhs: InventoryCanEditItem, rhs: InventoryCanEditItem) -> Bool {
+        lhs.id == rhs.id
     }
 }
 

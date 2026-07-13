@@ -98,13 +98,19 @@ See `CLAUDE.md` for full map. Hard rules:
     Serialize stacked sheets: dismiss first, present next on dismiss / next runloop.
 19. **AVCapture / camera:** `startRunning` / `stopRunning` / session configure never on
     main. `stopRunning` blocks; main-thread call = UI freeze. Metadata delegate may be main;
-    session lifecycle must not.
+    session lifecycle must not. Prefer a **file-level nonisolated session helper** (not
+    `queue.async` into `@MainActor` UIViewController methods — Swift 6 may only *warn*).
+20. **Stay in scope.** Fix rounds fix the **named findings only** — no unprompted
+    feature/refactor in the same commit. Propose extras separately; wait for Connor.
+21. **Build with new Swift 6 isolation warnings = failed build.** Treat isolation
+    downgrade warnings as errors; `grep` build output for them. Zero-warning is the bar.
 
 ### Verification
 
 - Prefer `xcodebuild test … -destination 'platform=iOS Simulator,name=iPhone 17'`
   (or whatever sim exists; `iPhone 16` may be missing on newer Xcode).
 - Do not claim tests passed without running them.
+- After camera/concurrency changes: scan build log for isolation warnings.
 - Simulator ≠ Live Activity / real widget validation.
 
 ## Concision preference

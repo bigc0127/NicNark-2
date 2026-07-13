@@ -53,14 +53,10 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
                 let userInfo = response.notification.request.content.userInfo
                 let fromUserInfo = userInfo["pouchIds"] as? [String]
                 Task { @MainActor in
+                    let ctx = PersistenceController.shared.container.viewContext
                     if let fromUserInfo, !fromUserInfo.isEmpty {
-                        for pid in fromUserInfo {
-                            _ = await PouchRemovalService.removePouch(
-                                withId: pid,
-                                in: PersistenceController.shared.container.viewContext
-                            )
-                        }
                         NotificationManager.cancelAlert(id: id)
+                        _ = await PouchRemovalService.removePouches(withIds: fromUserInfo, in: ctx)
                     } else {
                         NotificationManager.handlePouchRemovalAction(pouchId: id)
                     }

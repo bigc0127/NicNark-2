@@ -40,8 +40,9 @@ struct CanImagePicker: View {
             }
 
             HStack {
+                let hasPhoto = image != nil
                 PhotosPicker(selection: $selection, matching: .images, photoLibrary: .shared()) {
-                    Label(image == nil ? "Choose Photo" : "Replace Photo", systemImage: "photo")
+                    Label(hasPhoto ? "Replace Photo" : "Choose Photo", systemImage: "photo")
                 }
 
                 if let current = image {
@@ -69,7 +70,8 @@ struct CanImagePicker: View {
                 let data = try? await newValue.loadTransferable(type: Data.self)
                 let downsized: UIImage? = await Task.detached(priority: .userInitiated) {
                     guard let data, let ui = UIImage(data: data) else { return nil }
-                    return downscaleUIImage(ui, maxDimension: 1600)
+                    // ≥ store post-crop budget (1000px) with headroom for crop zoom; 1600 was soft.
+                    return downscaleUIImage(ui, maxDimension: 3000)
                 }.value
                 guard let downsized else { return }
                 cropTarget = CropTarget(image: downsized)

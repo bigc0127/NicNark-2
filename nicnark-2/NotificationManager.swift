@@ -231,6 +231,7 @@ enum NotificationManager {
                   let mgs = meta["mgs"] as? [String: Double] {
             let fire = Date(timeIntervalSince1970: fireTs)
             // Past-fire guard: never re-enqueue a completion banner that already fired.
+            // Still prune maps + clear badge (early return used to skip trailing cleanup → sticky badge).
             guard fire.timeIntervalSinceNow > 1 else {
                 for pid in members { pouchToRequest.removeValue(forKey: pid) }
                 requestMembers.removeValue(forKey: requestId)
@@ -238,6 +239,10 @@ enum NotificationManager {
                 defaults.set(pouchToRequest, forKey: pouchToRequestKey)
                 defaults.set(requestMembers, forKey: requestMembersKey)
                 defaults.set(requestMeta, forKey: requestMetaKey)
+                Task {
+                    let delivered = await c.deliveredNotifications()
+                    if delivered.isEmpty { clearBadge() }
+                }
                 return
             }
             let remainingItems: [(id: String, mg: Double, fireDate: Date)] = members.compactMap { pid in
@@ -459,15 +464,13 @@ enum NotificationManager {
         logger.info("Handling pouch removal for notification id: \(notificationId)")
 
         let ids = pouchIds(forNotificationId: notificationId)
-        // Cancel group/request once (maps all members).
+        // Cancel group/request once (maps all members) before batch remove.
         cancelAlert(id: notificationId)
 
         Task { @MainActor in
             let ctx = PersistenceController.shared.container.viewContext
-            for id in ids {
-                _ = await PouchRemovalService.removePouch(withId: id, in: ctx)
-            }
-            // LA / watch / widget side effects already run inside PouchRemovalService.
+            // One save + one LA/widget/watch pass — not N× removePouch side effects.
+            _ = await PouchRemovalService.removePouches(withIds: ids, in: ctx)
             clearBadge()
         }
     }
