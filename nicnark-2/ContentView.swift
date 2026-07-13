@@ -144,7 +144,11 @@ struct ContentView: View {
             showingSettings = false
             showingInsights = false
             // Match inventory scanner defer (~0.35s dismiss animation); one runloop is too short.
+            // Skip if user already opened another sheet in the window during the defer.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                guard !showingSettings, !showingInsights,
+                      !showingWhatsNew, !showingFirstRunDisclaimer,
+                      !showingInventory else { return }
                 showingInventory = true
             }
         }

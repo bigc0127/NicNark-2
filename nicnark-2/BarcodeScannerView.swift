@@ -139,9 +139,12 @@ nonisolated final class BarcodeSessionController: @unchecked Sendable {
         self.sessionForPreview = session
         self.isConfigured = true
 
-        // If user dismissed mid-configure, do not start; still publish preview if desired.
+        // Always publish preview once session exists. viewDidLoad enqueues configure before
+        // viewWillAppear sets desiredRunning (FIFO) — gating publish on the flag left the
+        // layer unattached forever while startLocked still ran later → black scanner, live decode.
+        // Attaching AVCaptureVideoPreviewLayer to a not-yet-running session is safe.
+        DispatchQueue.main.async { onPreviewReady() }
         if desiredRunning {
-            DispatchQueue.main.async { onPreviewReady() }
             startLocked()
         }
     }

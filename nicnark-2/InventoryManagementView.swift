@@ -132,7 +132,9 @@ struct InventoryManagementView: View {
                 guard let barcode = barcodePendingAfterScan else { return }
                 barcodePendingAfterScan = nil
                 // Short delay beyond one runloop — dismiss animation ~0.35s.
+                // Re-check so a quick re-open does not stack add/edit under the scanner.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    guard !showingBarcodeScanner, barcodePendingAfterScan == nil else { return }
                     handleScannedBarcode(barcode)
                 }
             }) {

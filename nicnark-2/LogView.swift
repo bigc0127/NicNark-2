@@ -503,7 +503,9 @@ struct LogView: View {
         .sheet(isPresented: $showingBarcodeScanner, onDismiss: {
             guard let code = pendingBarcodeAfterScan else { return }
             pendingBarcodeAfterScan = nil
+            // Defer past dismiss animation; re-check so a quick re-open does not stack sheets.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                guard !showingBarcodeScanner, pendingBarcodeAfterScan == nil else { return }
                 handleScannedBarcode(code)
             }
         }) {

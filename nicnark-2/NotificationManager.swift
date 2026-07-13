@@ -411,7 +411,9 @@ enum NotificationManager {
     }
 
     /// Drop map entries whose fire time is in the past (natural fire or stale CloudKit).
-    /// Also strips delivered banners for those request ids so group strands don't linger.
+    /// Map-only: never touches delivered/pending banners. Banner removal belongs exclusively
+    /// to explicit user-driven paths (`cancelAlert` / resolved-id cleanup) so a natural fire
+    /// is not eaten 0s later by any alert activity that re-enters prune.
     private static func pruneExpiredAlertMaps() {
         let defaults = UserDefaults.standard
         var pouchToRequest = defaults.dictionary(forKey: pouchToRequestKey) as? [String: String] ?? [:]
@@ -419,7 +421,6 @@ enum NotificationManager {
         var requestMeta = defaults.dictionary(forKey: requestMetaKey) as? [String: [String: Any]] ?? [:]
         let now = Date().timeIntervalSince1970
         var dirty = false
-        var expiredRequestIds: [String] = []
         for (reqId, meta) in requestMeta {
             guard let fireTs = meta["fire"] as? Double else { continue }
             if fireTs + 60 < now { // 60s grace after fire
@@ -428,7 +429,6 @@ enum NotificationManager {
                 }
                 requestMembers.removeValue(forKey: reqId)
                 requestMeta.removeValue(forKey: reqId)
-                expiredRequestIds.append(reqId)
                 dirty = true
             }
         }
@@ -436,11 +436,6 @@ enum NotificationManager {
             defaults.set(pouchToRequest, forKey: pouchToRequestKey)
             defaults.set(requestMembers, forKey: requestMembersKey)
             defaults.set(requestMeta, forKey: requestMetaKey)
-            if !expiredRequestIds.isEmpty {
-                let c = UNUserNotificationCenter.current()
-                c.removeDeliveredNotifications(withIdentifiers: expiredRequestIds)
-                c.removePendingNotificationRequests(withIdentifiers: expiredRequestIds)
-            }
         }
     }
 

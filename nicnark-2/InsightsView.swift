@@ -31,6 +31,7 @@
 
 import SwiftUI
 import Charts
+import Combine
 import CoreData
 
 // MARK: - InsightsView
@@ -168,7 +169,11 @@ struct InsightsView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchEdited"))) { _ in scheduleRecompute() }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchDeleted"))) { _ in scheduleRecompute() }
         // Cross-device CloudKit imports update the store without local pouch events.
-        .onReceive(NotificationCenter.default.publisher(for: .NSPersistentStoreRemoteChange)) { _ in
+        // Core Data posts this on a private queue; hop to main before any @State touch.
+        .onReceive(
+            NotificationCenter.default.publisher(for: .NSPersistentStoreRemoteChange)
+                .receive(on: DispatchQueue.main)
+        ) { _ in
             scheduleRecompute()
         }
         .onChange(of: scenePhase) { _, phase in
