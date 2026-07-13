@@ -92,6 +92,13 @@ See `CLAUDE.md` for full map. Hard rules:
     Settings toggle governing the behavior first.
 17. **Changing an identifier's format/scheme:** grep every consumer that **parses** it
     (NotificationDelegate, intents, deep links) — not only code that cancels it.
+18. **SwiftUI sheets:** Never clear the model that the sheet content depends on inside
+    content `.onDisappear` while using `sheet(isPresented:)` + `if let` — that dismisses
+    the sheet mid-present. Clear on `onChange(isPresented → false)` or use `sheet(item:)`.
+    Serialize stacked sheets: dismiss first, present next on dismiss / next runloop.
+19. **AVCapture / camera:** `startRunning` / `stopRunning` / session configure never on
+    main. `stopRunning` blocks; main-thread call = UI freeze. Metadata delegate may be main;
+    session lifecycle must not.
 
 ### Verification
 

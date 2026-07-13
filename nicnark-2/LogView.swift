@@ -66,6 +66,7 @@ struct LogView: View {
     @State private var showingAddCan = false                          // Controls "Add Can" sheet presentation
     @State private var showingBarcodeScanner = false                  // Barcode scanner sheet presentation
     @State private var scannedBarcode: String? = nil                  // Temporarily holds scanned barcode data
+    @State private var pendingBarcodeAfterScan: String? = nil         // Handle after scanner sheet dismiss
     @State private var selectedCan: Can?                              // Currently selected can for operations
     @State private var showingEditCan = false                         // Edit can details sheet
     @State private var canToEdit: Can?                                // Can being edited
@@ -502,10 +503,15 @@ struct LogView: View {
                 canManager.fetchActiveCans(context: ctx)
             }
         }
-        .sheet(isPresented: $showingBarcodeScanner) {
+        .sheet(isPresented: $showingBarcodeScanner, onDismiss: {
+            if let code = pendingBarcodeAfterScan {
+                pendingBarcodeAfterScan = nil
+                handleScannedBarcode(code)
+            }
+        }) {
             BarcodeScannerView { barcode in
+                pendingBarcodeAfterScan = barcode
                 showingBarcodeScanner = false
-                handleScannedBarcode(barcode)
             }
         }
         .onAppear {

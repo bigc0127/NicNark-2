@@ -61,22 +61,22 @@ struct InventoryManagementView: View {
     ) private var allCans: FetchedResults<Can>
     
     // MARK: - UI State Properties
-    @State private var showingAddCan = false                      // Controls "Add Can" sheet presentation
-    @State private var showingBarcodeScanner = false              // Controls barcode scanner sheet
-    @State private var scannedBarcode: String?                    // Temporarily holds scanned barcode data
-    @State private var selectedCan: Can?                          // Currently selected can for edit operations
-    @State private var showingEditCan = false                     // Controls edit can sheet presentation
-    @State private var showingDeleteConfirmation = false          // Shows delete confirmation alert
-    @State private var canToDelete: Can?                          // Can pending deletion (awaiting confirmation)
-    @State private var searchText = ""                            // Search filter text
-    
+    @State private var showingAddCan = false
+    @State private var showingBarcodeScanner = false
+    @State private var scannedBarcode: String?
+    /// Pending barcode action after scanner sheet fully dismisses (no stacked present).
+    @State private var barcodePendingAfterScan: String?
+    @State private var selectedCan: Can?
+    @State private var showingEditCan = false
+    @State private var showingDeleteConfirmation = false
+    @State private var canToDelete: Can?
+    @State private var searchText = ""
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Summary header
                 summaryHeader
-                
-                // Main content
+
                 if allCans.isEmpty {
                     emptyStateView
                 } else {
@@ -87,17 +87,14 @@ struct InventoryManagementView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Done") {
-                        dismiss()
-                    }
+                    Button("Done") { dismiss() }
                 }
-                
+
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
                         Button(action: { showingAddCan = true }) {
                             Label("Add Can Manually", systemImage: "plus.circle")
                         }
-                        
                         Button(action: { showingBarcodeScanner = true }) {
                             Label("Scan Barcode", systemImage: "barcode.viewfinder")
                         }
@@ -111,35 +108,38 @@ struct InventoryManagementView: View {
             .sheet(isPresented: $showingAddCan) {
                 CanDetailView(barcode: scannedBarcode)
                     .environment(\.managedObjectContext, viewContext)
-                    .onDisappear {
-                        scannedBarcode = nil
-                        canManager.fetchActiveCans(context: viewContext)
-                    }
             }
+            .onChange(of: showingAddCan) { _, isShowing in
+                if !isShowing {
+                    scannedBarcode = nil
+                    canManager.fetchActiveCans(context: viewContext)
+                }
+            }
+            // Edit sheet: do NOT nil selectedCan in content onDisappear — that dismisses mid-present.
             .sheet(isPresented: $showingEditCan) {
                 if let can = selectedCan {
                     CanDetailView(editingCan: can)
                         .environment(\.managedObjectContext, viewContext)
-                        .onDisappear {
-                            selectedCan = nil
-                            canManager.fetchActiveCans(context: viewContext)
-                        }
+                } else {
+                    ProgressView()
+                        .onAppear { showingEditCan = false }
                 }
             }
-            .sheet(isPresented: $showingBarcodeScanner) {
+            .onChange(of: showingEditCan) { _, isShowing in
+                if !isShowing {
+                    selectedCan = nil
+                    canManager.fetchActiveCans(context: viewContext)
+                }
+            }
+            .sheet(isPresented: $showingBarcodeScanner, onDismiss: {
+                // Present add/edit only after scanner is gone (avoids stacked-sheet freeze).
+                guard let barcode = barcodePendingAfterScan else { return }
+                barcodePendingAfterScan = nil
+                handleScannedBarcode(barcode)
+            }) {
                 BarcodeScannerView { barcode in
-                    scannedBarcode = barcode
+                    barcodePendingAfterScan = barcode
                     showingBarcodeScanner = false
-                    
-                    // Check if can with this barcode exists
-                    if let existingCan = canManager.findCanByBarcode(barcode, context: viewContext) {
-                        // Edit existing can
-                        selectedCan = existingCan
-                        showingEditCan = true
-                    } else {
-                        // Add new can with barcode
-                        showingAddCan = true
-                    }
                 }
             }
             .alert("Delete Can?", isPresented: $showingDeleteConfirmation) {
@@ -156,6 +156,16 @@ struct InventoryManagementView: View {
                     Text("Delete \(can.brand ?? "this can") \(can.flavor ?? "")? This action cannot be undone.")
                 }
             }
+        }
+    }
+
+    private func handleScannedBarcode(_ barcode: String) {
+        scannedBarcode = barcode
+        if let existingCan = canManager.findCanByBarcode(barcode, context: viewContext) {
+            selectedCan = existingCan
+            showingEditCan = true
+        } else {
+            showingAddCan = true
         }
     }
     
@@ -461,19 +471,21 @@ struct CanRowView: View {
                 
                 Spacer()
                 
-                // Action buttons
+                // Action buttons — borderless so List row gestures don't steal taps.
                 VStack(spacing: 8) {
                     Button(action: onEdit) {
                         Image(systemName: "pencil.circle.fill")
                             .font(.title2)
                             .foregroundColor(.blue)
                     }
-                    
+                    .buttonStyle(.borderless)
+
                     Button(action: onDelete) {
                         Image(systemName: "trash.circle.fill")
                             .font(.title2)
                             .foregroundColor(.red)
                     }
+                    .buttonStyle(.borderless)
                 }
             }
             .contentShape(Rectangle())
@@ -481,6 +493,10 @@ struct CanRowView: View {
                 withAnimation(.spring(response: 0.3)) {
                     isExpanded.toggle()
                 }
+            }
+            .contextMenu {
+                Button("Edit", systemImage: "pencil") { onEdit() }
+                Button("Delete", systemImage: "trash", role: .destructive) { onDelete() }
             }
             
             // Expanded details

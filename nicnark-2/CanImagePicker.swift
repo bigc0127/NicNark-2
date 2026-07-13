@@ -2,27 +2,20 @@
 //  CanImagePicker.swift
 //  nicnark-2
 //
-//  Reusable control for attaching / cropping / replacing / removing a photo on a can. It binds an
-//  in-memory UIImage; the parent editor persists it via CanImageStore on Save (so a brand-new
-//  can — whose UUID doesn't exist until it's created — is handled correctly). Newly picked photos
-//  are routed through ImageCropView so the user can frame a clean square; an existing photo can be
-//  re-cropped from the "Crop" button.
+//  Reusable control for attaching / cropping / replacing / removing a photo on a can.
 //
 
 import SwiftUI
 import PhotosUI
 
 struct CanImagePicker: View {
-    /// The currently-chosen image (nil = no photo / removed). Owned by the parent editor.
     @Binding var image: UIImage?
 
     @State private var selection: PhotosPickerItem?
-    @State private var imageToCrop: UIImage?     // image handed to the cropper sheet
-    @State private var showingCropper = false
+    @State private var cropTarget: CropTarget?
 
     var body: some View {
         VStack(spacing: 12) {
-            // Preview
             if let image {
                 Image(uiImage: image)
                     .resizable()
@@ -46,7 +39,6 @@ struct CanImagePicker: View {
                     )
             }
 
-            // Actions
             HStack {
                 PhotosPicker(selection: $selection, matching: .images, photoLibrary: .shared()) {
                     Label(image == nil ? "Choose Photo" : "Replace Photo", systemImage: "photo")
@@ -55,8 +47,7 @@ struct CanImagePicker: View {
                 if let current = image {
                     Spacer()
                     Button {
-                        imageToCrop = current
-                        showingCropper = true
+                        cropTarget = CropTarget(image: current)
                     } label: {
                         Label("Crop", systemImage: "crop")
                     }
@@ -75,31 +66,41 @@ struct CanImagePicker: View {
         .onChange(of: selection) { _, newValue in
             guard let newValue else { return }
             Task {
-                // Data is Sendable; the resulting UIImage is only assigned back on the main
-                // actor (this view is @MainActor), so nothing non-Sendable crosses a boundary.
-                if let data = try? await newValue.loadTransferable(type: Data.self),
-                   let ui = UIImage(data: data) {
-                    // Route every newly picked photo through the square cropper before keeping it.
-                    imageToCrop = ui
-                    showingCropper = true
+                let data = try? await newValue.loadTransferable(type: Data.self)
+                let downsized: UIImage? = await Task.detached(priority: .userInitiated) {
+                    guard let data, let ui = UIImage(data: data) else { return nil }
+                    return downscaleUIImage(ui, maxDimension: 1600)
+                }.value
+                guard let downsized else { return }
+                cropTarget = CropTarget(image: downsized)
+            }
+        }
+        .fullScreenCover(item: $cropTarget) { target in
+            ImageCropView(
+                image: target.image,
+                onCancel: { cropTarget = nil },
+                onCrop: { cropped in
+                    image = cropped
+                    cropTarget = nil
                 }
-            }
+            )
         }
-        .fullScreenCover(isPresented: $showingCropper) {
-            if let cropTarget = imageToCrop {
-                ImageCropView(
-                    image: cropTarget,
-                    onCancel: {
-                        showingCropper = false
-                        imageToCrop = nil
-                    },
-                    onCrop: { cropped in
-                        image = cropped
-                        showingCropper = false
-                        imageToCrop = nil
-                    }
-                )
-            }
-        }
+    }
+}
+
+private struct CropTarget: Identifiable {
+    let id = UUID()
+    let image: UIImage
+}
+
+private nonisolated func downscaleUIImage(_ image: UIImage, maxDimension: CGFloat) -> UIImage {
+    let longest = max(image.size.width, image.size.height)
+    guard longest > maxDimension, longest > 0 else { return image }
+    let scale = maxDimension / longest
+    let newSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+    let format = UIGraphicsImageRendererFormat.default()
+    format.scale = 1
+    return UIGraphicsImageRenderer(size: newSize, format: format).image { _ in
+        image.draw(in: CGRect(origin: .zero, size: newSize))
     }
 }

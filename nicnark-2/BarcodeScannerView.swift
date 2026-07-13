@@ -2,7 +2,9 @@
 //  BarcodeScannerView.swift
 //  nicnark-2
 //
-//  Barcode scanning for can inventory in v2.0
+//  Barcode scanning for can inventory.
+//  AVCaptureSession lifecycle runs on a dedicated serial queue — never start/stop/configure
+//  on the main thread (stopRunning blocks and freezes UI).
 //
 
 import SwiftUI
@@ -11,30 +13,30 @@ import AVFoundation
 struct BarcodeScannerView: UIViewControllerRepresentable {
     let onScan: (String) -> Void
     @Environment(\.dismiss) private var dismiss
-    
+
     func makeUIViewController(context: Context) -> BarcodeScannerViewController {
         let controller = BarcodeScannerViewController()
         controller.delegate = context.coordinator
         return controller
     }
-    
+
     func updateUIViewController(_ uiViewController: BarcodeScannerViewController, context: Context) {}
-    
+
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
     }
-    
+
     class Coordinator: NSObject, BarcodeScannerDelegate {
         let parent: BarcodeScannerView
-        
+
         init(_ parent: BarcodeScannerView) {
             self.parent = parent
         }
-        
+
         func didScanBarcode(_ barcode: String) {
             parent.onScan(barcode)
         }
-        
+
         func didCancel() {
             parent.dismiss()
         }
@@ -48,21 +50,22 @@ protocol BarcodeScannerDelegate: AnyObject {
 
 class BarcodeScannerViewController: UIViewController {
     weak var delegate: BarcodeScannerDelegate?
-    
+
+    /// All session mutate/start/stop happen here — never main.
+    private let sessionQueue = DispatchQueue(label: "com.nicnark.barcode.session")
     private nonisolated(unsafe) var captureSession: AVCaptureSession?
     private var previewLayer: AVCaptureVideoPreviewLayer?
     private var hasScanned = false
-    
+    private var isSessionConfigured = false
+
     override func viewDidLoad() {
         super.viewDidLoad()
-        
         view.backgroundColor = .black
-        setupCamera()
         setupUI()
+        requestCameraAndConfigure()
     }
-    
+
     override func viewDidLayoutSubviews() {
-        // Keep preview layer frame and rotation in sync after SwiftUI layout and on rotation.
         super.viewDidLayoutSubviews()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -75,7 +78,7 @@ class BarcodeScannerViewController: UIViewController {
             case .landscapeLeft:  angle = 180
             case .landscapeRight: angle = 0
             case .portraitUpsideDown: angle = 270
-            default: angle = 90 // portrait
+            default: angle = 90
             }
             if connection.isVideoRotationAngleSupported(angle) {
                 connection.videoRotationAngle = angle
@@ -85,38 +88,29 @@ class BarcodeScannerViewController: UIViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        
-        if captureSession?.isRunning == false {
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                self?.captureSession?.startRunning()
-            }
-        }
+        startSessionIfNeeded()
     }
-    
+
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        
-        if captureSession?.isRunning == true {
-            captureSession?.stopRunning()
+        // stopRunning() blocks — always off main.
+        sessionQueue.async { [weak self] in
+            guard let session = self?.captureSession, session.isRunning else { return }
+            session.stopRunning()
         }
     }
-    
-    private func setupCamera() {
-        // Check authorization before configuring the capture session so a denied/restricted
-        // user gets an actionable alert instead of a silent black screen.
+
+    private func requestCameraAndConfigure() {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
-            configureSession()
+            sessionQueue.async { [weak self] in self?.configureSession() }
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
-                DispatchQueue.main.async {
-                    guard let self else { return }
-                    if granted {
-                        self.configureSession()
-                        DispatchQueue.global(qos: .userInitiated).async { self.captureSession?.startRunning() }
-                    } else {
-                        self.showPermissionDeniedAlert()
-                    }
+                guard let self else { return }
+                if granted {
+                    self.sessionQueue.async { self.configureSession() }
+                } else {
+                    DispatchQueue.main.async { self.showPermissionDeniedAlert() }
                 }
             }
         case .denied, .restricted:
@@ -126,59 +120,75 @@ class BarcodeScannerViewController: UIViewController {
         }
     }
 
+    /// Must run on `sessionQueue`.
     private func configureSession() {
-        captureSession = AVCaptureSession()
+        guard !isSessionConfigured else {
+            startSessionIfNeeded()
+            return
+        }
+
+        let session = AVCaptureSession()
+        session.beginConfiguration()
 
         guard let videoCaptureDevice = AVCaptureDevice.default(for: .video) else {
-            showError("No camera available")
+            session.commitConfiguration()
+            DispatchQueue.main.async { [weak self] in self?.showError("No camera available") }
             return
         }
 
         let videoInput: AVCaptureDeviceInput
-
         do {
             videoInput = try AVCaptureDeviceInput(device: videoCaptureDevice)
         } catch {
-            showError("Camera input error")
+            session.commitConfiguration()
+            DispatchQueue.main.async { [weak self] in self?.showError("Camera input error") }
             return
         }
 
-        if captureSession?.canAddInput(videoInput) == true {
-            captureSession?.addInput(videoInput)
-        } else {
-            showError("Could not add camera input")
+        guard session.canAddInput(videoInput) else {
+            session.commitConfiguration()
+            DispatchQueue.main.async { [weak self] in self?.showError("Could not add camera input") }
             return
         }
+        session.addInput(videoInput)
 
         let metadataOutput = AVCaptureMetadataOutput()
-
-        if captureSession?.canAddOutput(metadataOutput) == true {
-            captureSession?.addOutput(metadataOutput)
-
-            metadataOutput.setMetadataObjectsDelegate(self, queue: DispatchQueue.main)
-            metadataOutput.metadataObjectTypes = [
-                .ean8,
-                .ean13,
-                .pdf417,
-                .qr,
-                .code128,
-                .code39,
-                .code93,
-                .upce
-            ]
-        } else {
-            showError("Could not add metadata output")
+        guard session.canAddOutput(metadataOutput) else {
+            session.commitConfiguration()
+            DispatchQueue.main.async { [weak self] in self?.showError("Could not add metadata output") }
             return
         }
+        session.addOutput(metadataOutput)
+        // Callbacks on main for simple UI handoff; hasScanned guards re-entry.
+        metadataOutput.setMetadataObjectsDelegate(self, queue: DispatchQueue.main)
+        metadataOutput.metadataObjectTypes = [
+            .ean8, .ean13, .pdf417, .qr, .code128, .code39, .code93, .upce
+        ]
 
-        previewLayer = AVCaptureVideoPreviewLayer(session: captureSession!)
-        previewLayer?.frame = view.layer.bounds
-        previewLayer?.videoGravity = .resizeAspectFill
-        view.layer.addSublayer(previewLayer!)
+        session.commitConfiguration()
+        captureSession = session
+        isSessionConfigured = true
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let session = self.captureSession else { return }
+            let layer = AVCaptureVideoPreviewLayer(session: session)
+            layer.frame = self.view.layer.bounds
+            layer.videoGravity = .resizeAspectFill
+            self.view.layer.insertSublayer(layer, at: 0)
+            self.previewLayer = layer
+        }
+
+        startSessionIfNeeded()
     }
-    
+
+    private func startSessionIfNeeded() {
+        sessionQueue.async { [weak self] in
+            guard let self, let session = self.captureSession, !session.isRunning else { return }
+            session.startRunning()
+        }
+    }
+
     private func setupUI() {
-        // Add cancel button
         let cancelButton = UIButton(type: .system)
         cancelButton.setTitle("Cancel", for: .normal)
         cancelButton.titleLabel?.font = .systemFont(ofSize: 18, weight: .medium)
@@ -186,7 +196,7 @@ class BarcodeScannerViewController: UIViewController {
         cancelButton.backgroundColor = UIColor.black.withAlphaComponent(0.7)
         cancelButton.layer.cornerRadius = 8
         cancelButton.addTarget(self, action: #selector(cancelTapped), for: .touchUpInside)
-        
+
         view.addSubview(cancelButton)
         cancelButton.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -195,14 +205,13 @@ class BarcodeScannerViewController: UIViewController {
             cancelButton.widthAnchor.constraint(equalToConstant: 80),
             cancelButton.heightAnchor.constraint(equalToConstant: 40)
         ])
-        
-        // Add scan guide
+
         let guideView = UIView()
         guideView.layer.borderColor = UIColor.white.cgColor
         guideView.layer.borderWidth = 2
         guideView.layer.cornerRadius = 8
         guideView.backgroundColor = .clear
-        
+
         view.addSubview(guideView)
         guideView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -211,8 +220,7 @@ class BarcodeScannerViewController: UIViewController {
             guideView.widthAnchor.constraint(equalToConstant: 280),
             guideView.heightAnchor.constraint(equalToConstant: 140)
         ])
-        
-        // Add instruction label
+
         let instructionLabel = UILabel()
         instructionLabel.text = "Align barcode within frame"
         instructionLabel.textColor = .white
@@ -221,7 +229,7 @@ class BarcodeScannerViewController: UIViewController {
         instructionLabel.backgroundColor = UIColor.black.withAlphaComponent(0.7)
         instructionLabel.layer.cornerRadius = 8
         instructionLabel.clipsToBounds = true
-        
+
         view.addSubview(instructionLabel)
         instructionLabel.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -231,11 +239,11 @@ class BarcodeScannerViewController: UIViewController {
             instructionLabel.heightAnchor.constraint(equalToConstant: 40)
         ])
     }
-    
+
     @objc private func cancelTapped() {
         delegate?.didCancel()
     }
-    
+
     private func showError(_ message: String) {
         let alert = UIAlertController(title: "Scanner Error", message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
@@ -245,10 +253,15 @@ class BarcodeScannerViewController: UIViewController {
     }
 
     private func showPermissionDeniedAlert() {
-        let alert = UIAlertController(title: "Camera Access Needed",
-            message: "Enable camera access in Settings to scan barcodes.", preferredStyle: .alert)
+        let alert = UIAlertController(
+            title: "Camera Access Needed",
+            message: "Enable camera access in Settings to scan barcodes.",
+            preferredStyle: .alert
+        )
         alert.addAction(UIAlertAction(title: "Open Settings", style: .default) { _ in
-            if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(url)
+            }
         })
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { [weak self] _ in
             self?.delegate?.didCancel()
@@ -258,23 +271,22 @@ class BarcodeScannerViewController: UIViewController {
 }
 
 extension BarcodeScannerViewController: AVCaptureMetadataOutputObjectsDelegate {
-    func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {
-        // Delegate runs on DispatchQueue.main (see setMetadataObjectsDelegate).
-        // Guard against repeated callbacks while stopRunning() is completing off-thread.
+    func metadataOutput(
+        _ output: AVCaptureMetadataOutput,
+        didOutput metadataObjects: [AVMetadataObject],
+        from connection: AVCaptureConnection
+    ) {
         guard !hasScanned,
               let readableObject = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
               let stringValue = readableObject.stringValue else { return }
 
         hasScanned = true
 
-        // stopRunning() blocks until the session tears down — keep it off the main thread.
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        sessionQueue.async { [weak self] in
             self?.captureSession?.stopRunning()
         }
 
-        // Haptic feedback
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-
         delegate?.didScanBarcode(stringValue)
     }
 }
