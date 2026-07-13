@@ -183,27 +183,33 @@ enum NotificationManager {
 
     /// Resolve a notification request identifier (or pouch id) → pouch UUID strings to act on.
     static func pouchIds(forNotificationId id: String) -> [String] {
-        pruneExpiredAlertMaps()
         let defaults = UserDefaults.standard
         let requestMembers = defaults.dictionary(forKey: requestMembersKey) as? [String: [String]] ?? [:]
         let pouchToRequest = defaults.dictionary(forKey: pouchToRequestKey) as? [String: String] ?? [:]
-        if let members = requestMembers[id], !members.isEmpty { return members }
-        if let req = pouchToRequest[id], let members = requestMembers[req], !members.isEmpty {
-            return members
-        }
-        return [id]
+        // Resolve *before* prune: maps hold >60s-stale group members that prune would erase,
+        // and Remove on a fired group banner needs those pouch UUIDs.
+        let resolved: [String] = {
+            if let members = requestMembers[id], !members.isEmpty { return members }
+            if let req = pouchToRequest[id], let members = requestMembers[req], !members.isEmpty {
+                return members
+            }
+            return [id]
+        }()
+        pruneExpiredAlertMaps()
+        return resolved
     }
 
     /// Cancel pending/delivered alert for this pouch (or group id).
     /// Partial group cancel reschedules remaining **only if fire is still in the future**.
     static func cancelAlert(id: String) {
-        pruneExpiredAlertMaps()
         let defaults = UserDefaults.standard
         var pouchToRequest = defaults.dictionary(forKey: pouchToRequestKey) as? [String: String] ?? [:]
         var requestMembers = defaults.dictionary(forKey: requestMembersKey) as? [String: [String]] ?? [:]
         var requestMeta = defaults.dictionary(forKey: requestMetaKey) as? [String: [String: Any]] ?? [:]
 
-        // Resolve request id *before* map mutations so group banners always clear.
+        // Resolve request id *before* prune (and before map mutations). Prune is map-only and
+        // drops entries >60s past fire; resolving after prune left group banners stranded and
+        // Remove unable to find member pouch ids (old P4 residual).
         let resolvedRequestId: String = {
             if let mapped = pouchToRequest[id] { return mapped }
             if requestMembers[id] != nil { return id }
@@ -212,6 +218,12 @@ enum NotificationManager {
             }
             return id
         }()
+
+        pruneExpiredAlertMaps()
+        // Re-read after prune so mutations don't resurrect expired map entries.
+        pouchToRequest = defaults.dictionary(forKey: pouchToRequestKey) as? [String: String] ?? [:]
+        requestMembers = defaults.dictionary(forKey: requestMembersKey) as? [String: [String]] ?? [:]
+        requestMeta = defaults.dictionary(forKey: requestMetaKey) as? [String: [String: Any]] ?? [:]
 
         let c = UNUserNotificationCenter.current()
         // Always strip both pending + delivered for request + raw id (group banner strand fix).
