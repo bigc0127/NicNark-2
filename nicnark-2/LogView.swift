@@ -325,6 +325,7 @@ struct LogView: View {
                         .frame(height: 44)
                         
                         Button(action: {
+                            pendingBarcodeAfterScan = nil
                             showingBarcodeScanner = true
                         }) {
                             HStack {
@@ -435,18 +436,14 @@ struct LogView: View {
         .onDisappear {
             stopOptimizedTimer()
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchRemoved"))) { notification in
-            // Only handle notifications that come from external sources (like notification actions)
-            // and contain a specific pouchId to avoid duplicate processing
-            if let userInfo = notification.userInfo,
-               let notificationPouchId = userInfo["pouchId"] as? String,
-               let activePouch = activePouches.first {
-                let activePouchId = activePouch.pouchId?.uuidString ?? activePouch.objectID.uriRepresentation().absoluteString
-                // Only remove if the notification is for the current active pouch
-                if notificationPouchId == activePouchId {
-                    removePouch(activePouch)
-                    WidgetReloadCoordinator.reload()
-                }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchRemoved"))) { _ in
+            // Removal already persisted by PouchRemovalService. Refresh local timers only
+            // (do not call removePouch again). Contract: userInfo has pouchIds: [String] + count.
+            if activePouches.isEmpty {
+                stopOptimizedTimer()
+            } else {
+                startOptimizedTimer()
+                startLiveTimerIfNeeded()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchLogged"))) { notification in
@@ -504,8 +501,9 @@ struct LogView: View {
             }
         }
         .sheet(isPresented: $showingBarcodeScanner, onDismiss: {
-            if let code = pendingBarcodeAfterScan {
-                pendingBarcodeAfterScan = nil
+            guard let code = pendingBarcodeAfterScan else { return }
+            pendingBarcodeAfterScan = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 handleScannedBarcode(code)
             }
         }) {
@@ -516,6 +514,9 @@ struct LogView: View {
         }
         .onAppear {
             canManager.fetchActiveCans(context: ctx)
+            if !showingBarcodeScanner {
+                pendingBarcodeAfterScan = nil
+            }
         }
         .alert("Can Already in Inventory", isPresented: $showingDuplicateCanAlert) {
             Button("Add Pouches to Existing Can") {

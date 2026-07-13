@@ -203,30 +203,40 @@ enum NotificationManager {
         var requestMembers = defaults.dictionary(forKey: requestMembersKey) as? [String: [String]] ?? [:]
         var requestMeta = defaults.dictionary(forKey: requestMetaKey) as? [String: [String: Any]] ?? [:]
 
-        let requestId = pouchToRequest[id] ?? id
+        // Resolve request id *before* map mutations so group banners always clear.
+        let resolvedRequestId: String = {
+            if let mapped = pouchToRequest[id] { return mapped }
+            if requestMembers[id] != nil { return id }
+            for (req, members) in requestMembers where members.contains(id) {
+                return req
+            }
+            return id
+        }()
+
         let c = UNUserNotificationCenter.current()
-        c.removePendingNotificationRequests(withIdentifiers: [requestId, id])
-        c.removeDeliveredNotifications(withIdentifiers: [requestId, id])
+        // Always strip both pending + delivered for request + raw id (group banner strand fix).
+        c.removePendingNotificationRequests(withIdentifiers: [resolvedRequestId, id])
+        c.removeDeliveredNotifications(withIdentifiers: [resolvedRequestId, id])
 
         // Drop this pouch from maps; may be a member id or the request id itself.
         pouchToRequest.removeValue(forKey: id)
-        var members = requestMembers[requestId] ?? []
+        var members = requestMembers[resolvedRequestId] ?? []
         members.removeAll { $0 == id }
         // If `id` was the request id, drop all members' reverse map entries for this request.
-        if id == requestId || id.hasPrefix("completion.group.") {
-            for pid in requestMembers[requestId] ?? [] {
+        if id == resolvedRequestId || id.hasPrefix("completion.group.") {
+            for pid in requestMembers[resolvedRequestId] ?? [] {
                 pouchToRequest.removeValue(forKey: pid)
             }
             members = []
         }
 
         if members.isEmpty {
-            requestMembers.removeValue(forKey: requestId)
-            requestMeta.removeValue(forKey: requestId)
+            requestMembers.removeValue(forKey: resolvedRequestId)
+            requestMeta.removeValue(forKey: resolvedRequestId)
             defaults.set(pouchToRequest, forKey: pouchToRequestKey)
             defaults.set(requestMembers, forKey: requestMembersKey)
             defaults.set(requestMeta, forKey: requestMetaKey)
-        } else if let meta = requestMeta[requestId],
+        } else if let meta = requestMeta[resolvedRequestId],
                   let fireTs = meta["fire"] as? Double,
                   let mgs = meta["mgs"] as? [String: Double] {
             let fire = Date(timeIntervalSince1970: fireTs)
@@ -234,11 +244,12 @@ enum NotificationManager {
             // Still prune maps + clear badge (early return used to skip trailing cleanup → sticky badge).
             guard fire.timeIntervalSinceNow > 1 else {
                 for pid in members { pouchToRequest.removeValue(forKey: pid) }
-                requestMembers.removeValue(forKey: requestId)
-                requestMeta.removeValue(forKey: requestId)
+                requestMembers.removeValue(forKey: resolvedRequestId)
+                requestMeta.removeValue(forKey: resolvedRequestId)
                 defaults.set(pouchToRequest, forKey: pouchToRequestKey)
                 defaults.set(requestMembers, forKey: requestMembersKey)
                 defaults.set(requestMeta, forKey: requestMetaKey)
+                // Group banner already removed above via resolvedRequestId.
                 Task {
                     let delivered = await c.deliveredNotifications()
                     if delivered.isEmpty { clearBadge() }
@@ -250,8 +261,8 @@ enum NotificationManager {
                 return (pid, mg, fire)
             }
             for pid in members { pouchToRequest.removeValue(forKey: pid) }
-            requestMembers.removeValue(forKey: requestId)
-            requestMeta.removeValue(forKey: requestId)
+            requestMembers.removeValue(forKey: resolvedRequestId)
+            requestMeta.removeValue(forKey: resolvedRequestId)
             defaults.set(pouchToRequest, forKey: pouchToRequestKey)
             defaults.set(requestMembers, forKey: requestMembersKey)
             defaults.set(requestMeta, forKey: requestMetaKey)
@@ -400,6 +411,7 @@ enum NotificationManager {
     }
 
     /// Drop map entries whose fire time is in the past (natural fire or stale CloudKit).
+    /// Also strips delivered banners for those request ids so group strands don't linger.
     private static func pruneExpiredAlertMaps() {
         let defaults = UserDefaults.standard
         var pouchToRequest = defaults.dictionary(forKey: pouchToRequestKey) as? [String: String] ?? [:]
@@ -407,6 +419,7 @@ enum NotificationManager {
         var requestMeta = defaults.dictionary(forKey: requestMetaKey) as? [String: [String: Any]] ?? [:]
         let now = Date().timeIntervalSince1970
         var dirty = false
+        var expiredRequestIds: [String] = []
         for (reqId, meta) in requestMeta {
             guard let fireTs = meta["fire"] as? Double else { continue }
             if fireTs + 60 < now { // 60s grace after fire
@@ -415,6 +428,7 @@ enum NotificationManager {
                 }
                 requestMembers.removeValue(forKey: reqId)
                 requestMeta.removeValue(forKey: reqId)
+                expiredRequestIds.append(reqId)
                 dirty = true
             }
         }
@@ -422,6 +436,11 @@ enum NotificationManager {
             defaults.set(pouchToRequest, forKey: pouchToRequestKey)
             defaults.set(requestMembers, forKey: requestMembersKey)
             defaults.set(requestMeta, forKey: requestMetaKey)
+            if !expiredRequestIds.isEmpty {
+                let c = UNUserNotificationCenter.current()
+                c.removeDeliveredNotifications(withIdentifiers: expiredRequestIds)
+                c.removePendingNotificationRequests(withIdentifiers: expiredRequestIds)
+            }
         }
     }
 

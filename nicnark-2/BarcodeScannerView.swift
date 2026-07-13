@@ -51,7 +51,8 @@ nonisolated final class BarcodeSessionController: @unchecked Sendable {
     nonisolated(unsafe) private(set) var sessionForPreview: AVCaptureSession?
     private var session: AVCaptureSession?
     private var isConfigured = false
-    private var generation: UInt64 = 0
+    /// Sole cancel-during-setup gate (serial queue). Bump-generation was dead code:
+    /// configure runs to completion before the next block, so gen could never flip mid-fn.
     private var desiredRunning = false
     private weak var metadataProxy: BarcodeMetadataProxy?
 
@@ -75,7 +76,6 @@ nonisolated final class BarcodeSessionController: @unchecked Sendable {
             if running {
                 self.startLocked()
             } else {
-                self.generation &+= 1
                 self.stopLocked()
             }
         }
@@ -89,7 +89,6 @@ nonisolated final class BarcodeSessionController: @unchecked Sendable {
         onPreviewReady: @escaping @Sendable () -> Void,
         onError: @escaping @Sendable (String) -> Void
     ) {
-        let gen = generation
         if isConfigured {
             startLocked()
             return
@@ -135,13 +134,16 @@ nonisolated final class BarcodeSessionController: @unchecked Sendable {
         ]
 
         session.commitConfiguration()
-        guard gen == generation else { return }
 
         self.session = session
         self.sessionForPreview = session
         self.isConfigured = true
-        DispatchQueue.main.async { onPreviewReady() }
-        startLocked()
+
+        // If user dismissed mid-configure, do not start; still publish preview if desired.
+        if desiredRunning {
+            DispatchQueue.main.async { onPreviewReady() }
+            startLocked()
+        }
     }
 
     private func startLocked() {
@@ -203,7 +205,7 @@ class BarcodeScannerViewController: UIViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        // Bumps generation + stops — cancels any in-flight start after dismiss.
+        // desiredRunning=false → startLocked no-ops after in-flight configure finishes.
         sessionController.setDesiredRunning(false)
     }
 

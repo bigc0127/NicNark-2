@@ -67,11 +67,7 @@ enum PouchRemovalService {
         LogService.updateWidgetSnapshotForActivePouches(in: context)
         WidgetReloadCoordinator.reload()
 
-        NotificationCenter.default.post(
-            name: NSNotification.Name("PouchRemoved"),
-            object: nil,
-            userInfo: ["pouchId": pouchId]
-        )
+        postPouchRemoved(ids: [pouchId])
 
         #if os(iOS)
         await WatchConnectivityBridge.shared.pushHomeToWatch()
@@ -121,11 +117,7 @@ enum PouchRemovalService {
         LogService.updateWidgetSnapshotForActivePouches(in: context)
         WidgetReloadCoordinator.reload()
 
-        NotificationCenter.default.post(
-            name: NSNotification.Name("PouchRemoved"),
-            object: nil,
-            userInfo: ["count": removedIds.count, "ids": removedIds]
-        )
+        postPouchRemoved(ids: removedIds)
 
         #if os(iOS)
         await WatchConnectivityBridge.shared.pushHomeToWatch()
@@ -187,11 +179,7 @@ enum PouchRemovalService {
         LogService.updateWidgetSnapshotForActivePouches(in: context)
         WidgetReloadCoordinator.reload()
 
-        NotificationCenter.default.post(
-            name: NSNotification.Name("PouchRemoved"),
-            object: nil,
-            userInfo: ["count": removedIds.count]
-        )
+        postPouchRemoved(ids: removedIds)
 
         #if os(iOS)
         await WatchConnectivityBridge.shared.pushHomeToWatch()
@@ -201,6 +189,25 @@ enum PouchRemovalService {
     }
 
     // MARK: - Private
+
+    /// Stable contract for all removal paths:
+    /// - `pouchIds`: [String] (always present, may be empty only if misused)
+    /// - `count`: Int
+    /// - `pouchId`: String? first id (legacy single-key readers)
+    private static func postPouchRemoved(ids: [String]) {
+        var info: [String: Any] = [
+            "pouchIds": ids,
+            "count": ids.count
+        ]
+        if let first = ids.first {
+            info["pouchId"] = first
+        }
+        NotificationCenter.default.post(
+            name: NSNotification.Name("PouchRemoved"),
+            object: nil,
+            userInfo: info
+        )
+    }
 
     private static func fetchPouch(withId pouchId: String, in context: NSManagedObjectContext) -> PouchLog? {
         if let uuid = UUID(uuidString: pouchId) {

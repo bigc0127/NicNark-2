@@ -41,6 +41,7 @@ struct InsightsView: View {
 
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
 
     /// Recent pouch history. We fetch a generous window (last ~60 days) so the foundation can
     /// compute prior-period trends (which reach back 60 days) without a second query. All-time
@@ -166,6 +167,13 @@ struct InsightsView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchRemoved"))) { _ in scheduleRecompute() }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchEdited"))) { _ in scheduleRecompute() }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchDeleted"))) { _ in scheduleRecompute() }
+        // Cross-device CloudKit imports update the store without local pouch events.
+        .onReceive(NotificationCenter.default.publisher(for: .NSPersistentStoreRemoteChange)) { _ in
+            scheduleRecompute()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { scheduleRecompute() }
+        }
         .refreshable {
             refreshNonce &+= 1
             recompute()

@@ -143,8 +143,8 @@ struct ContentView: View {
             // flags — clearing those @State can fire onChange → WhatsNew sheet races inventory.
             showingSettings = false
             showingInsights = false
-            // Defer present one runloop so dismiss animation/state settles (same-frame present flaky).
-            DispatchQueue.main.async {
+            // Match inventory scanner defer (~0.35s dismiss animation); one runloop is too short.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 showingInventory = true
             }
         }
