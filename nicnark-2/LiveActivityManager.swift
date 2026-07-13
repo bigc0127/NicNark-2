@@ -665,13 +665,13 @@ class BackgroundMaintainer {
             log.info("📊 Pouch \(t.pouchId, privacy: .public): expired=\(isExpired), elapsed=\(Int(elapsed))s, duration=\(Int(duration))s, level=\(String(format: "%.3f", bloodstreamLevel))mg")
 
             if isExpired {
-                // Mark every overdue active pouch removed in Core Data. Without this the
-                // aggregate still counts them and LA "rebuild" tries Activity.request from a
-                // BGTask — which ActivityKit rejects. Widget + next foreground sync handle UX.
-                log.info("⏰ Timer expired — auto-removing overdue pouches, ending LA (no BG recreate)")
-                markOverdueActivePouchesRemoved(in: context, at: now)
+                // End LA only. Do NOT write removalTime from BG:
+                // - would ignore Settings `autoRemovePouches` (default off)
+                // - would CloudKit-sync fabricated timer-end as real removal
+                // - auto-remove (when enabled) is owned by LogView + PouchRemovalService
+                // Activity.request from BG is impossible; foreground/sync rebuilds LA if needed.
+                log.info("⏰ Timer expired — ending LA only (no DB auto-remove from BG)")
                 await LiveActivityManager.endLiveActivity(for: t.pouchId)
-                // Do NOT call presentAggregatedLiveActivity here: Activity.request fails in BG.
             } else {
                 let progress = min(max(elapsed / max(1, duration), 0), 1)
                 await LiveActivityManager.updateLiveActivity(
@@ -687,34 +687,6 @@ class BackgroundMaintainer {
         LogService.updateWidgetSnapshotForActivePouches(in: context)
 
         log.info("✅ Background update complete at \(DateFormatter.localizedString(from: now, dateStyle: .none, timeStyle: .medium), privacy: .public)")
-    }
-
-    /// Sets `removalTime` on active pouches whose configured timer has elapsed.
-    /// Saves once. Safe on the main viewContext (BG handlers hop to MainActor).
-    private func markOverdueActivePouchesRemoved(in context: NSManagedObjectContext, at now: Date) {
-        let request: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
-        request.predicate = NSPredicate(format: "removalTime == nil")
-        guard let active = try? context.fetch(request) else { return }
-        var changed = false
-        for pouch in active {
-            guard let insertion = pouch.insertionTime else { continue }
-            let duration = pouch.effectiveDurationSeconds
-            if insertion.addingTimeInterval(duration) <= now {
-                pouch.removalTime = insertion.addingTimeInterval(duration)
-                if let id = pouch.pouchId?.uuidString {
-                    NotificationManager.cancelAlert(id: id)
-                }
-                changed = true
-            }
-        }
-        if changed {
-            do {
-                try context.save()
-            } catch {
-                log.error("Failed to save auto-removals: \(error.localizedDescription, privacy: .public)")
-                context.rollback()
-            }
-        }
     }
 
     private func getActualPouchData(for pouchId: String) -> (startTime: Date, nicotineAmount: Double, isActive: Bool, duration: TimeInterval)? {

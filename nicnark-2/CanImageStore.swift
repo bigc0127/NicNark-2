@@ -34,8 +34,11 @@ enum CanImageStore {
     private static let cache = NSCache<NSString, UIImage>()
 
     /// Debounce CloudKit remote-change reconcile storms (main-thread I/O).
+    /// Leading-edge runs immediately; trailing run scheduled so mid-burst changes aren't dropped.
     private static var lastReconcileAt: Date = .distantPast
     private static let reconcileMinInterval: TimeInterval = 2.0
+    private static var trailingReconcileWorkItem: DispatchWorkItem?
+    private static weak var trailingReconcileContext: NSManagedObjectContext?
 
     // MARK: - Locations
 
@@ -121,8 +124,12 @@ enum CanImageStore {
     static func delete(for id: UUID?) {
         guard let id else { return }
         let key = id.uuidString as NSString
-        if let url = fileURL(for: id) {
-            try? FileManager.default.removeItem(at: url)
+        // Canonical path is .jpg; also clear .jpeg orphans (case-insensitive via path variants).
+        for ext in ["jpg", "jpeg", "JPG", "JPEG"] {
+            if let base = directory {
+                let url = base.appendingPathComponent("\(id.uuidString).\(ext)")
+                try? FileManager.default.removeItem(at: url)
+            }
         }
         cache.removeObject(forKey: key)
     }
@@ -131,14 +138,30 @@ enum CanImageStore {
 
     /// Mirrors every can's synced `imageData` into the id-keyed disk cache.
     ///
-    /// Debounced (min 2s between runs) because CloudKit remote-change fires in bursts.
-    /// Change detection: size + 8-byte prefix/suffix fingerprint (not full-file compare).
-    /// Same-size different photo can still miss — rare; documented tradeoff vs main-thread I/O.
-    /// Orphan sweep skipped when Can fetch is empty (transient empty ≠ mass-delete).
+    /// Leading + trailing debounce (min 2s): first call runs; mid-burst calls schedule one
+    /// trailing run so the last state still lands. Change detection: size + head/tail bytes.
+    /// Orphan sweep skipped when Can fetch is empty.
     static func reconcile(context: NSManagedObjectContext) {
         let now = Date()
-        guard now.timeIntervalSince(lastReconcileAt) >= reconcileMinInterval else { return }
-        lastReconcileAt = now
+        if now.timeIntervalSince(lastReconcileAt) < reconcileMinInterval {
+            trailingReconcileContext = context
+            trailingReconcileWorkItem?.cancel()
+            let work = DispatchWorkItem {
+                trailingReconcileWorkItem = nil
+                if let ctx = trailingReconcileContext {
+                    trailingReconcileContext = nil
+                    performReconcile(context: ctx)
+                }
+            }
+            trailingReconcileWorkItem = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + reconcileMinInterval, execute: work)
+            return
+        }
+        performReconcile(context: context)
+    }
+
+    private static func performReconcile(context: NSManagedObjectContext) {
+        lastReconcileAt = Date()
 
         let request = NSFetchRequest<Can>(entityName: "Can")
         request.predicate = NSPredicate(format: "id != nil")
@@ -152,7 +175,6 @@ enum CanImageStore {
             liveIDs.insert(id)
 
             if let data = can.imageData {
-                // Accessing imageData may fault external storage once; unavoidable for sync.
                 if diskMatches(data: data, id: id) { continue }
                 store(data: data, for: id)
             } else if hasImage(for: id) {
@@ -169,7 +191,6 @@ enum CanImageStore {
               ) else { return }
 
         for file in files {
-            // Case-insensitive: iCloud / tooling can produce .JPG / .jpeg
             let ext = file.pathExtension.lowercased()
             guard ext == "jpg" || ext == "jpeg" else { continue }
             let name = file.deletingPathExtension().lastPathComponent

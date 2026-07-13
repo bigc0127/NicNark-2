@@ -172,17 +172,32 @@ enum NotificationManager {
      */
     // MARK: - Grouped completion alerts
     //
-    // Multi-pouch batches schedule ONE system notification per proximity cluster, but every
-    // member pouchId maps to that request so cancelAlert(pouchId) still works. Removing one
-    // member reschedules the remaining group with an updated body (or cancels if empty).
+    // Multi-pouch batches: ONE UNNotificationRequest per proximity cluster.
+    // request.identifier may be a real pouch UUID (single) or `completion.group.<uuid>`.
+    // Maps: pouchId → requestId, requestId → [pouchIds], requestId → {fire, mgs}.
+    // Consumers that parse identifiers: cancelAlert, handlePouchRemovalAction (Remove btn).
 
     private static let pouchToRequestKey = "completionAlert.pouchToRequestId"
-    private static let requestMembersKey = "completionAlert.requestMembers" // requestId -> [pouchId]
-    private static let requestMetaKey = "completionAlert.requestMeta" // requestId -> [fire, mgs...]
+    private static let requestMembersKey = "completionAlert.requestMembers"
+    private static let requestMetaKey = "completionAlert.requestMeta"
 
-    /// Cancel pending/delivered alert for this pouch. If it was part of a multi-pouch
-    /// cluster, reschedule the remaining members so the banner text stays accurate.
+    /// Resolve a notification request identifier (or pouch id) → pouch UUID strings to act on.
+    static func pouchIds(forNotificationId id: String) -> [String] {
+        pruneExpiredAlertMaps()
+        let defaults = UserDefaults.standard
+        let requestMembers = defaults.dictionary(forKey: requestMembersKey) as? [String: [String]] ?? [:]
+        let pouchToRequest = defaults.dictionary(forKey: pouchToRequestKey) as? [String: String] ?? [:]
+        if let members = requestMembers[id], !members.isEmpty { return members }
+        if let req = pouchToRequest[id], let members = requestMembers[req], !members.isEmpty {
+            return members
+        }
+        return [id]
+    }
+
+    /// Cancel pending/delivered alert for this pouch (or group id).
+    /// Partial group cancel reschedules remaining **only if fire is still in the future**.
     static func cancelAlert(id: String) {
+        pruneExpiredAlertMaps()
         let defaults = UserDefaults.standard
         var pouchToRequest = defaults.dictionary(forKey: pouchToRequestKey) as? [String: String] ?? [:]
         var requestMembers = defaults.dictionary(forKey: requestMembersKey) as? [String: [String]] ?? [:]
@@ -193,70 +208,85 @@ enum NotificationManager {
         c.removePendingNotificationRequests(withIdentifiers: [requestId, id])
         c.removeDeliveredNotifications(withIdentifiers: [requestId, id])
 
+        // Drop this pouch from maps; may be a member id or the request id itself.
         pouchToRequest.removeValue(forKey: id)
         var members = requestMembers[requestId] ?? []
         members.removeAll { $0 == id }
+        // If `id` was the request id, drop all members' reverse map entries for this request.
+        if id == requestId || id.hasPrefix("completion.group.") {
+            for pid in requestMembers[requestId] ?? [] {
+                pouchToRequest.removeValue(forKey: pid)
+            }
+            members = []
+        }
 
         if members.isEmpty {
             requestMembers.removeValue(forKey: requestId)
             requestMeta.removeValue(forKey: requestId)
-        } else {
-            requestMembers[requestId] = members
-            // Reschedule with remaining pouches so body doesn't still say "N pouches".
-            if let meta = requestMeta[requestId],
-               let fireTs = meta["fire"] as? Double,
-               let mgs = meta["mgs"] as? [String: Double] {
-                let fire = Date(timeIntervalSince1970: fireTs)
-                let remainingItems: [(id: String, mg: Double, fireDate: Date)] = members.compactMap { pid in
-                    guard let mg = mgs[pid] else { return nil }
-                    return (pid, mg, fire)
-                }
-                // Drop old maps for this request, then schedule fresh group.
+            defaults.set(pouchToRequest, forKey: pouchToRequestKey)
+            defaults.set(requestMembers, forKey: requestMembersKey)
+            defaults.set(requestMeta, forKey: requestMetaKey)
+        } else if let meta = requestMeta[requestId],
+                  let fireTs = meta["fire"] as? Double,
+                  let mgs = meta["mgs"] as? [String: Double] {
+            let fire = Date(timeIntervalSince1970: fireTs)
+            // Past-fire guard: never re-enqueue a completion banner that already fired.
+            guard fire.timeIntervalSinceNow > 1 else {
                 for pid in members { pouchToRequest.removeValue(forKey: pid) }
                 requestMembers.removeValue(forKey: requestId)
                 requestMeta.removeValue(forKey: requestId)
                 defaults.set(pouchToRequest, forKey: pouchToRequestKey)
                 defaults.set(requestMembers, forKey: requestMembersKey)
                 defaults.set(requestMeta, forKey: requestMetaKey)
-                scheduleGroupedCompletionAlerts(remainingItems)
                 return
             }
+            let remainingItems: [(id: String, mg: Double, fireDate: Date)] = members.compactMap { pid in
+                guard let mg = mgs[pid] else { return nil }
+                return (pid, mg, fire)
+            }
+            for pid in members { pouchToRequest.removeValue(forKey: pid) }
+            requestMembers.removeValue(forKey: requestId)
+            requestMeta.removeValue(forKey: requestId)
+            defaults.set(pouchToRequest, forKey: pouchToRequestKey)
+            defaults.set(requestMembers, forKey: requestMembersKey)
+            defaults.set(requestMeta, forKey: requestMetaKey)
+            scheduleGroupedCompletionAlerts(remainingItems)
+        } else {
+            defaults.set(pouchToRequest, forKey: pouchToRequestKey)
+            defaults.set(requestMembers, forKey: requestMembersKey)
+            defaults.set(requestMeta, forKey: requestMetaKey)
         }
-
-        defaults.set(pouchToRequest, forKey: pouchToRequestKey)
-        defaults.set(requestMembers, forKey: requestMembersKey)
-        defaults.set(requestMeta, forKey: requestMetaKey)
 
         Task {
-            let deliveredNotifications = await c.deliveredNotifications()
-            if deliveredNotifications.isEmpty {
-                clearBadge()
-            }
+            let delivered = await c.deliveredNotifications()
+            if delivered.isEmpty { clearBadge() }
         }
     }
 
-    /**
-     * Schedules a single-pouch completion alert (request id == pouch id).
-     * Prefer `scheduleGroupedCompletionAlerts` for multi-pouch batches.
-     */
-    static func scheduleCompletionAlert(id: String, title: String, body: String, fireDate: Date) {
-        enqueueNotificationRequest(id: id, title: title, body: body, fireDate: fireDate)
-        rememberMapping(
-            pouchIds: [id],
-            requestId: id,
-            fire: fireDate,
-            mgs: [id: extractMg(from: body) ?? 0]
+    /// Single-pouch completion alert. `mg` stored for group remap accuracy.
+    static func scheduleCompletionAlert(id: String, title: String, body: String, fireDate: Date, mg: Double = 0) {
+        let dose = mg > 0 ? mg : 0
+        let resolvedBody = dose > 0
+            ? "Your \(Int(dose))mg pouch has finished absorbing."
+            : body
+        enqueueNotificationRequest(
+            id: id,
+            title: title,
+            body: resolvedBody,
+            fireDate: fireDate,
+            memberPouchIds: [id]
         )
+        rememberMapping(pouchIds: [id], requestId: id, fire: fireDate, mgs: [id: dose])
     }
 
-    /// Cluster items whose fire dates are within `proximity` of the previous (sorted),
-    /// one system notification per cluster. Every pouchId maps to the cluster request id
-    /// so `cancelAlert` stays correct.
+    /// Cluster by gap-to-previous ≤ proximity; one system notification per cluster.
     static func scheduleGroupedCompletionAlerts(
         _ items: [(id: String, mg: Double, fireDate: Date)],
         proximity: TimeInterval = 2.0
     ) {
         guard !items.isEmpty else { return }
+        pruneExpiredAlertMaps()
+
         let sorted = items.sorted { $0.fireDate < $1.fireDate }
         var clusters: [[(id: String, mg: Double, fireDate: Date)]] = []
         var current: [(id: String, mg: Double, fireDate: Date)] = []
@@ -275,6 +305,9 @@ enum NotificationManager {
 
         for cluster in clusters {
             let fire = cluster.map(\.fireDate).max() ?? cluster[0].fireDate
+            // Skip past-due (would fire immediately as spurious "finished").
+            guard fire.timeIntervalSinceNow > 1 else { continue }
+
             let requestId: String
             let body: String
             if cluster.count == 1 {
@@ -285,28 +318,40 @@ enum NotificationManager {
                 let totalMg = cluster.reduce(0.0) { $0 + $1.mg }
                 body = "Your \(cluster.count) pouches (\(Int(totalMg.rounded()))mg) have finished absorbing."
             }
+            let memberIds = cluster.map(\.id)
             enqueueNotificationRequest(
                 id: requestId,
                 title: "Absorption complete",
                 body: body,
-                fireDate: fire
+                fireDate: fire,
+                memberPouchIds: memberIds
             )
             var mgs: [String: Double] = [:]
             for p in cluster { mgs[p.id] = p.mg }
-            rememberMapping(pouchIds: cluster.map(\.id), requestId: requestId, fire: fire, mgs: mgs)
+            rememberMapping(pouchIds: memberIds, requestId: requestId, fire: fire, mgs: mgs)
         }
     }
 
-    private static func enqueueNotificationRequest(id: String, title: String, body: String, fireDate: Date) {
+    private static func enqueueNotificationRequest(
+        id: String,
+        title: String,
+        body: String,
+        fireDate: Date,
+        memberPouchIds: [String]
+    ) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         content.sound = .default
         content.badge = 1
         content.categoryIdentifier = "POUCH_COMPLETION"
+        // So REMOVE_POUCH_ACTION can resolve group → member pouch UUIDs without UserDefaults.
+        content.userInfo = [
+            "requestId": id,
+            "pouchIds": memberPouchIds
+        ]
 
-        let priorityEnabled = UserDefaults.standard.bool(forKey: "priorityNotifications")
-        if priorityEnabled {
+        if UserDefaults.standard.bool(forKey: "priorityNotifications") {
             content.interruptionLevel = .timeSensitive
             content.relevanceScore = 1.0
         }
@@ -334,7 +379,6 @@ enum NotificationManager {
         var requestMeta = defaults.dictionary(forKey: requestMetaKey) as? [String: [String: Any]] ?? [:]
 
         for pid in pouchIds {
-            // Cancel any prior alert for this pouch before remapping.
             if let old = pouchToRequest[pid], old != requestId {
                 UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [old])
             }
@@ -350,10 +394,30 @@ enum NotificationManager {
         defaults.set(requestMeta, forKey: requestMetaKey)
     }
 
-    private static func extractMg(from body: String) -> Double? {
-        // "Your 6mg pouch..." — best-effort for the single-alert convenience path.
-        guard let r = body.range(of: #"(\d+)mg"#, options: .regularExpression) else { return nil }
-        return Double(body[r].dropLast(2))
+    /// Drop map entries whose fire time is in the past (natural fire or stale CloudKit).
+    private static func pruneExpiredAlertMaps() {
+        let defaults = UserDefaults.standard
+        var pouchToRequest = defaults.dictionary(forKey: pouchToRequestKey) as? [String: String] ?? [:]
+        var requestMembers = defaults.dictionary(forKey: requestMembersKey) as? [String: [String]] ?? [:]
+        var requestMeta = defaults.dictionary(forKey: requestMetaKey) as? [String: [String: Any]] ?? [:]
+        let now = Date().timeIntervalSince1970
+        var dirty = false
+        for (reqId, meta) in requestMeta {
+            guard let fireTs = meta["fire"] as? Double else { continue }
+            if fireTs + 60 < now { // 60s grace after fire
+                for pid in requestMembers[reqId] ?? [] {
+                    pouchToRequest.removeValue(forKey: pid)
+                }
+                requestMembers.removeValue(forKey: reqId)
+                requestMeta.removeValue(forKey: reqId)
+                dirty = true
+            }
+        }
+        if dirty {
+            defaults.set(pouchToRequest, forKey: pouchToRequestKey)
+            defaults.set(requestMembers, forKey: requestMembersKey)
+            defaults.set(requestMeta, forKey: requestMetaKey)
+        }
     }
 
     /**
@@ -389,23 +453,23 @@ enum NotificationManager {
      * 
      * - Parameter pouchId: Unique identifier of the pouch being removed
      */
-    static func handlePouchRemovalAction(pouchId: String) {
-        logger.info("Handling pouch removal: \(pouchId)")
+    /// - Parameter notificationId: UNNotificationRequest.identifier — either a pouch UUID
+    ///   or `completion.group.<uuid>`. Never treat group ids as Core Data pouchIds.
+    static func handlePouchRemovalAction(pouchId notificationId: String) {
+        logger.info("Handling pouch removal for notification id: \(notificationId)")
 
-        // End Live Activity (if present) and cancel any pending completion notifications.
-        Task { @MainActor in
-            await LiveActivityManager.endLiveActivity(for: pouchId)
-        }
-        cancelAlert(id: pouchId)
+        let ids = pouchIds(forNotificationId: notificationId)
+        // Cancel group/request once (maps all members).
+        cancelAlert(id: notificationId)
 
-        // Persist removal in Core Data so the action works even when the app UI isn't open.
         Task { @MainActor in
             let ctx = PersistenceController.shared.container.viewContext
-            _ = await PouchRemovalService.removePouch(withId: pouchId, in: ctx)
+            for id in ids {
+                _ = await PouchRemovalService.removePouch(withId: id, in: ctx)
+            }
+            // LA / watch / widget side effects already run inside PouchRemovalService.
+            clearBadge()
         }
-
-        // Clear notification badge
-        clearBadge()
     }
     
     /**

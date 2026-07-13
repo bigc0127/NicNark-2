@@ -56,7 +56,7 @@ enum PouchRemovalService {
         // pouch inactive, so a background sync cannot re-create the activity.
         await LiveActivityManager.endLiveActivity(for: pouchId)
 
-        // Cancel completion notification
+        // Cancel completion notification (group-aware; past-fire safe).
         NotificationManager.cancelAlert(id: pouchId)
 
         // If other pouches are still active, rebuild ONE aggregated Live Activity
@@ -66,10 +66,13 @@ enum PouchRemovalService {
         // Widget snapshot (decay-aware even when none remain).
         LogService.updateWidgetSnapshotForActivePouches(in: context)
         WidgetReloadCoordinator.reload()
-        // CloudKit export is scheduled automatically by NSPersistentCloudKitContainer on save.
 
-        // Push the updated state to a paired Apple Watch so it reflects the removal even
-        // while this app is backgrounded. No-op if no watch is paired.
+        NotificationCenter.default.post(
+            name: NSNotification.Name("PouchRemoved"),
+            object: nil,
+            userInfo: ["pouchId": pouchId]
+        )
+
         #if os(iOS)
         await WatchConnectivityBridge.shared.pushHomeToWatch()
         #endif
@@ -130,8 +133,12 @@ enum PouchRemovalService {
         LogService.updateWidgetSnapshotForActivePouches(in: context)
         WidgetReloadCoordinator.reload()
 
-        // Push the updated state to a paired Apple Watch so it reflects the removals even
-        // while this app is backgrounded. No-op if no watch is paired.
+        NotificationCenter.default.post(
+            name: NSNotification.Name("PouchRemoved"),
+            object: nil,
+            userInfo: ["count": removedIds.count]
+        )
+
         #if os(iOS)
         await WatchConnectivityBridge.shared.pushHomeToWatch()
         #endif

@@ -49,12 +49,22 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
             if response.actionIdentifier == "REMOVE_POUCH_ACTION" {
                 struct C: @unchecked Sendable { let c: () -> Void }
                 let t = C(c: completion)
+                // Prefer userInfo pouchIds (set at schedule time); fall back to request id maps.
+                let userInfo = response.notification.request.content.userInfo
+                let fromUserInfo = userInfo["pouchIds"] as? [String]
                 Task { @MainActor in
-                    NotificationManager.handlePouchRemovalAction(pouchId: id)
-
-                    // Keep badge/state aligned with current activities
+                    if let fromUserInfo, !fromUserInfo.isEmpty {
+                        for pid in fromUserInfo {
+                            _ = await PouchRemovalService.removePouch(
+                                withId: pid,
+                                in: PersistenceController.shared.container.viewContext
+                            )
+                        }
+                        NotificationManager.cancelAlert(id: id)
+                    } else {
+                        NotificationManager.handlePouchRemovalAction(pouchId: id)
+                    }
                     let count = Activity<PouchActivityAttributes>.activities.count
-                    // Update the shared manager the UI actually observes.
                     LiveActivityManager.shared.hasActiveNotification = (count > 0)
                     t.c()
                 }

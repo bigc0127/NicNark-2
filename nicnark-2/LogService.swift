@@ -75,7 +75,7 @@ enum LogService {
     /// Inserts a CustomButton if missing. Does **not** call `ctx.save()` — callers
     /// must save so multi-insert batches stay atomic with a single save/rollback.
     static func ensureCustomButton(for amount: Double, in ctx: NSManagedObjectContext) {
-        guard !predefinedAmounts.contains(amount) else { return }
+        guard amount > 0, !predefinedAmounts.contains(amount) else { return }
 
         let fetch: NSFetchRequest<CustomButton> = CustomButton.fetchRequest()
         fetch.predicate = NSPredicate(format: "nicotineAmount == %f", amount)
@@ -257,7 +257,8 @@ enum LogService {
             id: pouchId,
             title: "Absorption complete",
             body: "Your \(Int(mg))mg pouch has finished absorbing.",
-            fireDate: Date().addingTimeInterval(durationSeconds)
+            fireDate: Date().addingTimeInterval(durationSeconds),
+            mg: mg
         )
 
         NotificationCenter.default.post(
@@ -303,7 +304,7 @@ enum LogService {
         for entry in loads {
             let can = entry.can
             let count = entry.count
-            guard count > 0 else { continue }
+            guard count > 0, can.strength > 0 else { continue }
 
             for _ in 0..<count {
                 let pouch = PouchLog(context: ctx)
@@ -321,7 +322,9 @@ enum LogService {
                 if let id = pouch.pouchId?.uuidString, let insertion = pouch.insertionTime {
                     created.append((id, can.strength, durationSeconds, insertion))
                 }
-                amountsForButtons.insert(can.strength)
+                if can.strength > 0 {
+                    amountsForButtons.insert(can.strength)
+                }
                 index += 1
             }
         }

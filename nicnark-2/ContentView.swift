@@ -139,13 +139,14 @@ struct ContentView: View {
         // NotificationDelegate posts these; wire them so taps actually switch tabs / open sheets.
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NavigateToCanManagement"))) { _ in
             selectedTab = 0
-            // Dismiss any other modal first — presenting inventory while Settings/Insights
-            // is up is a no-op / presentation conflict on iOS.
+            // Dismiss competing modals first. Do NOT touch first-run disclaimer / WhatsNew
+            // flags — clearing those @State can fire onChange → WhatsNew sheet races inventory.
             showingSettings = false
             showingInsights = false
-            showingWhatsNew = false
-            showingFirstRunDisclaimer = false
-            showingInventory = true
+            // Defer present one runloop so dismiss animation/state settles (same-frame present flaky).
+            DispatchQueue.main.async {
+                showingInventory = true
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowQuickLog"))) { _ in
             selectedTab = 0

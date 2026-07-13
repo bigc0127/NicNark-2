@@ -86,6 +86,12 @@ See `CLAUDE.md` for full map. Hard rules:
     **execution context** (foreground/background, actor, BGTask) of any system
     API you call or move. Named-bug-only patches that skip "who else touches
     this?" are how cancel paths, ActivityKit-from-BG, and sheet conflicts slip through.
+16. **NEVER change product behavior or data semantics** to work around a technical
+    constraint. If blocked (e.g. ActivityKit can't start from BG), degrade gracefully
+    and surface the tradeoff to Connor — do not decide for him. Check for an existing
+    Settings toggle governing the behavior first.
+17. **Changing an identifier's format/scheme:** grep every consumer that **parses** it
+    (NotificationDelegate, intents, deep links) — not only code that cancels it.
 
 ### Verification
 

@@ -103,22 +103,10 @@ struct InsightsView: View {
     // device heat). Now it's built once and rebuilt only when an input actually changes.
     @State private var data: InsightsData = .empty
     @State private var hasLoaded = false
+    /// Coalesce burst of pouch events (log+remove) into one rebuild.
+    @State private var recomputeWorkItem: DispatchWorkItem?
 
-    /// Cheap content fingerprint so edits (same count, different mg/times) recompute.
-    /// Samples first/last/mid insertion + total mg — enough to catch typical mutations.
-    private var insightsFingerprint: String {
-        let logs = recentLogs
-        guard !logs.isEmpty else { return "0" }
-        let first = logs.first?.insertionTime?.timeIntervalSince1970 ?? 0
-        let last = logs.last?.insertionTime?.timeIntervalSince1970 ?? 0
-        let mid = logs[logs.count / 2].insertionTime?.timeIntervalSince1970 ?? 0
-        let sumMg = logs.reduce(0.0) { $0 + $1.nicotineAmount }
-        let removed = logs.filter { $0.removalTime != nil }.count
-        return "\(logs.count)|\(first)|\(mid)|\(last)|\(sumMg)|\(removed)|\(refreshNonce)"
-    }
-
-    /// Rebuild the aggregate from the current fetch + settings. Called on appear and on input
-    /// changes only — never per render/access.
+    /// Rebuild the aggregate from the current fetch + settings. Never per body access.
     private func recompute() {
         data = InsightsData.build(
             from: Array(recentLogs),
@@ -130,6 +118,13 @@ struct InsightsView: View {
             currencySymbol: currencySymbol
         )
         hasLoaded = true
+    }
+
+    private func scheduleRecompute() {
+        recomputeWorkItem?.cancel()
+        let work = DispatchWorkItem { recompute() }
+        recomputeWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
     // MARK: Body
@@ -161,18 +156,16 @@ struct InsightsView: View {
                 Button("Done") { dismiss() }
             }
         }
-        // Build once on appear, then when inputs change — NOT on every render.
-        // Count alone is insufficient (edit amount/time keeps count stable → stale KPIs).
+        // Build once on appear; debounced on fetch/settings/pouch events (not O(N) per render).
         .task { recompute() }
-        .onChange(of: recentLogs.count) { _, _ in recompute() }
-        .onChange(of: insightsFingerprint) { _, _ in recompute() }
-        .onChange(of: dailyGoal) { _, _ in recompute() }
-        .onChange(of: pricePerTin) { _, _ in recompute() }
-        .onChange(of: pouchesPerTin) { _, _ in recompute() }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchLogged"))) { _ in recompute() }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchRemoved"))) { _ in recompute() }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchEdited"))) { _ in recompute() }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchDeleted"))) { _ in recompute() }
+        .onChange(of: recentLogs.count) { _, _ in scheduleRecompute() }
+        .onChange(of: dailyGoal) { _, _ in scheduleRecompute() }
+        .onChange(of: pricePerTin) { _, _ in scheduleRecompute() }
+        .onChange(of: pouchesPerTin) { _, _ in scheduleRecompute() }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchLogged"))) { _ in scheduleRecompute() }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchRemoved"))) { _ in scheduleRecompute() }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchEdited"))) { _ in scheduleRecompute() }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchDeleted"))) { _ in scheduleRecompute() }
         .refreshable {
             refreshNonce &+= 1
             recompute()
