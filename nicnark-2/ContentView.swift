@@ -1,7 +1,6 @@
 // Import necessary frameworks and libraries
 import SwiftUI           // For building the user interface
 import CoreData          // For database operations (storing pouch logs)
-import TipKit            // For in-app tips and hints
 import BackgroundTasks   // For background processing
 import WidgetKit         // For home screen widgets
 
@@ -182,16 +181,6 @@ struct ContentView: View {
                 // for this update instead.
                 try? await Task.sleep(for: .seconds(0.5))
                 showingWhatsNew = true
-            }
-            
-            // Configure TipKit for in-app tips and tutorials
-            do {
-                try Tips.configure([
-                    .displayFrequency(.immediate),        // Show tips immediately when available
-                    .datastoreLocation(.applicationDefault) // Use default storage location
-                ])
-            } catch {
-                print("Failed to configure TipKit: \(error)")
             }
 
             // Set up background tasks for Live Activity updates

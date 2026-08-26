@@ -34,7 +34,6 @@ A privacy-first iOS app for tracking personal nicotine consumption patterns. Bui
 - **WidgetKit** - Home screen widgets and Live Activities
 - **Charts** - SwiftUI Charts for data visualization
 - **Shortcuts** - Siri and iOS Shortcuts integration
-- **TipKit** - In-app guidance system
 
 ### Architecture
 - **MVVM Pattern** - Clean separation of concerns
