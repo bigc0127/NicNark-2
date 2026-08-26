@@ -3,9 +3,11 @@
 import ActivityKit
 import Foundation
 
-struct PouchActivityAttributes: ActivityAttributes {
+// ActivityKit reads attributes from @concurrent contexts. Default MainActor
+// isolation would make the ActivityAttributes conformance unusable there.
+nonisolated struct PouchActivityAttributes: ActivityAttributes {
 
-    struct ContentState: Codable, Hashable {
+    nonisolated struct ContentState: Codable, Hashable {
         // System-driven timer for smooth countdown/progress
         var timerInterval: ClosedRange<Date>
 

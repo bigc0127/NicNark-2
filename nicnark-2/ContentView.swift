@@ -39,75 +39,76 @@ struct ContentView: View {
         // TabView creates a tab bar interface with multiple tabs
         // $selectedTab binds the selection to our @State variable ($ creates a binding)
         TabView(selection: $selectedTab) {
-            
-            // MARK: - Tab 1: Log Tab (Main pouch logging interface)
-            NavigationStack {  // NavigationStack provides navigation capabilities (back/forward)
-                LogView()  // The main view where users log pouches
-                    .environmentObject(liveActivityManager)  // Pass the live activity manager to LogView
-                    .toolbar {  // Add toolbar items to the navigation bar
-                        ToolbarItem(placement: .navigationBarLeading) {  // Insights hub button (left)
-                            Button {
-                                showingInsights = true
-                            } label: {
-                                Image(systemName: "chart.bar.xaxis")
-                            }
-                        }
-                        ToolbarItem(placement: .navigationBarTrailing) {  // Put item on right side of nav bar
-                            Button {
-                                // When button is tapped, show the settings sheet
-                                showingSettings = true
-                            } label: {
-                                // Show different gear icon if there are active notifications
-                                Image(systemName: liveActivityManager.hasActiveNotification ? "gear.badge" : "gear")
-                            }
-                        }
-                    }
-            }
-            // .sheet presents a modal view (settings) when showingSettings becomes true
-            .sheet(isPresented: $showingSettings) {
+
+            Tab("Log", systemImage: "list.bullet", value: 0) {
                 NavigationStack {
-                    SettingsView()  // The settings interface
-                        .navigationTitle("Settings")  // Title for the settings view
-                        .navigationBarTitleDisplayMode(.inline)  // Small title style
+                    LogView()
+                        .environmentObject(liveActivityManager)
                         .toolbar {
-                            ToolbarItem(placement: .navigationBarTrailing) {
-                                // Done button to dismiss the settings sheet
-                                Button("Done") { showingSettings = false }
+                            if #available(iOS 27, *) {
+                                ToolbarItem(placement: .topBarLeading) {
+                                    Button {
+                                        showingInsights = true
+                                    } label: {
+                                        Image(systemName: "chart.bar.xaxis")
+                                    }
+                                }
+                                .visibilityPriority(.high)
+                                ToolbarItem(placement: .topBarPinnedTrailing) {
+                                    Button {
+                                        showingSettings = true
+                                    } label: {
+                                        Image(systemName: liveActivityManager.hasActiveNotification ? "gear.badge" : "gear")
+                                    }
+                                }
+                            } else {
+                                ToolbarItem(placement: .navigationBarLeading) {
+                                    Button {
+                                        showingInsights = true
+                                    } label: {
+                                        Image(systemName: "chart.bar.xaxis")
+                                    }
+                                }
+                                ToolbarItem(placement: .navigationBarTrailing) {
+                                    Button {
+                                        showingSettings = true
+                                    } label: {
+                                        Image(systemName: liveActivityManager.hasActiveNotification ? "gear.badge" : "gear")
+                                    }
+                                }
                             }
                         }
                 }
-            }
-            // Insights hub (the 5 new features live here), opened from the toolbar chart button.
-            .sheet(isPresented: $showingInsights) {
-                NavigationStack {
-                    InsightsView()
+                .sheet(isPresented: $showingSettings) {
+                    NavigationStack {
+                        SettingsView()
+                            .navigationTitle("Settings")
+                            .navigationBarTitleDisplayMode(.inline)
+                            .toolbar {
+                                ToolbarItem(placement: .navigationBarTrailing) {
+                                    Button("Done") { showingSettings = false }
+                                }
+                            }
+                    }
+                }
+                .sheet(isPresented: $showingInsights) {
+                    NavigationStack {
+                        InsightsView()
+                    }
                 }
             }
-            .tabItem {  // Define what appears in the tab bar for this tab
-                Image(systemName: "list.bullet")  // Tab icon
-                Text("Log")  // Tab label
-            }
-            .tag(0)  // Unique identifier for this tab
 
-            // MARK: - Tab 2: Nicotine Levels Tab (Charts and graphs)
-            NavigationStack {
-                NicotineLevelView()  // View showing nicotine level over time
+            Tab("Levels", systemImage: "chart.line.uptrend.xyaxis", value: 1) {
+                NavigationStack {
+                    NicotineLevelView()
+                }
             }
-            .tabItem {
-                Image(systemName: "chart.line.uptrend.xyaxis")  // Chart icon
-                Text("Levels")  // Tab label
-            }
-            .tag(1)  // Unique identifier for this tab
 
-            // MARK: - Tab 3: Usage Statistics Tab
-            NavigationStack {
-                UsageGraphView()  // View showing usage patterns and statistics
+            Tab("Usage", systemImage: "chart.bar", value: 2) {
+                NavigationStack {
+                    UsageGraphView()
+                }
             }
-            .tabItem {
-                Image(systemName: "chart.bar")  // Bar chart icon
-                Text("Usage")  // Tab label
-            }
-            .tag(2)  // Unique identifier for this tab
         }
         // MARK: - First-Run Disclaimer
         // Show comprehensive disclaimer on first app launch for App Store compliance

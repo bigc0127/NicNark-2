@@ -43,7 +43,7 @@ A privacy-first iOS app for tracking personal nicotine consumption patterns. Bui
 - **Privacy by Design** - No analytics, tracking, or data collection
 
 ### Requirements
-- iOS 17.0+ (iOS 18.0+ recommended)
+- iOS 26.0+ (optimized for iOS 27)
 - Xcode 15.0+
 - Swift 5.9+
 
@@ -53,8 +53,8 @@ A privacy-first iOS app for tracking personal nicotine consumption patterns. Bui
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/ConnorNeedling/nicnark.git
-   cd nicnark
+   git clone https://github.com/bigc0127/NicNark-2.git
+   cd NicNark-2
    ```
 
 2. **Open in Xcode**
