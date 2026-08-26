@@ -183,13 +183,13 @@ class NicotineCalculator {
     ///
     /// This implements a **two-phase nicotine model**:
     ///
-    /// **Phase 1 - Absorption (while pouch is in mouth):**
+    /// **Phase 1 - Absorption (while pouch is in mouth, including past the timer):**
     /// - Linear absorption up to 30% of total nicotine content
-    /// - Formula: absorbed(t) = D × A × (t / FULL_RELEASE_TIME)
+    /// - Formula: absorbed(t) = D × A × min(t / FULL_RELEASE_TIME, 1)
     ///   where D = dose (mg), A = 0.30 (30%), t = time in mouth
-    /// - Absorption completes at FULL_RELEASE_TIME (30, 45, or 60 minutes)
+    /// - Caps at peak at FULL_RELEASE_TIME; stays at peak until recorded removal
     ///
-    /// **Phase 2 - Decay (after pouch removal):**
+    /// **Phase 2 - Decay (after recorded pouch removal):**
     /// - Exponential decay with 2-hour half-life
     /// - Formula: N_i(t) = absorbed × 0.5^((t-t_i)/T_1/2)
     ///   where t-t_i = time since removal, T_1/2 = 120 minutes
@@ -208,40 +208,32 @@ class NicotineCalculator {
         insertionTime: Date
     ) -> Double {
         let nicotineContent = pouch.nicotineAmount
-        
-        // Determine when the pouch was/will be removed
-        // If `removalTime` is nil, treat it as removed at its configured timer duration.
         let duration = pouch.timerDuration > 0
             ? TimeInterval(pouch.timerDuration) * 60
             : FULL_RELEASE_TIME
-        let modeledRemovalTime = insertionTime.addingTimeInterval(duration)
-        let removalTime = pouch.removalTime ?? modeledRemovalTime
-        
-        if timestamp <= removalTime {
-            // ABSORPTION PHASE: Pouch is still in mouth at this timestamp
-            // Linear absorption: D × A × (elapsed / duration)
-            let timeInMouth = timestamp.timeIntervalSince(insertionTime)
-            return absorptionConstants.calculateCurrentNicotineLevel(
-                nicotineContent: nicotineContent,
-                elapsedTime: max(0, timeInMouth),
-                fullReleaseTime: duration
-            )
-        } else {
-            // DECAY PHASE: Pouch was removed before this timestamp
-            // First calculate total absorbed during usage (assume it reaches max at `duration`).
+
+        // Decay only after a recorded removal. A still-in-mouth pouch (removalTime == nil)
+        // plateaus at peak once the timer elapses — auto-remove is off by default, so
+        // treating timer-end as removal understated levels for leftover pouches.
+        if let removalTime = pouch.removalTime, timestamp > removalTime {
             let actualTimeInMouth = removalTime.timeIntervalSince(insertionTime)
             let totalAbsorbed = absorptionConstants.calculateAbsorbedNicotine(
                 nicotineContent: nicotineContent,
                 useTime: actualTimeInMouth,
                 fullReleaseTime: duration
             )
-            
-            // Then apply exponential decay: absorbed × 0.5^(time_since_removal / 120min)
             let timeSinceRemoval = timestamp.timeIntervalSince(removalTime)
             return absorptionConstants.calculateDecayedNicotine(
                 initialLevel: totalAbsorbed,
                 timeSinceRemoval: timeSinceRemoval
             )
         }
+
+        let timeInMouth = timestamp.timeIntervalSince(insertionTime)
+        return absorptionConstants.calculateCurrentNicotineLevel(
+            nicotineContent: nicotineContent,
+            elapsedTime: max(0, timeInMouth),
+            fullReleaseTime: duration
+        )
     }
 }

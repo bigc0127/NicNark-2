@@ -92,19 +92,10 @@ class WidgetNicotineCalculator {
         let duration = pouch.timerDuration > 0
             ? TimeInterval(pouch.timerDuration) * 60
             : WIDGET_FULL_RELEASE_TIME
-        let modeledRemovalTime = insertionTime.addingTimeInterval(duration)
-        let removalTime = pouch.removalTime ?? modeledRemovalTime
-        
-        if timestamp <= removalTime {
-            // Absorption phase
-            let timeInMouth = timestamp.timeIntervalSince(insertionTime)
-            return calculateCurrentNicotineLevel(
-                nicotineContent: nicotineContent,
-                elapsedTime: max(0, timeInMouth),
-                fullReleaseTime: duration
-            )
-        } else {
-            // Decay phase
+
+        // Match main-app calculator: decay only after recorded removal; still-in-mouth
+        // pouches plateau at peak after the timer instead of decaying as if removed.
+        if let removalTime = pouch.removalTime, timestamp > removalTime {
             let actualTimeInMouth = removalTime.timeIntervalSince(insertionTime)
             let totalAbsorbed = calculateAbsorbedNicotine(
                 nicotineContent: nicotineContent,
@@ -117,6 +108,13 @@ class WidgetNicotineCalculator {
                 timeSinceRemoval: timeSinceRemoval
             )
         }
+
+        let timeInMouth = timestamp.timeIntervalSince(insertionTime)
+        return calculateCurrentNicotineLevel(
+            nicotineContent: nicotineContent,
+            elapsedTime: max(0, timeInMouth),
+            fullReleaseTime: duration
+        )
     }
     
     private func calculateAbsorbedNicotine(nicotineContent: Double, useTime: TimeInterval, fullReleaseTime: TimeInterval) -> Double {

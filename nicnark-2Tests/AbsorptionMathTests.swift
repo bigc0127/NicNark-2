@@ -94,4 +94,66 @@ final class AbsorptionMathTests: XCTestCase {
         let result = LogService.calculateWeightedDuration(pouches: [])
         XCTAssertEqual(result, FULL_RELEASE_TIME, accuracy: 1e-6)
     }
+
+    @MainActor
+    func testStillInMouthPastTimerPlateausAtPeak() throws {
+        let controller = PersistenceController(inMemory: true)
+        let ctx = controller.container.viewContext
+        let now = Date()
+
+        let pouch = PouchLog(context: ctx)
+        pouch.pouchId = UUID()
+        pouch.insertionTime = now.addingTimeInterval(-2 * twoHours)
+        pouch.removalTime = nil
+        pouch.nicotineAmount = 6
+        pouch.timerDuration = 30
+        try ctx.save()
+
+        let calculator = NicotineCalculator()
+        let level = calculator.levelFromPouches([pouch], at: now)
+        XCTAssertEqual(level, 6 * ABSORPTION_FRACTION, accuracy: 1e-6)
+    }
+
+    @MainActor
+    func testRecordedRemovalDecaysFromPeak() throws {
+        let controller = PersistenceController(inMemory: true)
+        let ctx = controller.container.viewContext
+        let now = Date()
+
+        let pouch = PouchLog(context: ctx)
+        pouch.pouchId = UUID()
+        pouch.insertionTime = now.addingTimeInterval(-twoHours - thirtyMin)
+        pouch.removalTime = now.addingTimeInterval(-twoHours)
+        pouch.nicotineAmount = 6
+        pouch.timerDuration = 30
+        try ctx.save()
+
+        let calculator = NicotineCalculator()
+        let level = calculator.levelFromPouches([pouch], at: now)
+        XCTAssertEqual(level, 6 * ABSORPTION_FRACTION * 0.5, accuracy: 1e-6)
+    }
+
+    @MainActor
+    func testAggregatePicksLongestRemaining() {
+        let controller = PersistenceController(inMemory: true)
+        let ctx = controller.container.viewContext
+        let now = Date()
+
+        let short = PouchLog(context: ctx)
+        short.pouchId = UUID()
+        short.insertionTime = now.addingTimeInterval(-20 * 60)
+        short.nicotineAmount = 3
+        short.timerDuration = 30
+
+        let long = PouchLog(context: ctx)
+        long.pouchId = UUID()
+        long.insertionTime = now.addingTimeInterval(-5 * 60)
+        long.nicotineAmount = 6
+        long.timerDuration = 60
+
+        let agg = LogService.aggregate(activePouches: [short, long], at: now)
+        XCTAssertEqual(agg?.representativePouchId, long.pouchId?.uuidString)
+        XCTAssertEqual(agg?.totalNicotine ?? -1, 9, accuracy: 1e-9)
+        XCTAssertEqual(agg?.activeCount, 2)
+    }
 }

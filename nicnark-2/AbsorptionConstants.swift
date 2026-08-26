@@ -91,6 +91,8 @@ public struct AbsorptionConstants: Sendable {
      * This uses a linear absorption model for the active pouch phase:
      * - Absorption increases steadily from 0% to 30% over FULL_RELEASE_TIME
      * - Maximum 30% of the pouch content gets absorbed (ABSORPTION_FRACTION)
+     * - If the pouch stays in after the timer (no removalTime), level holds at peak
+     *   until a recorded removal; decay does not start on timer expiry alone
      *
      * Simplification note: real in-mouth uptake is monotonic but concave/front-loaded
      * (fastest in the first ~5–15 min; in-vitro studies show ~60–90% of the releasable
