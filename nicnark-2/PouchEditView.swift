@@ -7,7 +7,6 @@
 
 import SwiftUI
 import CoreData
-import WidgetKit
 
 struct PouchEditView: View {
     // MARK: - Properties
@@ -182,69 +181,68 @@ struct PouchEditView: View {
             showError("Please enter a valid nicotine amount")
             return
         }
-        
-        // Store original values to check for changes
-        let originalStartTime = pouchLog.insertionTime
-        let originalRemovalTime = pouchLog.removalTime
-        let hasActivePouch = originalRemovalTime == nil
-        let startTimeChanged = originalStartTime != insertionTime
-        
-        // Update pouch properties
+
+        let pouchId = pouchLog.pouchId?.uuidString ?? pouchLog.objectID.uriRepresentation().absoluteString
+        let wasActive = pouchLog.removalTime == nil
+
         pouchLog.insertionTime = insertionTime
         pouchLog.removalTime = hasRemovalTime ? (removalTime ?? insertionTime.addingTimeInterval(30 * 60)) : nil
         pouchLog.nicotineAmount = amount
-        
-        // Save to Core Data
+
         do {
             try viewContext.save()
-            
-            // If this is an active pouch and the start time changed, update the Live Activity
-            if hasActivePouch && startTimeChanged {
-                let pouchId = pouchLog.pouchId?.uuidString ?? pouchLog.objectID.uriRepresentation().absoluteString
-                Task {
-                    await LiveActivityManager.updateLiveActivityStartTime(
-                        for: pouchId,
-                        newStartTime: insertionTime,
-                        nicotineAmount: amount
-                    )
+
+            let nowActive = pouchLog.removalTime == nil
+            let duration = pouchLog.effectiveDurationSeconds
+            Task { @MainActor in
+                if nowActive {
+                    NotificationManager.cancelAlert(id: pouchId)
+                    let fireDate = insertionTime.addingTimeInterval(duration)
+                    if fireDate > Date() {
+                        NotificationManager.scheduleCompletionAlert(
+                            id: pouchId,
+                            title: "Absorption complete",
+                            body: "Your \(Int(amount))mg pouch has finished absorbing.",
+                            fireDate: fireDate,
+                            mg: amount
+                        )
+                    }
+                } else if wasActive {
+                    NotificationManager.cancelAlert(id: pouchId)
                 }
+                await LogService.syncAfterExternalPouchChange(in: viewContext)
             }
-            
-            // Update widgets and Live Activities
-            WidgetReloadCoordinator.reload()
-            
-            // Post notification for other views to update
+
             NotificationCenter.default.post(name: NSNotification.Name("PouchEdited"), object: nil)
-            
             onSave()
             dismiss()
         } catch {
             showError("Failed to save changes: \(error.localizedDescription)")
         }
     }
-    
+
     private func deletePouch() {
-        // If this pouch was from a can, restore the pouch count
+        let pouchId = pouchLog.pouchId?.uuidString ?? pouchLog.objectID.uriRepresentation().absoluteString
+        let wasActive = pouchLog.removalTime == nil
+
         if let can = pouchLog.can {
-            can.pouchCount += 1  // Restore one pouch to the can
-            print("📦 Restored pouch to can \(can.brand ?? "Unknown") after deletion - new count: \(can.pouchCount)")
+            can.pouchCount += 1
         }
-        
-        // Delete from Core Data
+
         viewContext.delete(pouchLog)
-        
+
         do {
             try viewContext.save()
-            
-            // Update widgets
-            WidgetReloadCoordinator.reload()
-            
-            // Post notification for other views to update
+
+            Task { @MainActor in
+                if wasActive {
+                    NotificationManager.cancelAlert(id: pouchId)
+                }
+                await LogService.syncAfterExternalPouchChange(in: viewContext)
+            }
+
             NotificationCenter.default.post(name: NSNotification.Name("PouchDeleted"), object: nil)
-            
-            // Update can manager to refresh inventory
             CanManager.shared.fetchActiveCans(context: viewContext)
-            
             onDelete()
             dismiss()
         } catch {

@@ -990,9 +990,6 @@ struct LogView: View {
     func logPouch(_ mg: Double) {
         LogService.logPouch(amount: mg, ctx: ctx)
         startLiveTimerIfNeeded()
-        
-        // Update widget persistence helper immediately after logging
-        Task { await updateWidgetPersistenceHelper() }
     }
     
     func logPouchFromCan(_ can: Can) {
@@ -1009,9 +1006,6 @@ struct LogView: View {
         
         if success {
             startLiveTimerIfNeeded()
-            Task { await updateWidgetPersistenceHelper() }
-
-            // Refresh can list to update counts
             canManager.fetchActiveCans(context: ctx)
         }
     }
@@ -1115,9 +1109,8 @@ struct LogView: View {
         let remaining = max(actualDuration - elapsed, 0)
         let progress = min(max(elapsed / actualDuration, 0), 1)
 
-        // Report the SUM across all active/decaying pouches, mirroring the widget snapshot
-        // path (updateWidgetPersistenceHelper). The activity was created with the TOTAL
-        // nicotine, so a single pouch's level would under-report the multi-pouch total.
+        // Report the SUM across all active/decaying pouches. The activity was created with
+        // the TOTAL nicotine, so a single pouch's level would under-report the multi-pouch total.
         let currentLevel = await NicotineCalculator().calculateTotalNicotineLevel(context: ctx)
 
         let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
@@ -1295,35 +1288,6 @@ struct LogView: View {
         }
     }
     
-    // MARK: - Widget Persistence Helper Update
-    
-    private func updateWidgetPersistenceHelper() async {
-        let helper = WidgetPersistenceHelper()
-
-        // Check if there are any active pouches
-        if activePouches.isEmpty {
-            // No active pouches, mark activity as ended
-            helper.markActivityEnded()
-        } else {
-            // Calculate the current nicotine level via the centralized calculator.
-            // This previously blocked the main thread on a DispatchSemaphore for up
-            // to 500ms per widget snapshot write; we now await it directly.
-            let currentLevel = await NicotineCalculator().calculateTotalNicotineLevel(context: ctx)
-            let pouchName = "\(activePouches.count) active pouch\(activePouches.count > 1 ? "es" : "")"
-            // Use the pouch's specific duration, not the app default
-            let pouchSpecificDuration = activePouches.first.map { TimeInterval($0.timerDuration * 60) } ?? FULL_RELEASE_TIME
-            let endTime = activePouches.first?.insertionTime?.addingTimeInterval(pouchSpecificDuration)
-
-            // Update the persistence helper with current data
-            helper.setFromLiveActivity(
-                level: currentLevel,
-                peak: currentLevel, // Use current as peak for simplicity in widget
-                pouchName: pouchName,
-                endTime: endTime
-            )
-        }
-    }
-    
     // Updates nicotine level information for the Start Timer button
     private func updateNicotineLevels() {
         Task {
@@ -1485,38 +1449,7 @@ struct LogView: View {
         return CloudKitSyncState.shared.isCloudKitEnabled && !CloudKitSyncState.shared.syncCompleted
     }
     
-    // MARK: - Special handling for removal to sync with widget
-    private func updateWidgetPersistenceHelperForRemoval(pouch: PouchLog, removalTime: Date) {
-        let helper = WidgetPersistenceHelper()
-        
-        guard let insertionTime = pouch.insertionTime else {
-            helper.markActivityEnded()
-            return
-        }
-        
-        // Calculate the actual absorbed amount based on actual time in mouth
-        let actualTimeInMouth = removalTime.timeIntervalSince(insertionTime)
-        let actualAbsorbed = AbsorptionConstants.shared.calculateAbsorbedNicotine(
-            nicotineContent: pouch.nicotineAmount,
-            useTime: actualTimeInMouth
-        )
-        
-        // Update widget with the actual absorbed amount and removal time
-        // This ensures widget shows the same level as main app
-        helper.setFromLiveActivity(
-            level: actualAbsorbed,
-            peak: actualAbsorbed,
-            pouchName: "Pouch removed",
-            endTime: removalTime  // Use actual removal time, not theoretical end time
-        )
-        
-        // After a brief delay, mark as ended since pouch is removed
-        Task {
-            try? await Task.sleep(nanoseconds: 1 * NSEC_PER_SEC)
-            helper.markActivityEnded()
-            WidgetReloadCoordinator.reload()
-        }
-    }
+
 }
 
 #Preview {

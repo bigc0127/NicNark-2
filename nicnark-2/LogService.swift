@@ -167,7 +167,11 @@ enum LogService {
     /// End any existing Live Activities and present ONE activity for the current aggregate.
     /// Prefer `schedulePresentAggregatedLiveActivity` / `…Serialized` so rebuilds cannot race.
     static func presentAggregatedLiveActivity(in ctx: NSManagedObjectContext) async {
-        guard let agg = fetchActiveAggregate(in: ctx) else { return }
+        guard let agg = fetchActiveAggregate(in: ctx) else {
+            // Empty aggregate must still tear down a leftover LA (edit/delete paths).
+            await LiveActivityManager.endAllLiveActivities()
+            return
+        }
 
         let calculator = NicotineCalculator()
         let recent = (try? calculator.fetchRecentPouches(context: ctx)) ?? []
@@ -373,5 +377,18 @@ enum LogService {
         Task { await BackgroundMaintainer.shared.scheduleSoon() }
 
         return created.count
+    }
+
+    // MARK: - External mutation sync
+
+    /// Rebuilds the single Live Activity, widget snapshot, and Watch payload after a
+    /// pouch row is edited or deleted outside `logPouch` / `PouchRemovalService`.
+    static func syncAfterExternalPouchChange(in ctx: NSManagedObjectContext) async {
+        await presentAggregatedLiveActivitySerialized(in: ctx)
+        updateWidgetSnapshotForActivePouches(in: ctx)
+        WidgetReloadCoordinator.reload()
+        #if os(iOS)
+        await WatchConnectivityBridge.shared.pushHomeToWatch()
+        #endif
     }
 }

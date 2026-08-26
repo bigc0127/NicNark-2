@@ -133,16 +133,13 @@ public final class WidgetPersistenceHelper {
     
     // MARK: Core Data Support for Widgets
     //
-    // A SINGLE process-wide container for the whole widget extension. Building an
-    // NSPersistentCloudKitContainer (CloudKit mirroring + loadPersistentStores) is
-    // expensive, and the widget runs under a tight memory budget, so a fresh
-    // container per helper instance — several per timeline render — risked jetsam.
-    // `static let` is initialized exactly once, lazily and thread-safely. The store
-    // is opened read-only and only ever read.
+    // Process-wide read-only SQLite on the App Group store. Do NOT attach CloudKit
+    // options here — the widget process must not run NSPersistentCloudKitContainer
+    // mirroring (memory + export races with the app). Snapshot UserDefaults is the
+    // write path from the app; this container is a read fallback for the graph widget.
     private static let sharedContainer: NSPersistentContainer = {
-        let container = NSPersistentCloudKitContainer(name: "nicnark_2")
+        let container = NSPersistentContainer(name: "nicnark_2")
 
-        // Use App Group container for shared access between app and widgets
         guard let groupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.ConnorNeedling.nicnark-2") else {
             print("❌ Failed to get App Group container URL")
             return container
@@ -152,23 +149,14 @@ public final class WidgetPersistenceHelper {
 
         let description = NSPersistentStoreDescription(url: storeURL)
         description.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
-        description.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
-
-        // CloudKit configuration for widgets
-        description.cloudKitContainerOptions = NSPersistentCloudKitContainerOptions(
-            containerIdentifier: "iCloud.ConnorNeedling.nicnark-2"
-        )
-
-        // Configure for read-only access in widget to avoid conflicts
         description.setOption(true as NSNumber, forKey: NSReadOnlyPersistentStoreOption)
 
-        // Set merge policy to handle CloudKit conflicts
         container.viewContext.mergePolicy = NSMergePolicy.mergeByPropertyObjectTrump
         container.viewContext.automaticallyMergesChangesFromParent = true
 
         container.persistentStoreDescriptions = [description]
 
-        print("📱 Widget Core Data: Configuring with App Group CloudKit store URL: \(storeURL.path)")
+        print("📱 Widget Core Data: read-only App Group store at \(storeURL.path)")
 
         container.loadPersistentStores { storeDescription, error in
             if let error = error as NSError? {

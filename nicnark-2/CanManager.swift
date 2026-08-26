@@ -173,18 +173,7 @@ class CanManager: ObservableObject {
         let roundedAmount = round(amount)
         
         // LogService handles the complete logging process including decrementing the can's count
-        let success = LogService.logPouch(amount: roundedAmount, ctx: context, can: can)
-        
-        if success {
-            // Ensure the database changes are saved (LogService already saves, but this is extra safety)
-            do {
-                try context.save()
-            } catch {
-                print("Failed to update can count: \(error)")
-            }
-        }
-        
-        return success
+        return LogService.logPouch(amount: roundedAmount, ctx: context, can: can)
     }
     
     /**
