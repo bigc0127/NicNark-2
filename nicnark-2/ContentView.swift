@@ -44,36 +44,18 @@ struct ContentView: View {
                     LogView()
                         .environmentObject(liveActivityManager)
                         .toolbar {
-                            if #available(iOS 27, *) {
-                                ToolbarItem(placement: .topBarLeading) {
-                                    Button {
-                                        showingInsights = true
-                                    } label: {
-                                        Image(systemName: "chart.bar.xaxis")
-                                    }
+                            ToolbarItem(placement: .navigationBarLeading) {
+                                Button {
+                                    showingInsights = true
+                                } label: {
+                                    Image(systemName: "chart.bar.xaxis")
                                 }
-                                .visibilityPriority(.high)
-                                ToolbarItem(placement: .topBarPinnedTrailing) {
-                                    Button {
-                                        showingSettings = true
-                                    } label: {
-                                        Image(systemName: liveActivityManager.hasActiveNotification ? "gear.badge" : "gear")
-                                    }
-                                }
-                            } else {
-                                ToolbarItem(placement: .navigationBarLeading) {
-                                    Button {
-                                        showingInsights = true
-                                    } label: {
-                                        Image(systemName: "chart.bar.xaxis")
-                                    }
-                                }
-                                ToolbarItem(placement: .navigationBarTrailing) {
-                                    Button {
-                                        showingSettings = true
-                                    } label: {
-                                        Image(systemName: liveActivityManager.hasActiveNotification ? "gear.badge" : "gear")
-                                    }
+                            }
+                            ToolbarItem(placement: .navigationBarTrailing) {
+                                Button {
+                                    showingSettings = true
+                                } label: {
+                                    Image(systemName: liveActivityManager.hasActiveNotification ? "gear.badge" : "gear")
                                 }
                             }
                         }
