@@ -55,35 +55,17 @@ enum SleepProtectionAnalyzer {
         let calculator = NicotineCalculator()
         let baseline = await calculator.calculateTotalNicotineLevel(context: context, at: targetTime)
 
-        // Planned contributions: model each planned pouch with the same two-phase absorption/decay model.
         let absorption = AbsorptionConstants.shared
         var plannedContribution = 0.0
 
         for pouch in plannedPouches {
-            let insertionTime = now
-            let removalTime = insertionTime.addingTimeInterval(pouch.duration)
-
-            if targetTime <= removalTime {
-                // Still absorbing at targetTime.
-                let elapsed = max(0, targetTime.timeIntervalSince(insertionTime))
-                plannedContribution += absorption.calculateCurrentNicotineLevel(
-                    nicotineContent: pouch.nicotineAmount,
-                    elapsedTime: elapsed,
-                    fullReleaseTime: pouch.duration
-                )
-            } else {
-                // Fully absorbed (or removed) before targetTime; decay after removal.
-                let totalAbsorbed = absorption.calculateAbsorbedNicotine(
-                    nicotineContent: pouch.nicotineAmount,
-                    useTime: pouch.duration,
-                    fullReleaseTime: pouch.duration
-                )
-                let timeSinceRemoval = max(0, targetTime.timeIntervalSince(removalTime))
-                plannedContribution += absorption.calculateDecayedNicotine(
-                    initialLevel: totalAbsorbed,
-                    timeSinceRemoval: timeSinceRemoval
-                )
-            }
+            let t = targetTime.timeIntervalSince(now)
+            plannedContribution += absorption.calculatePlasmaLevel(
+                nicotineContent: pouch.nicotineAmount,
+                timeSinceInsertion: t,
+                timeInMouth: min(max(0, t), pouch.duration),
+                fullReleaseTime: pouch.duration
+            )
         }
 
         return (time: targetTime, predictedLevel: max(0, baseline + plannedContribution), baselineLevel: max(0, baseline))

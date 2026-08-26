@@ -96,14 +96,41 @@ final class AbsorptionMathTests: XCTestCase {
     }
 
     @MainActor
-    func testStillInMouthPastTimerPlateausAtPeak() throws {
+    func testPlasmaAtTimerEndBelowCumulativeInput() {
+        let plasma = AbsorptionConstants.shared.calculatePlasmaLevel(
+            nicotineContent: 6,
+            timeSinceInsertion: thirtyMin,
+            timeInMouth: thirtyMin,
+            fullReleaseTime: thirtyMin
+        )
+        let input = 6 * ABSORPTION_FRACTION
+        XCTAssertLessThan(plasma, input)
+        XCTAssertEqual(plasma, expectedPlasma(dose: 6, t: thirtyMin, tMouth: thirtyMin, T: thirtyMin), accuracy: 1e-9)
+    }
+
+    @MainActor
+    func testPlasmaEarlyNearLinearInput() {
+        let t: TimeInterval = 1
+        let plasma = AbsorptionConstants.shared.calculatePlasmaLevel(
+            nicotineContent: 6,
+            timeSinceInsertion: t,
+            timeInMouth: t,
+            fullReleaseTime: thirtyMin
+        )
+        let linear = 6 * ABSORPTION_FRACTION * (t / thirtyMin)
+        XCTAssertEqual(plasma, linear, accuracy: 1e-6)
+    }
+
+    @MainActor
+    func testStillInMouthPastTimerDecaysAfterInputEnds() throws {
         let controller = PersistenceController(inMemory: true)
         let ctx = controller.container.viewContext
         let now = Date()
+        let elapsed = 2 * twoHours
 
         let pouch = PouchLog(context: ctx)
         pouch.pouchId = UUID()
-        pouch.insertionTime = now.addingTimeInterval(-2 * twoHours)
+        pouch.insertionTime = now.addingTimeInterval(-elapsed)
         pouch.removalTime = nil
         pouch.nicotineAmount = 6
         pouch.timerDuration = 30
@@ -111,11 +138,12 @@ final class AbsorptionMathTests: XCTestCase {
 
         let calculator = NicotineCalculator()
         let level = calculator.levelFromPouches([pouch], at: now)
-        XCTAssertEqual(level, 6 * ABSORPTION_FRACTION, accuracy: 1e-6)
+        XCTAssertEqual(level, expectedPlasma(dose: 6, t: elapsed, tMouth: elapsed, T: thirtyMin), accuracy: 1e-6)
+        XCTAssertLessThan(level, 6 * ABSORPTION_FRACTION)
     }
 
     @MainActor
-    func testRecordedRemovalDecaysFromPeak() throws {
+    func testRecordedRemovalDecaysFromInputEnd() throws {
         let controller = PersistenceController(inMemory: true)
         let ctx = controller.container.viewContext
         let now = Date()
@@ -130,7 +158,23 @@ final class AbsorptionMathTests: XCTestCase {
 
         let calculator = NicotineCalculator()
         let level = calculator.levelFromPouches([pouch], at: now)
-        XCTAssertEqual(level, 6 * ABSORPTION_FRACTION * 0.5, accuracy: 1e-6)
+        XCTAssertEqual(
+            level,
+            expectedPlasma(dose: 6, t: twoHours + thirtyMin, tMouth: thirtyMin, T: thirtyMin),
+            accuracy: 1e-6
+        )
+    }
+
+    /// Independent copy of the infusion+elimination closed form (not the production helper).
+    @MainActor
+    private func expectedPlasma(dose: Double, t: TimeInterval, tMouth: TimeInterval, T: TimeInterval) -> Double {
+        let ke = log(2.0) / twoHours
+        let tInput = min(min(max(0, tMouth), max(0, t)), max(1, T))
+        let R = (dose * ABSORPTION_FRACTION) / max(1, T)
+        let nStop = (R / ke) * (1 - exp(-ke * tInput))
+        let tAfter = max(0, t) - tInput
+        if tAfter <= 0 { return nStop }
+        return nStop * exp(-ke * tAfter)
     }
 
     @MainActor

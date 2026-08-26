@@ -88,61 +88,45 @@ class WidgetNicotineCalculator {
         at timestamp: Date,
         insertionTime: Date
     ) -> Double {
-        let nicotineContent = pouch.nicotineAmount
         let duration = pouch.timerDuration > 0
             ? TimeInterval(pouch.timerDuration) * 60
             : WIDGET_FULL_RELEASE_TIME
-
-        // Match main-app calculator: decay only after recorded removal; still-in-mouth
-        // pouches plateau at peak after the timer instead of decaying as if removed.
-        if let removalTime = pouch.removalTime, timestamp > removalTime {
-            let actualTimeInMouth = removalTime.timeIntervalSince(insertionTime)
-            let totalAbsorbed = calculateAbsorbedNicotine(
-                nicotineContent: nicotineContent,
-                useTime: actualTimeInMouth,
-                fullReleaseTime: duration
-            )
-            let timeSinceRemoval = timestamp.timeIntervalSince(removalTime)
-            return calculateDecayedNicotine(
-                initialLevel: totalAbsorbed,
-                timeSinceRemoval: timeSinceRemoval
-            )
+        let t = timestamp.timeIntervalSince(insertionTime)
+        let tMouth: TimeInterval
+        if let removalTime = pouch.removalTime {
+            tMouth = removalTime.timeIntervalSince(insertionTime)
+        } else {
+            tMouth = t
         }
-
-        let timeInMouth = timestamp.timeIntervalSince(insertionTime)
-        return calculateCurrentNicotineLevel(
-            nicotineContent: nicotineContent,
-            elapsedTime: max(0, timeInMouth),
+        return calculatePlasmaLevel(
+            nicotineContent: pouch.nicotineAmount,
+            timeSinceInsertion: t,
+            timeInMouth: tMouth,
             fullReleaseTime: duration
         )
     }
-    
-    private func calculateAbsorbedNicotine(nicotineContent: Double, useTime: TimeInterval, fullReleaseTime: TimeInterval) -> Double {
-        let release = max(1, fullReleaseTime)
-        let fractionalTime = useTime / release
-        let absorbedFraction = min(WIDGET_ABSORPTION_FRACTION * fractionalTime, WIDGET_ABSORPTION_FRACTION)
-        return nicotineContent * absorbedFraction
-    }
-    
-    private func calculateCurrentNicotineLevel(nicotineContent: Double, elapsedTime: TimeInterval, fullReleaseTime: TimeInterval) -> Double {
-        return calculateAbsorbedNicotine(nicotineContent: nicotineContent, useTime: elapsedTime, fullReleaseTime: fullReleaseTime)
-    }
-    
-    /**
-     * Calculates nicotine decay after pouch removal using half-life formula.
-     * 
-     * Formula: N_i(t) = absorbed × 0.5^((t-t_i)/T_1/2)
-     * Where:
-     * - absorbed = initial nicotine level at removal (mg)
-     * - t - t_i = elapsed time since pouch removal (in seconds)
-     * - T_1/2 = nicotine half-life (7200 seconds = 2 hours)
-     * 
-     * This matches the formula in AbsorptionConstants.calculateDecayedNicotine
-     * to ensure widget and main app show identical levels.
-     */
-    private func calculateDecayedNicotine(initialLevel: Double, timeSinceRemoval: TimeInterval) -> Double {
-        // Using pow(0.5, x) form to match published scientific model
-        let decayFactor = pow(0.5, timeSinceRemoval / WIDGET_NICOTINE_HALF_LIFE)
-        return initialLevel * decayFactor
+
+    /// Mirror of AbsorptionConstants.calculatePlasmaLevel (widget cannot import main-app types).
+    private func calculatePlasmaLevel(
+        nicotineContent: Double,
+        timeSinceInsertion: TimeInterval,
+        timeInMouth: TimeInterval,
+        fullReleaseTime: TimeInterval
+    ) -> Double {
+        let t = max(0, timeSinceInsertion)
+        let T = max(1, fullReleaseTime)
+        let tMouth = min(max(0, timeInMouth), t)
+        let tInput = min(tMouth, T)
+        let deliverable = max(0, nicotineContent) * WIDGET_ABSORPTION_FRACTION
+        guard deliverable > 0, tInput > 0 else { return 0 }
+
+        let ke = log(2.0) / WIDGET_NICOTINE_HALF_LIFE
+        let infusionRate = deliverable / T
+        let levelAtInputEnd = (infusionRate / ke) * (1 - exp(-ke * tInput))
+        let tAfterInput = t - tInput
+        if tAfterInput <= 0 {
+            return max(0, levelAtInputEnd)
+        }
+        return max(0, levelAtInputEnd * exp(-ke * tAfterInput))
     }
 }

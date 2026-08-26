@@ -73,6 +73,9 @@ public struct AbsorptionConstants: Sendable {
      * (~10–12 h) personal tracker where the dominant early-decay rate is what matters.
      */
     static let nicotineHalfLife: TimeInterval = 2 * 3600 // 2 hours in seconds
+
+    /// First-order elimination rate ke = ln(2) / t½. Used by the plasma model.
+    static var eliminationRateConstant: Double { log(2.0) / nicotineHalfLife }
     
     /**
      * maxAbsorptionRate: Maximum absorption rate (100% = 1.0)
@@ -86,35 +89,12 @@ public struct AbsorptionConstants: Sendable {
     // MARK: - Absorption Calculations
 
     /**
-     * calculateAbsorbedNicotine: Main calculation for how much nicotine has been absorbed
-     * 
-     * This uses a linear absorption model for the active pouch phase:
-     * - Absorption increases steadily from 0% to 30% over FULL_RELEASE_TIME
-     * - Maximum 30% of the pouch content gets absorbed (ABSORPTION_FRACTION)
-     * - If the pouch stays in after the timer (no removalTime), level holds at peak
-     *   until a recorded removal; decay does not start on timer expiry alone
+     * Cumulative systemic *input* (not current plasma). Insights "absorbed mg" uses this.
      *
-     * Simplification note: real in-mouth uptake is monotonic but concave/front-loaded
-     * (fastest in the first ~5–15 min; in-vitro studies show ~60–90% of the releasable
-     * nicotine is out within 30 min). The straight line slightly understates the early rate
-     * and overstates late-phase gain, but peak timing is correct: clinical Tmax tracks use
-     * duration (~30–35 min for 30-min use, ~60–65 min for 60-min use), so anchoring peak
-     * absorption to the end of the user-selected window and starting decay there matches the
-     * evidence. The linear ramp is an accepted first-order approximation for this tracker.
-     * 
-     * Formula: absorbed(t) = D × A × min(t / FULL_RELEASE_TIME, 1.0)
-     * Where:
-     * - D = nicotine dose/content of pouch (mg)
-     * - A = absorption fraction (0.30 = 30%)
-     * - t = time pouch has been in mouth (seconds)
-     * - FULL_RELEASE_TIME = configurable duration (30, 45, or 60 minutes)
-     * 
-     * Example: 6mg pouch after 15 minutes (with 30min FULL_RELEASE_TIME)
-     *   = 6 × 0.30 × (15/30) = 6 × 0.30 × 0.5 = 0.9mg absorbed
-     * 
-     * @param nicotineContent: Total nicotine in the pouch (e.g., 6mg)
-     * @param useTime: How long the pouch has been in mouth (in seconds)
-     * @return: Amount of nicotine absorbed into bloodstream (in mg)
+     * Linear extraction of A × D over FULL_RELEASE_TIME, capped. Does not subtract
+     * concurrent elimination — that is `calculatePlasmaLevel`.
+     *
+     * Formula: input(t) = D × A × min(t / FULL_RELEASE_TIME, 1.0)
      */
 
     public func calculateAbsorbedNicotine(nicotineContent: Double, useTime: TimeInterval) -> Double {
@@ -138,24 +118,56 @@ public struct AbsorptionConstants: Sendable {
     }
 
     /**
-     * calculateCurrentNicotineLevel: Wrapper for absorption calculation
-     * 
-     * This is just an alias for calculateAbsorbedNicotine with a clearer name
-     * Used when we want to emphasize we're getting the "current level" in bloodstream
-     * 
-     * @param nicotineContent: Total nicotine in the pouch (e.g., 6mg)
-     * @param elapsedTime: How long the pouch has been in mouth (in seconds)
-     * @return: Current nicotine level in bloodstream (in mg)
+     * Current bloodstream level for a pouch that has been in the mouth for `elapsedTime`
+     * (still in, or treat elapsed as time-in-mouth).
+     *
+     * Zero-order input of A×D over the timer + first-order elimination (ke = ln2 / 2h).
+     * Classic oral Bateman (fixed ka) is *not* used: pouch Tmax tracks use duration
+     * (30-min use ~30–35 min Tmax; 60-min use ~60–65 min). A fixed ka would pin Tmax
+     * independent of the timer. Duration-limited input keeps Tmax on the timer while
+     * still clearing nicotine during use (the linear-then-decay model overstated peak).
      */
-
     public func calculateCurrentNicotineLevel(nicotineContent: Double, elapsedTime: TimeInterval) -> Double {
-        return calculateAbsorbedNicotine(nicotineContent: nicotineContent, useTime: elapsedTime)
+        calculatePlasmaLevel(
+            nicotineContent: nicotineContent,
+            timeSinceInsertion: elapsedTime,
+            timeInMouth: elapsedTime,
+            fullReleaseTime: FULL_RELEASE_TIME
+        )
     }
 
-    /// Duration-aware variant of `calculateCurrentNicotineLevel`.
-
     public func calculateCurrentNicotineLevel(nicotineContent: Double, elapsedTime: TimeInterval, fullReleaseTime: TimeInterval) -> Double {
-        return calculateAbsorbedNicotine(nicotineContent: nicotineContent, useTime: elapsedTime, fullReleaseTime: fullReleaseTime)
+        calculatePlasmaLevel(
+            nicotineContent: nicotineContent,
+            timeSinceInsertion: elapsedTime,
+            timeInMouth: elapsedTime,
+            fullReleaseTime: fullReleaseTime
+        )
+    }
+
+    /// Blood level at `timeSinceInsertion` for a pouch that delivered for `timeInMouth`.
+    /// Input runs for min(timeInMouth, fullReleaseTime); after that only elimination.
+    public func calculatePlasmaLevel(
+        nicotineContent: Double,
+        timeSinceInsertion: TimeInterval,
+        timeInMouth: TimeInterval,
+        fullReleaseTime: TimeInterval
+    ) -> Double {
+        let t = max(0, timeSinceInsertion)
+        let T = max(1, fullReleaseTime)
+        let tMouth = min(max(0, timeInMouth), t)
+        let tInput = min(tMouth, T)
+        let deliverable = max(0, nicotineContent) * ABSORPTION_FRACTION
+        guard deliverable > 0, tInput > 0 else { return 0 }
+
+        let ke = Self.eliminationRateConstant
+        let infusionRate = deliverable / T
+        let levelAtInputEnd = (infusionRate / ke) * (1 - exp(-ke * tInput))
+        let tAfterInput = t - tInput
+        if tAfterInput <= 0 {
+            return max(0, levelAtInputEnd)
+        }
+        return max(0, levelAtInputEnd * exp(-ke * tAfterInput))
     }
 
     /**

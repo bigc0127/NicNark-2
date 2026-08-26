@@ -3,8 +3,8 @@
 //  nicnark-2
 //
 //  Comprehensive nicotine level calculator that properly handles:
-//  - Active pouch absorption (linear model up to FULL_RELEASE_TIME)
-//  - Post-removal decay (exponential decay with 2-hour half-life)
+//  - Duration-limited zero-order input of A×D plus first-order elimination
+//  - Decay after input stops (timer end or recorded removal)
 //  - Future projection for scheduling threshold-crossing notifications
 //
 //  This fixes the bug where nicotine-level-based reminders only considered
@@ -179,60 +179,29 @@ class NicotineCalculator {
     
     // MARK: - Private Helpers
     
-    /// Calculates a single pouch's contribution to nicotine level at a specific time
-    ///
-    /// This implements a **two-phase nicotine model**:
-    ///
-    /// **Phase 1 - Absorption (while pouch is in mouth, including past the timer):**
-    /// - Linear absorption up to 30% of total nicotine content
-    /// - Formula: absorbed(t) = D × A × min(t / FULL_RELEASE_TIME, 1)
-    ///   where D = dose (mg), A = 0.30 (30%), t = time in mouth
-    /// - Caps at peak at FULL_RELEASE_TIME; stays at peak until recorded removal
-    ///
-    /// **Phase 2 - Decay (after recorded pouch removal):**
-    /// - Exponential decay with 2-hour half-life
-    /// - Formula: N_i(t) = absorbed × 0.5^((t-t_i)/T_1/2)
-    ///   where t-t_i = time since removal, T_1/2 = 120 minutes
-    /// - See AbsorptionConstants.calculateDecayedNicotine for exact implementation
-    ///
-    /// **Total nicotine level** = sum of all pouches' individual contributions
-    ///
-    /// - Parameters:
-    ///   - pouch: The pouch log entry
-    ///   - timestamp: Point in time to calculate contribution for
-    ///   - insertionTime: When the pouch was inserted
-    /// - Returns: Nicotine contribution from this pouch in mg
+    /// One pouch's plasma contribution at `timestamp`.
+    /// Zero-order input of A×D over the pouch timer + first-order elimination throughout.
+    /// Input stops at min(time in mouth, timer); after that only ke applies — including
+    /// still-in-mouth after the timer (empty pouch, liver still clearing).
     private func calculatePouchContribution(
         pouch: PouchLog,
         at timestamp: Date,
         insertionTime: Date
     ) -> Double {
-        let nicotineContent = pouch.nicotineAmount
         let duration = pouch.timerDuration > 0
             ? TimeInterval(pouch.timerDuration) * 60
             : FULL_RELEASE_TIME
-
-        // Decay only after a recorded removal. A still-in-mouth pouch (removalTime == nil)
-        // plateaus at peak once the timer elapses — auto-remove is off by default, so
-        // treating timer-end as removal understated levels for leftover pouches.
-        if let removalTime = pouch.removalTime, timestamp > removalTime {
-            let actualTimeInMouth = removalTime.timeIntervalSince(insertionTime)
-            let totalAbsorbed = absorptionConstants.calculateAbsorbedNicotine(
-                nicotineContent: nicotineContent,
-                useTime: actualTimeInMouth,
-                fullReleaseTime: duration
-            )
-            let timeSinceRemoval = timestamp.timeIntervalSince(removalTime)
-            return absorptionConstants.calculateDecayedNicotine(
-                initialLevel: totalAbsorbed,
-                timeSinceRemoval: timeSinceRemoval
-            )
+        let t = timestamp.timeIntervalSince(insertionTime)
+        let tMouth: TimeInterval
+        if let removalTime = pouch.removalTime {
+            tMouth = removalTime.timeIntervalSince(insertionTime)
+        } else {
+            tMouth = t
         }
-
-        let timeInMouth = timestamp.timeIntervalSince(insertionTime)
-        return absorptionConstants.calculateCurrentNicotineLevel(
-            nicotineContent: nicotineContent,
-            elapsedTime: max(0, timeInMouth),
+        return absorptionConstants.calculatePlasmaLevel(
+            nicotineContent: pouch.nicotineAmount,
+            timeSinceInsertion: t,
+            timeInMouth: tMouth,
             fullReleaseTime: duration
         )
     }

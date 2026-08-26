@@ -399,13 +399,13 @@ class LiveActivityManager: ObservableObject {
         let expectedDuration = activity.attributes.expectedDuration
         let actualTimeInMouth = min(now.timeIntervalSince(activity.attributes.startTime), expectedDuration)
 
-        // Calculate the actual absorbed amount based on actual time in mouth and the pouch's own duration
-        let finalLevel = AbsorptionConstants.shared
-            .calculateAbsorbedNicotine(
-                nicotineContent: activity.attributes.totalNicotine,
-                useTime: actualTimeInMouth,  // Use actual time, not theoretical max time
-                fullReleaseTime: expectedDuration  // Use the pouch's own duration, not the global setting
-            )
+        let elapsed = max(0, now.timeIntervalSince(activity.attributes.startTime))
+        let finalLevel = AbsorptionConstants.shared.calculatePlasmaLevel(
+            nicotineContent: activity.attributes.totalNicotine,
+            timeSinceInsertion: elapsed,
+            timeInMouth: actualTimeInMouth,
+            fullReleaseTime: expectedDuration
+        )
 
         let timer = activity.attributes.startTime...activity.attributes.endTime
         let finalState = PouchActivityAttributes.ContentState(

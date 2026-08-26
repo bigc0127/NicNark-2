@@ -8,11 +8,18 @@ This document describes the complete nicotine calculation model used in nicnark-
 
 ## Overview
 
-The app uses a **two-phase model** to calculate nicotine levels in the bloodstream:
-1. **Absorption Phase** - Linear absorption while pouch is in mouth
-2. **Decay Phase** - Exponential decay after pouch removal
+Blood **level** (Levels tab, widget, Live Activity, sleep prediction) uses a
+**one-compartment model**: zero-order input of `A × D` over the pouch timer, plus
+first-order elimination the whole time (`ke = ln(2) / 2h`).
 
-The **total nicotine level** at any time is the **sum of contributions from all pouches** (active and removed).
+Classic oral Bateman (`N = (F D ka)/(ka−ke) × (e^{−ke t} − e^{−ka t})`) is **not**
+used. Pouch Tmax tracks use duration (~30–35 min for 30-min use, ~60–65 min for
+60-min use). A fixed `ka` would pin Tmax independent of the timer.
+
+Insights **"absorbed mg"** is still cumulative systemic *input*
+`D × A × min(t / T, 1)` — how much entered, not remaining plasma.
+
+The **total nicotine level** at any time is the **sum of plasma contributions from all pouches** (last 10 hours).
 
 ---
 
@@ -20,83 +27,46 @@ The **total nicotine level** at any time is the **sum of contributions from all 
 
 | Symbol | Value | Description |
 |--------|-------|-------------|
-| **A** | 0.30 | Absorption fraction (30%) |
+| **A** | 0.30 | Absorption fraction (30% of stated mg is deliverable) |
 | **T₁/₂** | 7200 seconds (120 minutes) | Nicotine half-life in bloodstream |
-| **FULL_RELEASE_TIME** | 1800, 2700, or 3600 seconds | Duration for complete absorption (30, 45, or 60 minutes, user-configurable) |
+| **ke** | ln(2) / T₁/₂ | First-order elimination rate |
+| **T / FULL_RELEASE_TIME** | 1800, 2700, or 3600 s | Zero-order input window (30 / 45 / 60 min) |
 
 ---
 
-## Phase 1: Absorption (While Pouch is in Mouth)
+## Plasma (blood level)
 
-**Applies when:** `t_insertion ≤ t_current ≤ t_removal`
+Input rate while delivering: `R = (D × A) / T` for `0 ≤ t < t_input`, else `0`.
+`t_input = min(time in mouth, T)`.
 
-### Formula:
+During input:
 ```
-N_absorbed(t) = D × A × min(t_elapsed / FULL_RELEASE_TIME, 1.0)
+N(t) = (R / ke) × (1 − e^{−ke t})
 ```
 
-### Where:
-- **N_absorbed(t)** = Amount of nicotine absorbed at time t (mg)
-- **D** = Nicotine dose/content of pouch (mg) - e.g., 6mg, 10mg
-- **A** = Absorption fraction = 0.30 (30% of total nicotine is absorbed)
-- **t_elapsed** = Time pouch has been in mouth = t_current - t_insertion (seconds)
-- **FULL_RELEASE_TIME** = Time for complete absorption (seconds)
-
-### Characteristics:
-- **Linear absorption** from 0% to 30% over FULL_RELEASE_TIME
-- At t=0: N_absorbed = 0 mg (no absorption yet)
-- At t=FULL_RELEASE_TIME: N_absorbed = D × 0.30 (maximum absorption reached)
-- After FULL_RELEASE_TIME: Absorption remains constant at D × 0.30
-
-### Example:
-For a 6mg pouch after 15 minutes (with 30-minute FULL_RELEASE_TIME):
+After input stops (timer elapsed **or** recorded removal, whichever first):
 ```
-N_absorbed(15 min) = 6 × 0.30 × (900/1800)
-                   = 6 × 0.30 × 0.5
-                   = 0.9 mg
+N(t) = N(t_input) × e^{−ke (t − t_input)}
+```
+
+At small t this matches the old linear ramp (`N ≈ R t`). At T it is **below** `D×A`
+because some nicotine already cleared during use (~8% lower peak for a 30-min 6mg pouch).
+
+Insights cumulative input (not plasma):
+```
+input(t) = D × A × min(t_in_mouth / T, 1.0)
 ```
 
 ---
 
-## Phase 2: Decay (After Pouch Removal)
+## After input stops
 
-**Applies when:** `t_current > t_removal`
+Same `ke`. `t_input` is min(time in mouth, T) — timer end while still in, or recorded removal, whichever comes first. Holding an exhausted pouch does not hold plasma up.
 
-### Formula:
-```
-N_i(t) = N_max × 0.5^((t - t_removal) / T₁/₂)
-```
-
-### Where:
-- **N_i(t)** = Remaining nicotine from pouch i at time t (mg)
-- **N_max** = Maximum absorbed nicotine = D × A × min(t_in_mouth / FULL_RELEASE_TIME, 1.0)
-- **t - t_removal** = Time elapsed since pouch removal (seconds)
-- **T₁/₂** = Nicotine half-life = 7200 seconds (120 minutes)
-- **0.5^x** = Exponential decay using half-life
-
-### Characteristics:
-- **Exponential decay** based on 2-hour half-life
-- After 1 hour (3600s): ~70.7% remains
-- After 2 hours (7200s): ~50% remains (one half-life)
-- After 4 hours: ~25% remains
-- After 6 hours: ~12.5% remains
-- After 10 hours: ~3.1% remains (negligible)
-
-### Mathematical Equivalence:
-This formula is mathematically equivalent to:
-```
-N_i(t) = N_max × e^(-ln(2) × (t - t_removal) / T₁/₂)
-```
-Because: `0.5^x = e^(-ln(2) × x)`
-
-### Example:
-For a pouch that absorbed 1.8mg (6mg × 0.30) and was removed 1 hour ago:
-```
-N_i(t) = 1.8 × 0.5^(3600 / 7200)
-       = 1.8 × 0.5^0.5
-       = 1.8 × 0.7071
-       ≈ 1.27 mg
-```
+Half-life checks (from the level at input-end, not from D×A):
+- +2 h → 50% of N(t_input) remains
+- +4 h → 25%
+- +10 h → ~3.1% (lookback window)
 
 ---
 
@@ -111,16 +81,12 @@ N_total(t) = Σ N_i(t)
 ### Where:
 - **N_total(t)** = Total nicotine in bloodstream at time t
 - **n** = Number of pouches used in last 10 hours
-- **N_i(t)** = Contribution from pouch i, calculated using:
-  - Absorption formula if pouch is still in mouth
-  - Decay formula if pouch has been removed
+- **N_i(t)** = plasma contribution from pouch i (`calculatePlasmaLevel`)
 
 ### Process:
-1. Fetch all pouches from last 10 hours (≈5 half-lives, covers 96.9% of decay)
-2. For each pouch i:
-   - If pouch is still active (not removed): Calculate using **Absorption Phase** formula
-   - If pouch was removed: Calculate using **Decay Phase** formula
-3. Sum all individual contributions to get total level
+1. Fetch all pouches from last 10 hours (≈5 half-lives)
+2. For each pouch, apply the infusion + elimination closed form
+3. Sum contributions
 
 ---
 
@@ -129,12 +95,12 @@ N_total(t) = Σ N_i(t)
 ### Example 1: Single Active Pouch
 **Scenario:** 6mg pouch inserted 15 minutes ago, still in mouth
 
-**Calculation:**
+**Calculation** (plasma, not cumulative input):
 ```
-N_total = 6 × 0.30 × (15×60 / 30×60)
-        = 6 × 0.30 × 0.5
-        = 0.9 mg
+R = (6 × 0.30) / 1800
+N = (R / ke) × (1 − e^{−ke × 900})  ≈ 0.86 mg
 ```
+(Old linear-no-elimination value was 0.90 mg.)
 
 ---
 
@@ -227,13 +193,14 @@ Filtered out by lookback window (not included in calculation)
 
 ### Code Location:
 - **Main calculator:** `nicnark-2/AbsorptionConstants.swift`
-  - `calculateAbsorbedNicotine()` - Absorption phase
-  - `calculateDecayedNicotine()` - Decay phase
+  - `calculatePlasmaLevel()` — bloodstream level
+  - `calculateAbsorbedNicotine()` — cumulative input (Insights)
+  - `calculateDecayedNicotine()` — exp decay helper
 - **Usage calculator:** `nicnark-2/NicotineCalculator.swift`
-  - `calculatePouchContribution()` - Determines which phase applies
-  - `calculateTotalNicotineLevel()` - Sums all contributions
-- **Widget calculator:** `nicnark-2/WidgetSupport/WidgetNicotineCalculator.swift`
-  - Mirror of main calculator for widget use
+  - `calculatePouchContribution()` → `calculatePlasmaLevel`
+  - `calculateTotalNicotineLevel()` — sums contributions
+- **Widget calculator:** `AbsorptionTimerWidget/WidgetNicotineCalculator.swift`
+  - Byte-matched plasma closed form
 
 ### Graph Display:
 - **Nicotine Level View:** `nicnark-2/NicotineLevelView.swift`
@@ -246,13 +213,13 @@ Filtered out by lookback window (not included in calculation)
 ## Validation
 
 The formula has been validated to ensure:
-1. ✅ Main app and widget calculators produce identical results
-2. ✅ Absorption is linear and reaches exactly 30% at FULL_RELEASE_TIME
-3. ✅ Decay follows exponential half-life (50% every 2 hours)
-4. ✅ Multiple pouches sum correctly
-5. ✅ Edge cases (t=0, full absorption) handled properly
+1. ✅ Plasma at timer end is below D×A (concurrent elimination)
+2. ✅ Early t matches linear input (first-order Taylor)
+3. ✅ After input ends, remaining follows 2 h half-life from N(t_input)
+4. ✅ Insights absorbed mg still uses cumulative input, not plasma
+5. ✅ Multiple pouches sum
 
-See: `nicnark-2Tests/NicotineLevelParityTests.swift` for comprehensive unit tests.
+See: `nicnark-2Tests/AbsorptionMathTests.swift`
 
 ---
 
