@@ -3,8 +3,9 @@
 //  Nicnark-2 Watch Widget
 //
 //  Watch-face complication showing the current nicotine level ("nic in body") and the
-//  countdown on the active pouch. Reads a snapshot the watch app writes to the shared App
-//  Group; the level decays across timeline entries so the face stays current between syncs.
+//  longest remaining pouch countdown (same policy as the iPhone Live Activity). Reads a
+//  snapshot the watch app writes to the shared App Group; the level decays across timeline
+//  entries so the face stays current between syncs.
 //
 
 import WidgetKit
@@ -16,13 +17,13 @@ struct NicComplicationEntry: TimelineEntry {
     let date: Date
     let level: Double
     let activePouchCount: Int
-    let soonestRemoval: Date?
+    let countdownEnd: Date?
 
     static let placeholder = NicComplicationEntry(
         date: Date(),
         level: 1.2,
         activePouchCount: 1,
-        soonestRemoval: Date().addingTimeInterval(20 * 60)
+        countdownEnd: Date().addingTimeInterval(20 * 60)
     )
 }
 
@@ -47,7 +48,7 @@ struct NicComplicationProvider: TimelineProvider {
             date: now,
             level: max(0, snapshot?.currentLevel ?? 0),
             activePouchCount: snapshot?.activePouchCount ?? 0,
-            soonestRemoval: snapshot?.soonestRemoval
+            countdownEnd: snapshot?.countdownEnd
         ))
 
         // Future entries from the sampled decay curve, so the displayed level keeps falling
@@ -61,7 +62,7 @@ struct NicComplicationProvider: TimelineProvider {
                     date: p.t,
                     level: max(0, p.level),
                     activePouchCount: snapshot.activePouchCount,
-                    soonestRemoval: snapshot.soonestRemoval
+                    countdownEnd: snapshot.countdownEnd
                 ))
             }
         }
@@ -79,7 +80,7 @@ struct NicComplicationProvider: TimelineProvider {
             date: date,
             level: max(0, snapshot?.currentLevel ?? 0),
             activePouchCount: snapshot?.activePouchCount ?? 0,
-            soonestRemoval: snapshot?.soonestRemoval
+            countdownEnd: snapshot?.countdownEnd
         )
     }
 }
@@ -106,8 +107,12 @@ struct NicComplicationEntryView: View {
     var entry: NicComplicationProvider.Entry
     @Environment(\.widgetFamily) private var family
 
-    private var hasActivePouch: Bool {
-        entry.activePouchCount > 0 && (entry.soonestRemoval.map { $0 > entry.date } ?? false)
+    private var countdownRunning: Bool {
+        entry.countdownEnd.map { $0 > entry.date } ?? false
+    }
+
+    private var hasActivePouches: Bool {
+        entry.activePouchCount > 0
     }
 
     var body: some View {
@@ -152,7 +157,7 @@ struct NicComplicationEntryView: View {
     // timer, so the bezel falls back to "<n> mg in body" and the corner shows a pill glyph.
     private var cornerView: some View {
         Group {
-            if hasActivePouch {
+            if countdownRunning || hasActivePouches {
                 Text(cornerLevelString(entry.level))
                     .font(.system(.title3, design: .rounded))
                     .minimumScaleFactor(0.5)
@@ -163,10 +168,10 @@ struct NicComplicationEntryView: View {
             }
         }
         .widgetLabel {
-            if hasActivePouch, let removal = entry.soonestRemoval {
-                // pauseTime: removal freezes the countdown at 00:00 when the pouch timer
-                // ends, instead of the default behaviour of ticking past zero and counting up.
-                Text(timerInterval: entry.date...removal, pauseTime: removal, countsDown: true)
+            if countdownRunning, let end = entry.countdownEnd {
+                // pauseTime: end freezes the countdown at 00:00 when the longest timer
+                // finishes, instead of the default behaviour of ticking past zero and counting up.
+                Text(timerInterval: entry.date...end, pauseTime: end, countsDown: true)
             } else {
                 Text("\(levelString(entry.level)) mg in body")
             }
@@ -183,15 +188,17 @@ struct NicComplicationEntryView: View {
             }
             Text("\(levelString(entry.level)) mg in body")
                 .font(.body)
-            if hasActivePouch, let removal = entry.soonestRemoval {
+            if countdownRunning, let end = entry.countdownEnd {
                 HStack(spacing: 4) {
                     Image(systemName: "timer")
-                    // Self-updating countdown; pauseTime freezes it at 00:00 at the end
-                    // rather than counting up past zero.
-                    Text(timerInterval: entry.date...removal, pauseTime: removal, countsDown: true)
+                    Text(timerInterval: entry.date...end, pauseTime: end, countsDown: true)
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            } else if hasActivePouches {
+                Text(entry.activePouchCount == 1 ? "1 pouch in" : "\(entry.activePouchCount) pouches in")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             } else {
                 Text("No active pouch")
                     .font(.caption)

@@ -24,7 +24,7 @@ struct NicComplication: Widget {
                 .containerBackground(.clear, for: .widget)
         }
         .configurationDisplayName("Nicotine")
-        .description("Current nicotine in your body and the active pouch timer.")
+        .description("Current nicotine in your body and the longest remaining pouch timer.")
         .supportedFamilies([
             .accessoryCircular,
             .accessoryCorner,

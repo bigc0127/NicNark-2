@@ -279,6 +279,9 @@ final class WatchDashboardViewModel: NSObject, ObservableObject {
             return
         }
 
+        let isLogAction = (message["action"] as? String) == "logPouchFromCanId"
+        let logCanId = message["canId"] as? String
+
         // Prefer immediate send+reply when possible.
         if session.isReachable {
             isLoading = true
@@ -286,8 +289,6 @@ final class WatchDashboardViewModel: NSObject, ObservableObject {
             // the non-Sendable `message` dictionary. The handlers MUST be @Sendable because
             // WatchConnectivity calls them on a background queue; a @MainActor closure would
             // trap on watchOS 26 (swift_task_checkIsolated -> dispatch_assert_queue).
-            let isLogAction = (message["action"] as? String) == "logPouchFromCanId"
-            let logCanId = message["canId"] as? String
             session.sendMessage(
                 message,
                 replyHandler: { @Sendable [weak self] reply in
@@ -314,10 +315,15 @@ final class WatchDashboardViewModel: NSObject, ObservableObject {
             return
         }
 
-        // Fallback: queue on iPhone.
+        // Fallback: queue on iPhone. Treat a queued log like a failed send so a
+        // re-tap of the SAME can within 60s reuses requestId (phone dedups).
         session.transferUserInfo(message)
         updateReachability(from: session)
         statusMessage = fallbackQueueMessage
+        if isLogAction, let canId = logCanId {
+            lastLogFailedCanId = canId
+            lastLogFailedAt = Date()
+        }
     }
 
     private func applyActionReply(_ reply: [String: Any]) {
@@ -421,16 +427,17 @@ final class WatchDashboardViewModel: NSObject, ObservableObject {
     /// Writes the current level + active-pouch countdown + near-future decay samples to the
     /// shared App Group so the complication can render them, and reloads its timelines.
     private func updateComplicationSnapshot() {
-        let soonestRemoval = activePouches
+        // Longest remaining timer — same policy as the iPhone Live Activity.
+        let countdownEnd = activePouches
             .map { $0.removalDate }
             .filter { $0 > Date() }
-            .min()
+            .max()
         let points = graphPoints.map { WatchComplicationSnapshot.Point(t: $0.time, level: $0.level) }
         let snapshot = WatchComplicationSnapshot(
             updatedAt: Date(),
             currentLevel: level,
             activePouchCount: activePouchCount,
-            soonestRemoval: soonestRemoval,
+            countdownEnd: countdownEnd,
             points: points
         )
         snapshot.save()
