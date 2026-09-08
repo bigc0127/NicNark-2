@@ -68,7 +68,7 @@ struct CanCardView: View {
                         .padding(.vertical, 2)
                         .background(strengthColor)
                         .cornerRadius(6)
-                    Text("Max \(maxAbsorptionPercent)% · \(String(format: \"%.2f\", maxAbsorptionMg))mg")
+                    Text(maxAbsorptionLabel)
                         .font(.caption2)
                         .fontWeight(.semibold)
                         .foregroundColor(.blue)
@@ -160,6 +160,10 @@ struct CanCardView: View {
 
     private var maxAbsorptionMg: Double {
         can.strength * maxAbsorptionFraction
+    }
+
+    private var maxAbsorptionLabel: String {
+        String(format: "Max %d%% · %.2fmg", maxAbsorptionPercent, maxAbsorptionMg)
     }
 
     private var strengthColor: Color {
