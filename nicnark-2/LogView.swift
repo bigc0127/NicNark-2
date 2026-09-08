@@ -1,8 +1,7 @@
 //
 // LogView.swift
 // nicnark-2
-//
-// Restored from main. Timer/action methods live in LogView+Actions.swift.
+// Restored from main; actions live in LogView+TimerUI/Logging/Support.swift
 //
 import SwiftUI
 import CoreData
@@ -11,31 +10,31 @@ import ActivityKit
 import Combine
 
 struct LogView: View {
-    @Environment(\.managedObjectContext) private var ctx
-    @StateObject private var timerSettings = TimerSettings.shared
-    @AppStorage("autoRemovePouches") private var autoRemovePouches = false
-    @AppStorage("autoRemoveDelayMinutes") private var autoRemoveDelayMinutes: Double = 0
-    @AppStorage("hideLegacyButtons") private var hideLegacyButtons = false
-    @AppStorage(SleepProtectionKeys.enabled) private var sleepProtectionEnabled = false
-    @AppStorage(SleepProtectionKeys.bedtimeSecondsFromMidnight) private var sleepProtectionBedtimeSecondsFromMidnight: Int = 23 * 3600
-    @AppStorage(SleepProtectionKeys.targetMg) private var sleepProtectionTargetMg: Double = 1.3
-    @StateObject private var canManager = CanManager.shared
-    @State private var loadedPouches: [UUID: Int] = [:]
-    @State private var showingAddCan = false
-    @State private var showingBarcodeScanner = false
-    @State private var scannedBarcode: String? = nil
-    @State private var pendingBarcodeAfterScan: String? = nil
-    @State private var selectedCan: Can?
-    @State private var showingEditCan = false
-    @State private var canToEdit: Can?
-    @State private var showingDuplicateCanAlert = false
-    @State private var duplicateCanForAlert: Can?
-    @State private var selectedBrand: String? = nil
-    @State private var currentNicotineLevel: Double = 0.0
-    @State private var estimatedNicotineLevel: Double? = nil
-    @State private var sleepProtectionBedtime: Date? = nil
-    @State private var sleepProtectionPredictedLevelAtBedtime: Double? = nil
-    @State private var isEvaluatingSleepProtection = false
+    @Environment(\.managedObjectContext) var ctx
+    @StateObject var timerSettings = TimerSettings.shared
+    @AppStorage("autoRemovePouches") var autoRemovePouches = false
+    @AppStorage("autoRemoveDelayMinutes") var autoRemoveDelayMinutes: Double = 0
+    @AppStorage("hideLegacyButtons") var hideLegacyButtons = false
+    @AppStorage(SleepProtectionKeys.enabled) var sleepProtectionEnabled = false
+    @AppStorage(SleepProtectionKeys.bedtimeSecondsFromMidnight) var sleepProtectionBedtimeSecondsFromMidnight: Int = 23 * 3600
+    @AppStorage(SleepProtectionKeys.targetMg) var sleepProtectionTargetMg: Double = 1.3
+    @StateObject var canManager = CanManager.shared
+    @State var loadedPouches: [UUID: Int] = [:]
+    @State var showingAddCan = false
+    @State var showingBarcodeScanner = false
+    @State var scannedBarcode: String? = nil
+    @State var pendingBarcodeAfterScan: String? = nil
+    @State var selectedCan: Can?
+    @State var showingEditCan = false
+    @State var canToEdit: Can?
+    @State var showingDuplicateCanAlert = false
+    @State var duplicateCanForAlert: Can?
+    @State var selectedBrand: String? = nil
+    @State var currentNicotineLevel: Double = 0.0
+    @State var estimatedNicotineLevel: Double? = nil
+    @State var sleepProtectionBedtime: Date? = nil
+    @State var sleepProtectionPredictedLevelAtBedtime: Double? = nil
+    @State var isEvaluatingSleepProtection = false
     @FetchRequest(
         entity: Can.entity(),
         sortDescriptors: [
@@ -43,42 +42,42 @@ struct LogView: View {
             NSSortDescriptor(keyPath: \Can.dateAdded, ascending: false)
         ],
         predicate: NSPredicate(format: "pouchCount > 0 OR (ANY pouchLogs.removalTime == nil)")
-    ) private var activeCans: FetchedResults<Can>
+    ) var activeCans: FetchedResults<Can>
     @FetchRequest(
         entity: CustomButton.entity(),
         sortDescriptors: [NSSortDescriptor(keyPath: \CustomButton.nicotineAmount, ascending: true)]
-    ) private var customButtons: FetchedResults<CustomButton>
+    ) var customButtons: FetchedResults<CustomButton>
     @FetchRequest(
         entity: PouchLog.entity(),
         sortDescriptors: [NSSortDescriptor(keyPath: \PouchLog.insertionTime, ascending: false)],
         predicate: NSPredicate(format: "removalTime == nil")
-    ) private var activePouches: FetchedResults<PouchLog>
-    @State private var showInput = false
-    @State private var input = ""
-    @State private var tick = Date()
-    @State private var lastWidgetUpdate = Date()
-    @State private var lastLiveActivityUpdate = Date()
-    @State private var timersExpanded = true
-    @State private var liveTimer: Timer?
-    @State private var optimizedTimer: Timer?
-    private var pouchDuration: TimeInterval { timerSettings.currentTimerInterval }
-    private let TIMER_INTERVAL: TimeInterval = 1.0
-    private var totalLoadedPouches: Int { loadedPouches.values.reduce(0, +) }
-    private var totalNicotine: Double {
+    ) var activePouches: FetchedResults<PouchLog>
+    @State var showInput = false
+    @State var input = ""
+    @State var tick = Date()
+    @State var lastWidgetUpdate = Date()
+    @State var lastLiveActivityUpdate = Date()
+    @State var timersExpanded = true
+    @State var liveTimer: Timer?
+    @State var optimizedTimer: Timer?
+    var pouchDuration: TimeInterval { timerSettings.currentTimerInterval }
+    let TIMER_INTERVAL: TimeInterval = 1.0
+    var totalLoadedPouches: Int { loadedPouches.values.reduce(0, +) }
+    var totalNicotine: Double {
         activeCans.reduce(0.0) { total, can in
             guard let canId = can.id, let count = loadedPouches[canId], count > 0 else { return total }
             return total + (can.strength * Double(count))
         }
     }
-    private var estimatedTotalAbsorption: Double {
+    var estimatedTotalAbsorption: Double {
         activeCans.reduce(0.0) { total, can in
             guard let canId = can.id, let count = loadedPouches[canId], count > 0 else { return total }
             let fraction = BrandAbsorptionProfile.fraction(forBrand: can.brand)
             return total + (can.strength * Double(count) * fraction)
         }
     }
-    private var canStartTimer: Bool { totalLoadedPouches > 0 }
-    private var weightedDuration: TimeInterval {
+    var canStartTimer: Bool { totalLoadedPouches > 0 }
+    var weightedDuration: TimeInterval {
         var pouchData: [(nicotineAmount: Double, duration: TimeInterval)] = []
         for can in activeCans {
             guard let canId = can.id, let count = loadedPouches[canId], count > 0 else { continue }
@@ -87,10 +86,10 @@ struct LogView: View {
         }
         return LogService.calculateWeightedDuration(pouches: pouchData)
     }
-    private var uniqueBrands: [String] {
+    var uniqueBrands: [String] {
         Array(Set(activeCans.compactMap { $0.brand }.filter { !$0.isEmpty })).sorted()
     }
-    private var filteredCans: [Can] {
+    var filteredCans: [Can] {
         if let brand = selectedBrand { return activeCans.filter { $0.brand == brand } }
         return Array(activeCans)
     }
