@@ -9,8 +9,8 @@ private func widgetAbsorptionFraction(forBrand brand: String?) -> Double {
         return WIDGET_ABSORPTION_FRACTION
     }
     let cleaned = raw
-        .replacingOccurrences(of: "\u00ae", with: "")
-        .replacingOccurrences(of: "\u2122", with: "")
+        .replacingOccurrences(of: "®", with: "")
+        .replacingOccurrences(of: "™", with: "")
         .replacingOccurrences(of: "+", with: " plus ")
         .replacingOccurrences(of: "-", with: " ")
         .replacingOccurrences(of: "_", with: " ")
