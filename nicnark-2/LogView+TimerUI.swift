@@ -29,14 +29,16 @@ extension LogView {
             let elapsed = max(0, tick.timeIntervalSince(pouch.insertionTime ?? Date()))
             let progress = min(max(elapsed / actualDuration, 0), 1)
             let isCompleted = remaining == 0
+            let pouchWord = activePouches.count == 1 ? "Pouch" : "Pouches"
+            let summaryLine = String(format: "%.1fmg total • %.3fmg absorbed", totalNicotine, totalAbsorbed)
             return AnyView(
                 HStack(spacing: 12) {
                     VStack(spacing: 8) {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("\(activePouches.count) Active Pouch\(activePouches.count == 1 ? "" : "es")")
+                                Text("\(activePouches.count) Active \(pouchWord)")
                                     .font(.caption).fontWeight(.semibold)
-                                Text("\(String(format: \"%.1f\", totalNicotine))mg total • \(String(format: \"%.3f\", totalAbsorbed))mg absorbed")
+                                Text(summaryLine)
                                     .font(.caption2).foregroundColor(.secondary)
                             }
                             Spacer()
@@ -58,7 +60,7 @@ extension LogView {
         }
     }
 
-    private func calculateRemaining(for pouch: PouchLog) -> TimeInterval {
+    func calculateRemaining(for pouch: PouchLog) -> TimeInterval {
         let insertionTime = pouch.insertionTime ?? tick
         let elapsed = max(0, tick.timeIntervalSince(insertionTime))
         let actualDuration = TimeInterval(pouch.timerDuration * 60)
@@ -84,8 +86,8 @@ extension LogView {
                     Image(systemName: "play.fill")
                     Text("Start Timer").fontWeight(.semibold)
                 }.font(.title2)
-                Text("\(totalLoadedPouches) pouch\(totalLoadedPouches == 1 ? "" : "es") • \(String(format: \"%.1f\", totalNicotine))mg").font(.caption)
-                Text("Estimated absorption: \(String(format: \"%.2f\", estimatedTotalAbsorption)) mg").font(.caption2)
+                Text(startTimerPouchLine).font(.caption)
+                Text(startTimerAbsorptionLine).font(.caption2)
                 if let estimatedLevel = estimatedNicotineLevel {
                     HStack {
                         Text("Est. Level").font(.caption2)
@@ -105,7 +107,16 @@ extension LogView {
         .disabled(!canStartTimer)
     }
 
-    private var sleepProtectionStatusView: some View {
+    private var startTimerPouchLine: String {
+        let word = totalLoadedPouches == 1 ? "pouch" : "pouches"
+        return String(format: "%d %@ • %.1fmg", totalLoadedPouches, word, totalNicotine)
+    }
+
+    private var startTimerAbsorptionLine: String {
+        String(format: "Estimated absorption: %.2f mg", estimatedTotalAbsorption)
+    }
+
+    var sleepProtectionStatusView: some View {
         let bedtimeText: String = {
             if let bedtime = sleepProtectionBedtime { return bedtime.formatted(date: .omitted, time: .shortened) }
             return "Bedtime"
@@ -126,6 +137,7 @@ extension LogView {
             return AnyView(EmptyView())
         }
         let isSafe = predicted <= sleepProtectionTargetMg
+        let comparison = String(format: "%.3f %@ %.1f mg", predicted, isSafe ? "≤" : ">", sleepProtectionTargetMg)
         return AnyView(
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
@@ -137,7 +149,7 @@ extension LogView {
                 HStack {
                     Text(isSafe ? "OK for bedtime" : "May interfere").font(.caption2).foregroundColor(.white.opacity(0.9))
                     Spacer()
-                    Text("\(predicted, specifier: \"%.3f\") \(isSafe ? "≤" : ">") \(sleepProtectionTargetMg, specifier: \"%.1f\") mg")
+                    Text(comparison)
                         .font(.caption2).fontWeight(.medium).foregroundColor(.white.opacity(0.9))
                 }
             }
@@ -154,7 +166,8 @@ extension LogView {
                 guard let mg = Double(input), mg > 0 else { return }
                 LogService.ensureCustomButton(for: mg, in: ctx)
                 try? ctx.save()
-                input = ""; showInput = false
+                input = ""
+                showInput = false
                 WidgetReloadCoordinator.reload()
             }.buttonStyle(.borderedProminent)
             Button("Cancel") { input = ""; showInput = false }.buttonStyle(.bordered)
@@ -174,6 +187,9 @@ extension LogView {
         let maxPossibleAbsorption = AbsorptionConstants.shared.calculateAbsorbedNicotine(
             nicotineContent: pouch.nicotineAmount, useTime: actualDuration, fullReleaseTime: actualDuration, absorptionFraction: pouch.absorptionFraction)
         let absorptionProgress = maxPossibleAbsorption > 0 ? currentAbsorption / maxPossibleAbsorption : 0
+        let strengthLine = String(format: "%.1fmg", pouch.nicotineAmount)
+        let maxLine = String(format: "Max %d%% · %.2fmg", Int((pouch.absorptionFraction * 100).rounded()), pouch.nicotineAmount * pouch.absorptionFraction)
+        let absorbedLine = String(format: "%.3fmg (%d%%)", currentAbsorption, Int(absorptionProgress * 100))
         HStack(spacing: 12) {
             VStack(spacing: 8) {
                 HStack {
@@ -181,17 +197,15 @@ extension LogView {
                         if let brand = pouch.can?.brand {
                             Text(brand).font(.caption).fontWeight(.semibold)
                         }
-                        Text("\(String(format: \"%.1f\", pouch.nicotineAmount))mg").font(.caption2).foregroundColor(.secondary)
-                        Text("Max \(Int((pouch.absorptionFraction * 100).rounded()))% · \(String(format: \"%.2f\", pouch.nicotineAmount * pouch.absorptionFraction))mg")
-                            .font(.caption2).fontWeight(.semibold).foregroundColor(.blue)
+                        Text(strengthLine).font(.caption2).foregroundColor(.secondary)
+                        Text(maxLine).font(.caption2).fontWeight(.semibold).foregroundColor(.blue)
                     }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 2) {
                         Text(isCompleted ? "Complete!" : formatMinutesSeconds(remaining))
                             .font(.system(size: 16, weight: .bold, design: .monospaced))
                             .foregroundColor(isCompleted ? .green : .blue)
-                        Text("\(String(format: \"%.3f\", currentAbsorption))mg (\(Int(absorptionProgress * 100))%)")
-                            .font(.caption2).foregroundColor(.secondary)
+                        Text(absorbedLine).font(.caption2).foregroundColor(.secondary)
                     }
                 }
                 ProgressView(value: progress).scaleEffect(y: 1.2)
