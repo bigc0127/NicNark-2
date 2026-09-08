@@ -108,7 +108,7 @@ extension LogView {
         if let t = liveTimer { RunLoop.main.add(t, forMode: .common) }
     }
 
-    private func endLiveActivityIfNeeded(for pouch: PouchLog) {
+    func endLiveActivityIfNeeded(for pouch: PouchLog) {
         liveTimer?.invalidate()
         liveTimer = nil
         let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
@@ -118,7 +118,7 @@ extension LogView {
         }
     }
 
-    private func updateLiveActivityTick() async {
+    func updateLiveActivityTick() async {
         guard let pouch = activePouches.max(by: { a, b in
             let ea = (a.insertionTime ?? .distantPast).addingTimeInterval(TimeInterval(a.timerDuration * 60))
             let eb = (b.insertionTime ?? .distantPast).addingTimeInterval(TimeInterval(b.timerDuration * 60))
@@ -151,7 +151,7 @@ extension LogView {
         }
     }
 
-    private func updateLiveActivityTickIfNeeded() async {
+    func updateLiveActivityTickIfNeeded() async {
         let now = Date()
         if now.timeIntervalSince(lastLiveActivityUpdate) >= 15 || checkIfPouchCompleted() {
             await updateLiveActivityTick()
@@ -159,7 +159,7 @@ extension LogView {
         }
     }
 
-    private func startOptimizedTimer() {
+    func startOptimizedTimer() {
         stopOptimizedTimer()
         optimizedTimer = Timer.scheduledTimer(withTimeInterval: TIMER_INTERVAL, repeats: true) { _ in
             Task { @MainActor in
@@ -172,7 +172,7 @@ extension LogView {
         if let timer = optimizedTimer { RunLoop.main.add(timer, forMode: .common) }
     }
 
-    private func stopOptimizedTimer() {
+    func stopOptimizedTimer() {
         optimizedTimer?.invalidate()
         optimizedTimer = nil
     }
