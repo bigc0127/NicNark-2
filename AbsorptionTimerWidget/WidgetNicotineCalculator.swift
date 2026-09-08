@@ -1,51 +1,47 @@
-//
-//  WidgetNicotineCalculator.swift
-//  nicnark-2
-//
-//  Widget-specific nicotine calculator that mirrors the exact logic from the main app's
-//  NicotineCalculator without complex dependencies like NotificationSettings.
-//
-//  This ensures the widget and main app show identical nicotine levels while keeping
-//  the widget target self-contained and buildable.
-//
-
 import Foundation
 import CoreData
 import os.log
 
-// MARK: - Widget Constants (mirrored from main app)
-
-/// Absorption fraction — estimated ~30% of stated mg reaches the bloodstream (a conservative
-/// product/population average, not an exact constant). Must match ABSORPTION_FRACTION in the
-/// main app's AbsorptionConstants.swift. See NICOTINE_CALCULATION_FORMULA.md for the derivation.
 private let WIDGET_ABSORPTION_FRACTION: Double = 0.30
 
-/// Dynamic absorption time based on user preference.
-/// Read from the shared App Group suite (NOT UserDefaults.standard): the widget runs
-/// in a separate process whose `.standard` domain is the extension's own and never
-/// sees the user's setting. The app mirrors `selectedTimerDuration` into this suite
-/// (see TimerSettings), so both processes agree.
+private func widgetAbsorptionFraction(forBrand brand: String?) -> Double {
+    guard let raw = brand?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), !raw.isEmpty else {
+        return WIDGET_ABSORPTION_FRACTION
+    }
+    let cleaned = raw
+        .replacingOccurrences(of: "\u00ae", with: "")
+        .replacingOccurrences(of: "\u2122", with: "")
+        .replacingOccurrences(of: "+", with: " plus ")
+        .replacingOccurrences(of: "-", with: " ")
+        .replacingOccurrences(of: "_", with: " ")
+    let key = cleaned.split(whereSeparator: { !$0.isLetter && !$0.isNumber && $0 != "!" }).joined(separator: " ")
+    if key.contains("zyn ultra") || key.contains("zynultra") { return 0.32 }
+    if key.contains("velo plus") || key.contains("veloplus") { return 0.30 }
+    if key.contains("on plus") || key.contains("on! plus") || key.contains("onplus") { return 0.34 }
+    if key == "zyn" || key.hasPrefix("zyn ") { return 0.38 }
+    if key == "velo" || key.hasPrefix("velo ") { return 0.24 }
+    if key == "fre" || key.hasPrefix("fre ") { return 0.36 }
+    if key == "alp" || key.hasPrefix("alp ") { return 0.34 }
+    if key == "clue" || key.hasPrefix("clue ") { return 0.33 }
+    if key == "on" || key == "on!" || key.hasPrefix("on ") || key.hasPrefix("on! ") { return 0.42 }
+    return WIDGET_ABSORPTION_FRACTION
+}
+
 private var WIDGET_FULL_RELEASE_TIME: TimeInterval {
     let groupDefaults = UserDefaults(suiteName: "group.ConnorNeedling.nicnark-2")
     let savedValue = groupDefaults?.integer(forKey: "selectedTimerDuration") ?? 0
     switch savedValue {
-    case 45: return 45 * 60  // 45 minutes in seconds
-    case 60: return 60 * 60  // 60 minutes in seconds
-    default: return 30 * 60  // 30 minutes in seconds (default)
+    case 45: return 45 * 60
+    case 60: return 60 * 60
+    default: return 30 * 60
     }
 }
 
-/// Nicotine half-life: 2 hours for decay calculations
 private let WIDGET_NICOTINE_HALF_LIFE: TimeInterval = 2 * 3600
 
-// MARK: - Widget Nicotine Calculator
-
-/// Simplified nicotine calculator for widget use that mirrors main app calculations exactly
 class WidgetNicotineCalculator {
     private let logger = Logger(subsystem: "com.nicnark.nicnark-2", category: "WidgetNicotineCalculator")
-    
-    /// Calculates comprehensive nicotine levels including decay from removed pouches
-    /// This mirrors NicotineCalculator.calculateTotalNicotineLevel() exactly
+
     func calculateTotalNicotineLevel(context: NSManagedObjectContext, at timestamp: Date = Date()) -> Double {
         do {
             let pouches = try fetchRecentPouches(context: context, endingAt: timestamp)
@@ -56,8 +52,6 @@ class WidgetNicotineCalculator {
         }
     }
 
-    /// Fetches pouches that could still contribute nicotine at `timestamp` (inserted within
-    /// the last 10 hours). Lets callers fetch ONCE and sample many points in memory.
     func fetchRecentPouches(context: NSManagedObjectContext, endingAt timestamp: Date = Date()) throws -> [PouchLog] {
         let lookbackTime = timestamp.addingTimeInterval(-10 * 3600)
         let request: NSFetchRequest<PouchLog> = PouchLog.fetchRequest()
@@ -66,9 +60,6 @@ class WidgetNicotineCalculator {
         return try context.fetch(request)
     }
 
-    /// Pure, fetch-free total-level computation from an already-fetched pouch array,
-    /// applying the same 10-hour window as the single-shot path so a timeline can fetch
-    /// once and sample every chart point in memory.
     func levelFromPouches(_ pouches: [PouchLog], at timestamp: Date) -> Double {
         let lookbackTime = timestamp.addingTimeInterval(-10 * 3600)
         var totalLevel = 0.0
@@ -80,9 +71,7 @@ class WidgetNicotineCalculator {
         }
         return max(0, totalLevel)
     }
-    
-    // MARK: - Private helpers (mirrored from main app)
-    
+
     private func calculatePouchContribution(
         pouch: PouchLog,
         at timestamp: Date,
@@ -102,31 +91,29 @@ class WidgetNicotineCalculator {
             nicotineContent: pouch.nicotineAmount,
             timeSinceInsertion: t,
             timeInMouth: tMouth,
-            fullReleaseTime: duration
+            fullReleaseTime: duration,
+            absorptionFraction: widgetAbsorptionFraction(forBrand: pouch.can?.brand)
         )
     }
 
-    /// Mirror of AbsorptionConstants.calculatePlasmaLevel (widget cannot import main-app types).
     private func calculatePlasmaLevel(
         nicotineContent: Double,
         timeSinceInsertion: TimeInterval,
         timeInMouth: TimeInterval,
-        fullReleaseTime: TimeInterval
+        fullReleaseTime: TimeInterval,
+        absorptionFraction: Double = WIDGET_ABSORPTION_FRACTION
     ) -> Double {
         let t = max(0, timeSinceInsertion)
         let T = max(1, fullReleaseTime)
         let tMouth = min(max(0, timeInMouth), t)
         let tInput = min(tMouth, T)
-        let deliverable = max(0, nicotineContent) * WIDGET_ABSORPTION_FRACTION
+        let deliverable = max(0, nicotineContent) * max(0, absorptionFraction)
         guard deliverable > 0, tInput > 0 else { return 0 }
-
         let ke = log(2.0) / WIDGET_NICOTINE_HALF_LIFE
         let infusionRate = deliverable / T
         let levelAtInputEnd = (infusionRate / ke) * (1 - exp(-ke * tInput))
         let tAfterInput = t - tInput
-        if tAfterInput <= 0 {
-            return max(0, levelAtInputEnd)
-        }
+        if tAfterInput <= 0 { return max(0, levelAtInputEnd) }
         return max(0, levelAtInputEnd * exp(-ke * tAfterInput))
     }
 }

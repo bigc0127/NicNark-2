@@ -11,8 +11,8 @@ import WidgetKit
 
 struct CanCardView: View {
     let can: Can
-    let loadedCount: Int  // How many pouches are currently loaded from this can
-    let activePouches: [PouchLog]  // Active pouches from this can
+    let loadedCount: Int
+    let activePouches: [PouchLog]
     let onIncrement: () -> Void
     let onDecrement: () -> Void
     let onEdit: (() -> Void)?
@@ -30,9 +30,7 @@ struct CanCardView: View {
     
     var body: some View {
         HStack(spacing: 12) {
-            // Left: Can info
             VStack(alignment: .leading, spacing: 6) {
-                // Brand/Flavor with Maps tap for low inventory
                 HStack(spacing: 4) {
                     if let flavor = can.flavor, !flavor.isEmpty {
                         VStack(alignment: .leading, spacing: 2) {
@@ -50,7 +48,6 @@ struct CanCardView: View {
                             .lineLimit(1)
                     }
                     
-                    // Show map pin icon when inventory is low
                     if Int(can.pouchCount) <= NotificationSettings.shared.canLowInventoryThreshold {
                         Image(systemName: "map.fill")
                             .font(.caption)
@@ -62,17 +59,25 @@ struct CanCardView: View {
                     handleCanNameTap()
                 }
                 
-                // Strength badge
-                Text("\(Int(can.strength))mg")
-                    .font(.system(.body, design: .rounded))
-                    .fontWeight(.bold)
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 2)
-                    .background(strengthColor)
-                    .cornerRadius(6)
+                HStack(spacing: 6) {
+                    Text("\(Int(can.strength))mg")
+                        .font(.system(.body, design: .rounded))
+                        .fontWeight(.bold)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(strengthColor)
+                        .cornerRadius(6)
+                    Text("Max \(maxAbsorptionPercent)% · \(String(format: \"%.2f\", maxAbsorptionMg))mg")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.blue)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color.blue.opacity(0.14))
+                        .clipShape(Capsule())
+                }
                 
-                // Remaining count with progress
                 HStack(spacing: 4) {
                     Text("\(can.pouchCount)")
                         .font(.caption)
@@ -82,14 +87,12 @@ struct CanCardView: View {
                         .foregroundColor(.secondary)
                 }
                 
-                // Mini progress bar
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
                         Rectangle()
                             .fill(Color.gray.opacity(0.2))
                             .frame(height: 3)
                             .cornerRadius(1.5)
-                        
                         Rectangle()
                             .fill(progressColor)
                             .frame(width: geometry.size.width * can.remainingPercentage, height: 3)
@@ -102,10 +105,8 @@ struct CanCardView: View {
             
             Spacer()
             
-            // Right side: Always show +/- controls (timers will be displayed at bottom)
             VStack(spacing: 4) {
                 HStack(spacing: 12) {
-                    // Minus button
                     Button(action: onDecrement) {
                         Image(systemName: "minus.circle.fill")
                             .font(.system(size: 28))
@@ -113,15 +114,12 @@ struct CanCardView: View {
                     }
                     .disabled(loadedCount == 0)
                     
-                    // Loaded count
                     Text("\(loadedCount)")
                         .font(.system(.title3, design: .rounded))
                         .fontWeight(.bold)
-                        // High-contrast on the amber loaded state so the count clearly stands out.
                         .foregroundColor(loadedCount > 0 ? .primary : .secondary)
                         .frame(minWidth: 30)
                     
-                    // Plus button
                     Button(action: onIncrement) {
                         Image(systemName: "plus.circle.fill")
                             .font(.system(size: 28))
@@ -130,7 +128,6 @@ struct CanCardView: View {
                     .disabled(can.pouchCount == 0)
                 }
                 
-                // Active pouches indicator
                 if !activePouches.isEmpty {
                     Text("\(activePouches.count) active")
                         .font(.caption2)
@@ -143,7 +140,6 @@ struct CanCardView: View {
         .glassEffect(loadedCount > 0 ? .regular.tint(loadedTint) : .regular, in: .rect(cornerRadius: 12))
         .opacity(can.isEmpty ? 0.6 : 1.0)
         .contextMenu {
-            // Editing cans lives only in Settings → Inventory Management, not on the Log screen.
             Button(role: .destructive) {
                 canManager.deleteCan(can, context: viewContext)
             } label: {
@@ -152,10 +148,19 @@ struct CanCardView: View {
         }
     }
     
-    /// Warm amber tint applied to a can card while pouches are loaded from it (replaces the
-    /// old blue). Bright and clearly "armed", while staying light enough that the dark card
-    /// text/badges keep high contrast on top of the translucent glass.
     private var loadedTint: Color { Color(red: 1.0, green: 0.72, blue: 0.0) }
+
+    private var maxAbsorptionFraction: Double {
+        BrandAbsorptionProfile.fraction(forBrand: can.brand)
+    }
+
+    private var maxAbsorptionPercent: Int {
+        Int((maxAbsorptionFraction * 100).rounded())
+    }
+
+    private var maxAbsorptionMg: Double {
+        can.strength * maxAbsorptionFraction
+    }
 
     private var strengthColor: Color {
         switch can.strength {
@@ -180,27 +185,14 @@ struct CanCardView: View {
         }
     }
     
-    // MARK: - Helper Functions
-    
     private func handleCanNameTap() {
-        // Only open Maps if inventory is low
         guard Int(can.pouchCount) <= NotificationSettings.shared.canLowInventoryThreshold else {
-            print("ℹ️ Can has sufficient inventory (\(can.pouchCount) pouches), not opening Maps")
             return
         }
-        
-        // Open Maps with search for gas stations
         if let url = URL(string: "maps://?q=gas+stations") {
-            UIApplication.shared.open(url, options: [:]) { success in
-                if success {
-                    print("📍 Opened Maps to search for gas stations (\(can.brand ?? "Unknown") is low: \(can.pouchCount) pouches)")
-                } else {
-                    print("❌ Failed to open Maps")
-                }
-            }
+            UIApplication.shared.open(url, options: [:], completionHandler: nil)
         }
     }
-    
 }
 
 struct CanCardView_Previews: PreviewProvider {
@@ -212,12 +204,11 @@ struct CanCardView_Previews: PreviewProvider {
         can.strength = 6
         can.pouchCount = 15
         can.initialCount = 20
-        
         return CanCardView(
             can: can,
             loadedCount: 2,
-            onIncrement: { print("Increment") },
-            onDecrement: { print("Decrement") }
+            onIncrement: { },
+            onDecrement: { }
         )
         .environment(\.managedObjectContext, context)
         .padding()

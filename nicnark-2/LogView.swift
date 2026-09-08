@@ -1,1458 +1,257 @@
 //
 // LogView.swift
 // nicnark-2
+// Restored from main; actions live in LogView+TimerUI/Logging/Support.swift
 //
-// The Primary Pouch Logging Interface
-//
-// This is the main tab users see when opening the app. It handles:
-// • Displaying can inventory as horizontal scrollable cards
-// • Quick pouch logging from tracked cans (one tap to log and decrement inventory)
-// • Manual dosage entry for custom amounts
-// • Live countdown display with absorption progress and nicotine level calculations
-// • Real-time timer updates that sync across widgets, Live Activities, and in-app UI
-// • CloudKit sync status indicators
-// • Barcode scanning for adding new cans to inventory
-//
-// All logging operations use LogService for consistency across UI, Shortcuts, and URL schemes.
-//
+import SwiftUI
+import CoreData
+import WidgetKit
+import ActivityKit
+import Combine
 
-// Import necessary frameworks
-import SwiftUI      // For building the user interface
-import CoreData     // For database operations
-import WidgetKit    // For updating home screen widgets
-import ActivityKit  // For Live Activities (Dynamic Island & Lock Screen)
-import Combine      // For handling data streams and notifications
-
-/**
- * LogView: The main pouch logging interface that users see when they open the app.
- * 
- * This SwiftUI view is designed around the core user workflow:
- * 1. User has cans in their inventory (shown as horizontal scrollable cards)
- * 2. User taps a can to log a pouch from it (automatically decrements inventory)
- * 3. A live countdown begins showing absorption progress and current nicotine level
- * 4. Timer updates propagate to widgets, Live Activities, and other devices via CloudKit
- * 
- * The view handles multiple input methods:
- * • Can inventory cards (primary method) - one tap logging with automatic inventory tracking
- * • Manual entry - custom dosage amounts for users who don't track cans
- * • Barcode scanning - quick way to add new cans to inventory
- * • Legacy custom buttons - backward compatibility for existing users
- * 
- * Real-time features:
- * • In-app countdown timer (updates every second for smooth progress bars)
- * • Live Activity updates (every minute to preserve battery)
- * • Widget timeline updates (triggered on pouch events)
- * • CloudKit sync status overlay (shows when syncing across devices)
- */
 struct LogView: View {
-    // MARK: - Core Data Properties
-    // @Environment gets values from the SwiftUI environment that are shared across views
-    @Environment(\.managedObjectContext) private var ctx  // Database context for all Core Data operations
-
-    // MARK: - User Settings & Preferences
-    @StateObject private var timerSettings = TimerSettings.shared  // Global timer settings (30min default, custom durations)
-    @AppStorage("autoRemovePouches") private var autoRemovePouches = false    // Auto-remove pouches when timer ends
-    @AppStorage("autoRemoveDelayMinutes") private var autoRemoveDelayMinutes: Double = 0  // Delay before auto-removing (0 = immediate)
-    @AppStorage("hideLegacyButtons") private var hideLegacyButtons = false    // Hide old-style quick buttons
-
-    // MARK: - Sleep Protection
-    @AppStorage(SleepProtectionKeys.enabled) private var sleepProtectionEnabled = false
-    @AppStorage(SleepProtectionKeys.bedtimeSecondsFromMidnight) private var sleepProtectionBedtimeSecondsFromMidnight: Int = 23 * 3600
-    @AppStorage(SleepProtectionKeys.targetMg) private var sleepProtectionTargetMg: Double = 1.3
-    
-    // MARK: - Can Inventory Management
-    @StateObject private var canManager = CanManager.shared           // Singleton for managing can inventory
-    @State private var loadedPouches: [UUID: Int] = [:]              // Track loaded pouches per can (canID -> count)
-    @State private var showingAddCan = false                          // Controls "Add Can" sheet presentation
-    @State private var showingBarcodeScanner = false                  // Barcode scanner sheet presentation
-    @State private var scannedBarcode: String? = nil                  // Temporarily holds scanned barcode data
-    @State private var pendingBarcodeAfterScan: String? = nil         // Handle after scanner sheet dismiss
-    @State private var selectedCan: Can?                              // Currently selected can for operations
-    @State private var showingEditCan = false                         // Edit can details sheet
-    @State private var canToEdit: Can?                                // Can being edited
-    @State private var showingDuplicateCanAlert = false               // Alert when scanning duplicate barcodes
-    @State private var duplicateCanForAlert: Can?                     // The duplicate can found
-    @State private var selectedBrand: String? = nil                   // Currently selected brand filter
-    
-    // MARK: - Nicotine Level Information
-    @State private var currentNicotineLevel: Double = 0.0            // Current nicotine level in bloodstream
-    @State private var estimatedNicotineLevel: Double? = nil          // Estimated level after adding loaded pouches
-
-    // Sleep Protection evaluation (computed for currently-loaded pouches)
-    @State private var sleepProtectionBedtime: Date? = nil
-    @State private var sleepProtectionPredictedLevelAtBedtime: Double? = nil
-    @State private var isEvaluatingSleepProtection = false
-    
-    // MARK: - Core Data Fetch Requests
-    // @FetchRequest automatically fetches data and updates the UI when the data changes
-    
-    /// Fetches all cans that have pouches OR have active timers running.
-    /// This ensures cans with active pouches remain visible even when inventory reaches zero.
-    /// Sorted by pouch count (fullest first), then by date added (newest first).
-    /// This creates the horizontal scrollable can cards at the top of the screen.
+    @Environment(\.managedObjectContext) var ctx
+    @StateObject var timerSettings = TimerSettings.shared
+    @AppStorage("autoRemovePouches") var autoRemovePouches = false
+    @AppStorage("autoRemoveDelayMinutes") var autoRemoveDelayMinutes: Double = 0
+    @AppStorage("hideLegacyButtons") var hideLegacyButtons = false
+    @AppStorage(SleepProtectionKeys.enabled) var sleepProtectionEnabled = false
+    @AppStorage(SleepProtectionKeys.bedtimeSecondsFromMidnight) var sleepProtectionBedtimeSecondsFromMidnight: Int = 23 * 3600
+    @AppStorage(SleepProtectionKeys.targetMg) var sleepProtectionTargetMg: Double = 1.3
+    @StateObject var canManager = CanManager.shared
+    @State var loadedPouches: [UUID: Int] = [:]
+    @State var showingAddCan = false
+    @State var showingBarcodeScanner = false
+    @State var scannedBarcode: String? = nil
+    @State var pendingBarcodeAfterScan: String? = nil
+    @State var selectedCan: Can?
+    @State var showingEditCan = false
+    @State var canToEdit: Can?
+    @State var showingDuplicateCanAlert = false
+    @State var duplicateCanForAlert: Can?
+    @State var selectedBrand: String? = nil
+    @State var currentNicotineLevel: Double = 0.0
+    @State var estimatedNicotineLevel: Double? = nil
+    @State var sleepProtectionBedtime: Date? = nil
+    @State var sleepProtectionPredictedLevelAtBedtime: Double? = nil
+    @State var isEvaluatingSleepProtection = false
     @FetchRequest(
         entity: Can.entity(),
         sortDescriptors: [
-            NSSortDescriptor(keyPath: \Can.pouchCount, ascending: false),  // Fullest cans first
-            NSSortDescriptor(keyPath: \Can.dateAdded, ascending: false)    // Then newest first
+            NSSortDescriptor(keyPath: \Can.pouchCount, ascending: false),
+            NSSortDescriptor(keyPath: \Can.dateAdded, ascending: false)
         ],
-        predicate: NSPredicate(format: "pouchCount > 0 OR (ANY pouchLogs.removalTime == nil)")  // Show cans with pouches OR active timers
-    ) private var activeCans: FetchedResults<Can>
-
-    /// Fetches user-created custom dosage buttons (e.g., 4mg, 8mg, 12mg).
-    /// These are created automatically when users log non-standard amounts.
-    /// Sorted by nicotine amount (3mg, 4mg, 6mg, 8mg, etc.)
-    /// Used for the "Legacy Quick Add" section for backward compatibility.
+        predicate: NSPredicate(format: "pouchCount > 0 OR (ANY pouchLogs.removalTime == nil)")
+    ) var activeCans: FetchedResults<Can>
     @FetchRequest(
         entity: CustomButton.entity(),
-        sortDescriptors: [NSSortDescriptor(keyPath: \CustomButton.nicotineAmount, ascending: true)]  // Lowest to highest
-    ) private var customButtons: FetchedResults<CustomButton>
-
-    /// Fetches pouches currently being used (removalTime == nil).
-    /// The app only allows one active pouch at a time, so this should contain 0 or 1 items.
-    /// When a pouch exists here, the countdown timer UI is displayed.
-    /// Sorted by insertion time (newest first, though only one should exist).
+        sortDescriptors: [NSSortDescriptor(keyPath: \CustomButton.nicotineAmount, ascending: true)]
+    ) var customButtons: FetchedResults<CustomButton>
     @FetchRequest(
         entity: PouchLog.entity(),
         sortDescriptors: [NSSortDescriptor(keyPath: \PouchLog.insertionTime, ascending: false)],
-        predicate: NSPredicate(format: "removalTime == nil")  // Only active pouches (still in use)
-    ) private var activePouches: FetchedResults<PouchLog>
-    
-    // MARK: - UI State Properties
-    // @State creates local view state that persists across view updates
-    @State private var showInput = false           // Toggle for manual dosage entry text field
-    @State private var input = ""                  // User's typed dosage amount (e.g., "4.5")
-    @State private var tick = Date()               // Current timestamp, updated by timer for real-time calculations
-    @State private var lastWidgetUpdate = Date()   // Throttle widget updates (expensive operation)
-    @State private var lastLiveActivityUpdate = Date() // Throttle Live Activity updates (battery optimization)
-    @State private var timersExpanded = true       // Toggle between expanded and collapsed timer view
-
-    // MARK: - Timer Management
-    /// Timer for updating Live Activities and widgets (runs less frequently to save battery)
-    /// Fires every minute to keep Lock Screen and home screen widgets updated
-    @State private var liveTimer: Timer?
-    
-    /// Timer for in-app UI updates (runs every second for smooth countdown animations)
-    /// Only active when the app is in the foreground and there's an active pouch
-    @State private var optimizedTimer: Timer?
-    
-    // MARK: - Computed Properties
-    /// Returns the current timer duration based on user settings.
-    /// Can be 30 minutes (default) or custom duration set in TimerSettings.
-    private var pouchDuration: TimeInterval {
-        return timerSettings.currentTimerInterval
-    }
-    /// How often to update the in-app countdown display (1 second for smooth progress)
-    private let TIMER_INTERVAL: TimeInterval = 1.0
-    
-    // MARK: - Multi-Pouch Loading Computed Properties
-    
-    /// Total number of pouches loaded across all cans
-    private var totalLoadedPouches: Int {
-        loadedPouches.values.reduce(0, +)
-    }
-    
-    /// Total nicotine from all loaded pouches
-    private var totalNicotine: Double {
+        predicate: NSPredicate(format: "removalTime == nil")
+    ) var activePouches: FetchedResults<PouchLog>
+    @State var showInput = false
+    @State var input = ""
+    @State var tick = Date()
+    @State var lastWidgetUpdate = Date()
+    @State var lastLiveActivityUpdate = Date()
+    @State var timersExpanded = true
+    @State var liveTimer: Timer?
+    @State var optimizedTimer: Timer?
+    var pouchDuration: TimeInterval { timerSettings.currentTimerInterval }
+    let TIMER_INTERVAL: TimeInterval = 1.0
+    var totalLoadedPouches: Int { loadedPouches.values.reduce(0, +) }
+    var totalNicotine: Double {
         activeCans.reduce(0.0) { total, can in
             guard let canId = can.id, let count = loadedPouches[canId], count > 0 else { return total }
             return total + (can.strength * Double(count))
         }
     }
-    
-    /// Estimated total nicotine absorption (30% of total nicotine)
-    private var estimatedTotalAbsorption: Double {
-        return totalNicotine * ABSORPTION_FRACTION
+    var estimatedTotalAbsorption: Double {
+        activeCans.reduce(0.0) { total, can in
+            guard let canId = can.id, let count = loadedPouches[canId], count > 0 else { return total }
+            let fraction = BrandAbsorptionProfile.fraction(forBrand: can.brand)
+            return total + (can.strength * Double(count) * fraction)
+        }
     }
-    
-    /// Whether the Start Timer button should be enabled
-    private var canStartTimer: Bool {
-        totalLoadedPouches > 0  // Can start even if other pouches are active
-    }
-    
-    /// Weighted average duration based on loaded pouches
-    private var weightedDuration: TimeInterval {
+    var canStartTimer: Bool { totalLoadedPouches > 0 }
+    var weightedDuration: TimeInterval {
         var pouchData: [(nicotineAmount: Double, duration: TimeInterval)] = []
-        
         for can in activeCans {
             guard let canId = can.id, let count = loadedPouches[canId], count > 0 else { continue }
-            
-            let duration: TimeInterval
-            if can.duration > 0 {
-                // Can has custom duration
-                duration = TimeInterval(can.duration * 60)
-            } else {
-                // Use app default
-                duration = FULL_RELEASE_TIME
-            }
-            
-            // Add each pouch from this can
-            for _ in 0..<count {
-                pouchData.append((nicotineAmount: can.strength, duration: duration))
-            }
+            let duration: TimeInterval = can.duration > 0 ? TimeInterval(can.duration * 60) : FULL_RELEASE_TIME
+            for _ in 0..<count { pouchData.append((nicotineAmount: can.strength, duration: duration)) }
         }
-        
         return LogService.calculateWeightedDuration(pouches: pouchData)
     }
-    
-    /// Unique brand names from active cans for filtering
-    private var uniqueBrands: [String] {
-        let brands = activeCans.compactMap { $0.brand }.filter { !$0.isEmpty }
-        return Array(Set(brands)).sorted()
+    var uniqueBrands: [String] {
+        Array(Set(activeCans.compactMap { $0.brand }.filter { !$0.isEmpty })).sorted()
     }
-    
-    /// Filtered cans based on selected brand
-    private var filteredCans: [Can] {
-        if let brand = selectedBrand {
-            return activeCans.filter { $0.brand == brand }
-        }
+    var filteredCans: [Can] {
+        if let brand = selectedBrand { return activeCans.filter { $0.brand == brand } }
         return Array(activeCans)
     }
-
     var body: some View {
         ZStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    // Today's progress toward the user's daily goal. Renders nothing until a
-                    // goal is set in Insights, so it stays out of the way otherwise.
                     DailyGoalCard()
-
-                    // Loading interface
-                    Text("Load Pouches")
-                        .font(.headline)
-                        .padding(.top, 16)
-                    
-                    // Brand filter row
+                    Text("Load Pouches").font(.headline).padding(.top, 16)
                     if !uniqueBrands.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 12) {
-                                // "All" button
-                                Button(action: {
-                                    selectedBrand = nil
-                                }) {
-                                    Text("All")
-                                        .font(.subheadline)
-                                        .fontWeight(.semibold)
-                                        .padding(.horizontal, 16)
-                                        .padding(.vertical, 8)
+                                Button(action: { selectedBrand = nil }) {
+                                    Text("All").font(.subheadline).fontWeight(.semibold)
+                                        .padding(.horizontal, 16).padding(.vertical, 8)
                                         .background(selectedBrand == nil ? Color.blue : Color(.secondarySystemBackground))
                                         .foregroundColor(selectedBrand == nil ? .white : .primary)
                                         .cornerRadius(20)
                                 }
-                                
-                                // Brand buttons
                                 ForEach(uniqueBrands, id: \.self) { brand in
-                                    Button(action: {
-                                        selectedBrand = brand
-                                    }) {
-                                        Text(brand)
-                                            .font(.subheadline)
-                                            .fontWeight(.semibold)
-                                            .padding(.horizontal, 16)
-                                            .padding(.vertical, 8)
+                                    Button(action: { selectedBrand = brand }) {
+                                        Text(brand).font(.subheadline).fontWeight(.semibold)
+                                            .padding(.horizontal, 16).padding(.vertical, 8)
                                             .background(selectedBrand == brand ? Color.blue : Color(.secondarySystemBackground))
                                             .foregroundColor(selectedBrand == brand ? .white : .primary)
                                             .cornerRadius(20)
                                     }
                                 }
-                            }
-                            .padding(.horizontal)
+                            }.padding(.horizontal)
                         }
                     }
-                    
-                    // Vertical scrolling can inventory
                     if !activeCans.isEmpty {
                         ForEach(filteredCans, id: \.self) { can in
                             if let canId = can.id {
-                                // Get active pouches for this specific can
-                                let canActivePouches = activePouches.filter { pouch in
-                                    pouch.can?.id == canId
-                                }
-                                
+                                let canActivePouches = activePouches.filter { $0.can?.id == canId }
                                 CanCardView(
                                     can: can,
                                     loadedCount: loadedPouches[canId] ?? 0,
                                     activePouches: Array(canActivePouches),
-                                    onIncrement: {
-                                        incrementPouch(for: canId)
-                                    },
-                                    onDecrement: {
-                                        decrementPouch(for: canId)
-                                    },
+                                    onIncrement: { incrementPouch(for: canId) },
+                                    onDecrement: { decrementPouch(for: canId) },
                                     onEdit: {
                                         canToEdit = can
-                                        DispatchQueue.main.async {
-                                            showingEditCan = true
-                                        }
+                                        DispatchQueue.main.async { showingEditCan = true }
                                     }
-                                )
-                                .padding(.horizontal)
+                                ).padding(.horizontal)
                             }
                         }
                     } else {
-                        // Empty state - no cans
                         VStack(spacing: 12) {
-                            Image(systemName: "tray")
-                                .font(.system(size: 48))
-                                .foregroundColor(.gray)
-                            
-                            Text("No cans in inventory")
-                                .font(.headline)
-                                .foregroundColor(.secondary)
-                            
-                            Text("Add a can to start tracking")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                            Image(systemName: "tray").font(.system(size: 48)).foregroundColor(.gray)
+                            Text("No cans in inventory").font(.headline).foregroundColor(.secondary)
+                            Text("Add a can to start tracking").font(.caption).foregroundColor(.secondary)
                         }
-                        .frame(height: 180)
-                        .frame(maxWidth: .infinity)
-                        .background(Color(.secondarySystemBackground))
-                        .cornerRadius(12)
-                        .padding(.horizontal)
+                        .frame(height: 180).frame(maxWidth: .infinity)
+                        .background(Color(.secondarySystemBackground)).cornerRadius(12).padding(.horizontal)
                     }
-                    
-                    // Add can and scan buttons
                     HStack(spacing: 12) {
-                        Button(action: {
-                            showingAddCan = true
-                        }) {
-                            HStack {
-                                Image(systemName: "plus.circle.fill")
-                                Text("Add Can")
-                            }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .frame(height: 44)
-                        
-                        Button(action: {
-                            pendingBarcodeAfterScan = nil
-                            showingBarcodeScanner = true
-                        }) {
-                            HStack {
-                                Image(systemName: "barcode.viewfinder")
-                                Text("Scan Barcode")
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .frame(height: 44)
-                    }
-                    .padding(.horizontal)
-                    .padding(.bottom, calculateBottomPadding()) // Space for buttons at bottom
+                        Button(action: { showingAddCan = true }) {
+                            HStack { Image(systemName: "plus.circle.fill"); Text("Add Can") }
+                        }.buttonStyle(.borderedProminent).frame(height: 44)
+                        Button(action: { pendingBarcodeAfterScan = nil; showingBarcodeScanner = true }) {
+                            HStack { Image(systemName: "barcode.viewfinder"); Text("Scan Barcode") }
+                        }.buttonStyle(.bordered).frame(height: 44)
+                    }.padding(.horizontal).padding(.bottom, calculateBottomPadding())
                 }
             }
-            
-            // Bottom buttons overlay
             VStack {
                 Spacer()
-                
                 VStack(spacing: 8) {
-                    // Active pouches countdown display
                     if !activePouches.isEmpty {
-                        // Toggle button at top
-                        Button(action: {
-                            withAnimation {
-                                timersExpanded.toggle()
-                            }
-                        }) {
+                        Button(action: { withAnimation { timersExpanded.toggle() } }) {
                             HStack {
                                 Image(systemName: timersExpanded ? "chevron.down" : "chevron.up")
-                                Text(timersExpanded ? "Collapse" : "Expand \(activePouches.count) Timer\(activePouches.count == 1 ? "" : "s")")
-                                    .font(.caption)
-                            }
-                            .foregroundColor(.blue)
+                                Text(timersExpanded ? "Collapse" : "Expand \(activePouches.count) Timer\(activePouches.count == 1 ? "" : "s")").font(.caption)
+                            }.foregroundColor(.blue)
                         }
-                        
                         if timersExpanded {
-                            // Show all timers
-                            ForEach(activePouches, id: \.self) { pouch in
-                                compactCountdownPane(for: pouch)
-                            }
+                            ForEach(activePouches, id: \.self) { pouch in compactCountdownPane(for: pouch) }
                         } else {
-                            // Show collapsed summary
                             collapsedTimerSummary
                         }
                     }
-                    
-                    // Remove All Active Pouches button (shown when any pouches are active)
-                    if !activePouches.isEmpty {
-                        removeAllActivePouchesButton
-                    }
-                    
-                    // Start Timer button (shown when pouches are loaded)
-                    if canStartTimer {
-                        startTimerButton
-                    }
-                }
-                .padding(.horizontal)
-                .padding(.bottom, 16)
-                .background(.regularMaterial)
+                    if !activePouches.isEmpty { removeAllActivePouchesButton }
+                    if canStartTimer { startTimerButton }
+                }.padding(.horizontal).padding(.bottom, 16).background(.regularMaterial)
             }
-            // Pin this overlay to the bottom. Without an explicit full-height, bottom-aligned
-            // frame the container occasionally failed to fill the ZStack after returning from
-            // the background — collapsing the Spacer above and leaving the "Remove All / timers"
-            // panel floating mid-screen. The Spacer area stays transparent (only the inner panel
-            // has the material background), so scrolling behind it is unaffected.
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-
-            // Sync overlay - only shows when syncing and iCloud is enabled
-            if CloudKitSyncState.shared.isCloudKitEnabled && CloudKitSyncState.shared.isSyncing {
-                syncOverlay
-            }
+            if CloudKitSyncState.shared.isCloudKitEnabled && CloudKitSyncState.shared.isSyncing { syncOverlay }
         }
         .navigationTitle("NicNark")
         .navigationBarTitleDisplayMode(.large)
         .onAppear {
-            // Only clean up stale pouches after a delay to avoid conflicts with CloudKit sync
-            // This prevents accidentally removing pouches that are still being synced
             Task {
-                // Wait a moment for CloudKit sync to update pouch states
                 try? await Task.sleep(nanoseconds: 2 * NSEC_PER_SEC)
-                await MainActor.run {
-                    cleanUpStale()
-                }
+                await MainActor.run { cleanUpStale() }
             }
-            
-            let authInfo = ActivityAuthorizationInfo()
-            print("📱 Live Activities enabled: \(authInfo.areActivitiesEnabled)")
-
-            // Start initial sync if needed
-            Task {
-                await CloudKitSyncState.shared.startInitialSync()
-            }
+            print("Live Activities enabled: \(ActivityAuthorizationInfo().areActivitiesEnabled)")
+            Task { await CloudKitSyncState.shared.startInitialSync() }
             WidgetReloadCoordinator.reload()
+            if !activePouches.isEmpty { startOptimizedTimer() }
+            updateNicotineLevels()
+            updateSleepProtectionEvaluation()
+            canManager.fetchActiveCans(context: ctx)
+            if !showingBarcodeScanner { pendingBarcodeAfterScan = nil }
         }
         .onChange(of: activePouches.isEmpty) { _, isEmpty in
-            if isEmpty {
-                stopOptimizedTimer()
-            } else {
-                startOptimizedTimer()
-            }
+            if isEmpty { stopOptimizedTimer() } else { startOptimizedTimer() }
         }
-        .onAppear {
-            if !activePouches.isEmpty {
-                startOptimizedTimer()
-            }
-        }
-        .onDisappear {
-            stopOptimizedTimer()
-        }
+        .onDisappear { stopOptimizedTimer() }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchRemoved"))) { _ in
-            // Removal already persisted by PouchRemovalService. Refresh local timers only
-            // (do not call removePouch again). Contract: userInfo has pouchIds: [String] + count.
-            if activePouches.isEmpty {
-                stopOptimizedTimer()
-            } else {
-                startOptimizedTimer()
-                startLiveTimerIfNeeded()
-            }
+            if activePouches.isEmpty { stopOptimizedTimer() } else { startOptimizedTimer(); startLiveTimerIfNeeded() }
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchLogged"))) { notification in
-            // When a pouch is logged from anywhere (URL schemes, etc.), start the Live Activity timer
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PouchLogged"))) { _ in
             startLiveTimerIfNeeded()
-            // Also start the optimized timer for in-app updates
-            if !activePouches.isEmpty {
-                startOptimizedTimer()
-            }
-            // Update nicotine level display
+            if !activePouches.isEmpty { startOptimizedTimer() }
             updateNicotineLevels()
         }
-        .onAppear {
-            // Update nicotine levels when view appears
-            updateNicotineLevels()
-            updateSleepProtectionEvaluation()
-        }
-        .onChange(of: loadedPouches) { _, _ in
-            // Update estimated nicotine level when loaded pouches change
-            updateNicotineLevels()
-            updateSleepProtectionEvaluation()
-        }
-        .onChange(of: sleepProtectionEnabled) { _, _ in
-            updateSleepProtectionEvaluation()
-        }
-        .onChange(of: sleepProtectionBedtimeSecondsFromMidnight) { _, _ in
-            updateSleepProtectionEvaluation()
-        }
-        .onChange(of: sleepProtectionTargetMg) { _, _ in
-            updateSleepProtectionEvaluation()
-        }
+        .onChange(of: loadedPouches) { _, _ in updateNicotineLevels(); updateSleepProtectionEvaluation() }
+        .onChange(of: sleepProtectionEnabled) { _, _ in updateSleepProtectionEvaluation() }
+        .onChange(of: sleepProtectionBedtimeSecondsFromMidnight) { _, _ in updateSleepProtectionEvaluation() }
+        .onChange(of: sleepProtectionTargetMg) { _, _ in updateSleepProtectionEvaluation() }
         .sheet(isPresented: $showingAddCan) {
-            CanDetailView(barcode: scannedBarcode)
-                .environment(\.managedObjectContext, ctx)
-                .onDisappear {
-                    scannedBarcode = nil
-                }
+            CanDetailView(barcode: scannedBarcode).environment(\.managedObjectContext, ctx).onDisappear { scannedBarcode = nil }
         }
         .sheet(isPresented: $showingEditCan) {
             if let can = canToEdit {
-                CanDetailView(editingCan: can)
-                    .environment(\.managedObjectContext, ctx)
+                CanDetailView(editingCan: can).environment(\.managedObjectContext, ctx)
             } else {
-                // Fallback if can is nil (shouldn't happen)
-                Text("Error: No can selected")
-                    .onAppear {
-                        showingEditCan = false
-                    }
+                Text("Error: No can selected").onAppear { showingEditCan = false }
             }
         }
         .onChange(of: showingEditCan) { _, isShowing in
-            if !isShowing {
-                canToEdit = nil
-                canManager.fetchActiveCans(context: ctx)
-            }
+            if !isShowing { canToEdit = nil; canManager.fetchActiveCans(context: ctx) }
         }
         .sheet(isPresented: $showingBarcodeScanner, onDismiss: {
             guard let code = pendingBarcodeAfterScan else { return }
             pendingBarcodeAfterScan = nil
-            // Defer past dismiss animation; re-check so a quick re-open does not stack sheets.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 guard !showingBarcodeScanner, pendingBarcodeAfterScan == nil else { return }
                 handleScannedBarcode(code)
             }
         }) {
-            BarcodeScannerView { barcode in
-                pendingBarcodeAfterScan = barcode
-                showingBarcodeScanner = false
-            }
-        }
-        .onAppear {
-            canManager.fetchActiveCans(context: ctx)
-            if !showingBarcodeScanner {
-                pendingBarcodeAfterScan = nil
-            }
+            BarcodeScannerView { barcode in pendingBarcodeAfterScan = barcode; showingBarcodeScanner = false }
         }
         .alert("Can Already in Inventory", isPresented: $showingDuplicateCanAlert) {
             Button("Add Pouches to Existing Can") {
                 if let can = duplicateCanForAlert {
-                    // Add the full pouch count to the existing can
                     can.pouchCount += can.initialCount
-                    do {
-                        try ctx.save()
-                        canManager.fetchActiveCans(context: ctx)
-                    } catch {
-                        print("Failed to update can count: \(error)")
-                    }
+                    do { try ctx.save(); canManager.fetchActiveCans(context: ctx) } catch { print("Failed to update can count: \(error)") }
                 }
                 duplicateCanForAlert = nil
             }
             Button("Add as Separate Can") {
-                // Show add can screen to create a new can with the same barcode
-                if let can = duplicateCanForAlert {
-                    scannedBarcode = can.barcode
-                    showingAddCan = true
-                }
+                if let can = duplicateCanForAlert { scannedBarcode = can.barcode; showingAddCan = true }
                 duplicateCanForAlert = nil
             }
-            Button("Cancel", role: .cancel) {
-                duplicateCanForAlert = nil
-            }
+            Button("Cancel", role: .cancel) { duplicateCanForAlert = nil }
         } message: {
             if let can = duplicateCanForAlert {
                 Text("\(can.brand ?? "Unknown") \(can.flavor ?? "") (\(Int(can.strength))mg) is already in your inventory with \(can.pouchCount) pouches. Would you like to add more pouches to this can or track it as a separate can?")
             }
         }
     }
-
-    // MARK: - UI Components
-    
-    var collapsedTimerSummary: some View {
-        let longestPouch = activePouches.max(by: { pouch1, pouch2 in
-            let remaining1 = calculateRemaining(for: pouch1)
-            let remaining2 = calculateRemaining(for: pouch2)
-            return remaining1 < remaining2
-        })
-        
-        let totalNicotine = activePouches.reduce(0.0) { $0 + $1.nicotineAmount }
-        let totalAbsorbed = activePouches.reduce(0.0) { total, pouch in
-            let insertion = pouch.insertionTime ?? Date()
-            let elapsed = tick.timeIntervalSince(insertion)
-            let duration = pouch.timerDuration > 0 ? TimeInterval(pouch.timerDuration) * 60 : FULL_RELEASE_TIME
-            let absorbed = AbsorptionConstants.shared.calculateCurrentNicotineLevel(
-                nicotineContent: pouch.nicotineAmount,
-                elapsedTime: elapsed,
-                fullReleaseTime: duration
-            )
-            return total + absorbed
-        }
-        
-        if let pouch = longestPouch {
-            let remaining = calculateRemaining(for: pouch)
-            let actualDuration = TimeInterval(pouch.timerDuration * 60)
-            let elapsed = max(0, tick.timeIntervalSince(pouch.insertionTime ?? Date()))
-            let progress = min(max(elapsed / actualDuration, 0), 1)
-            let isCompleted = remaining == 0
-            
-            return AnyView(
-                HStack(spacing: 12) {
-                    VStack(spacing: 8) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("\(activePouches.count) Active Pouch\(activePouches.count == 1 ? "" : "es")")
-                                    .font(.caption)
-                                    .fontWeight(.semibold)
-                                Text("\(String(format: "%.1f", totalNicotine))mg total • \(String(format: "%.3f", totalAbsorbed))mg absorbed")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                            }
-                            
-                            Spacer()
-                            
-                            VStack(alignment: .trailing, spacing: 2) {
-                                Text(isCompleted ? "Complete!" : formatMinutesSeconds(remaining))
-                                    .font(.system(size: 16, weight: .bold, design: .monospaced))
-                                    .foregroundColor(isCompleted ? .green : .blue)
-                                Text("Longest Timer")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        
-                        ProgressView(value: progress)
-                            .scaleEffect(y: 1.2)
-                    }
-                }
-                .padding(12)
-                .glassEffect(.regular, in: .rect(cornerRadius: 10))
-            )
-        } else {
-            return AnyView(EmptyView())
-        }
-    }
-    
-    private func calculateRemaining(for pouch: PouchLog) -> TimeInterval {
-        let insertionTime = pouch.insertionTime ?? tick
-        let elapsed = max(0, tick.timeIntervalSince(insertionTime))
-        let actualDuration = TimeInterval(pouch.timerDuration * 60)
-        return max(min(actualDuration - elapsed, actualDuration), 0)
-    }
-    
-    var removeAllActivePouchesButton: some View {
-        Button(action: removeAllActivePouches) {
-            HStack {
-                Image(systemName: "xmark.circle.fill")
-                Text("Remove All Active Pouches")
-                    .fontWeight(.semibold)
-            }
-            .font(.headline)
-            .frame(maxWidth: .infinity)
-            .padding()
-        }
-        .buttonStyle(.glass)
-        .tint(.red)
-    }
-    
-    var startTimerButton: some View {
-        Button(action: startTimerWithLoadedPouches) {
-            VStack(spacing: 8) {
-                HStack {
-                    Image(systemName: "play.fill")
-                    Text("Start Timer")
-                        .fontWeight(.semibold)
-                }
-                .font(.title2)
-
-                Text("\(totalLoadedPouches) pouch\(totalLoadedPouches == 1 ? "" : "es") • \(String(format: "%.1f", totalNicotine))mg")
-                    .font(.caption)
-
-                Text("Estimated absorption: \(String(format: "%.2f", estimatedTotalAbsorption)) mg")
-                    .font(.caption2)
-
-                // Show estimated nicotine level
-                if let estimatedLevel = estimatedNicotineLevel {
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack {
-                            Text("Est. Level")
-                                .font(.caption2)
-                            Spacer()
-                            Text(String(format: "%.3f mg", estimatedLevel))
-                                .font(.caption2)
-                                .fontWeight(.medium)
-                        }
-                    }
-                }
-
-                if sleepProtectionEnabled && totalLoadedPouches > 0 {
-                    sleepProtectionStatusView
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .padding()
-        }
-        .buttonStyle(.glassProminent)
-        // The glass button style defaults to a full capsule; on this large content card the
-        // pill sides bow into the text. Use a rounded rectangle (matching the pouch cards'
-        // radius 20) so it reads as a card, not a pill.
-        .buttonBorderShape(.roundedRectangle(radius: 20))
-        .tint(.blue)
-        .disabled(!canStartTimer)
-    }
-
-    private var sleepProtectionStatusView: some View {
-        let bedtimeText: String = {
-            if let bedtime = sleepProtectionBedtime {
-                return bedtime.formatted(date: .omitted, time: .shortened)
-            }
-            return "Bedtime"
-        }()
-
-        if isEvaluatingSleepProtection {
-            return AnyView(
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .scaleEffect(0.7)
-                        .tint(.white.opacity(0.9))
-                    Text("Checking bedtime…")
-                        .font(.caption2)
-                        .foregroundColor(.white.opacity(0.85))
-                    Spacer()
-                    Text(bedtimeText)
-                        .font(.caption2)
-                        .foregroundColor(.white.opacity(0.7))
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(Color.white.opacity(0.12))
-                .cornerRadius(10)
-            )
-        }
-
-        guard let predicted = sleepProtectionPredictedLevelAtBedtime,
-              let bedtime = sleepProtectionBedtime else {
-            return AnyView(EmptyView())
-        }
-
-        let isSafe = predicted <= sleepProtectionTargetMg
-        let title = isSafe ? "OK for bedtime" : "May interfere"
-        let icon = isSafe ? "moon.stars.fill" : "moon.zzz.fill"
-        let bannerColor = isSafe ? Color.green.opacity(1.0) : Color.red.opacity(1.0)
-        let comparator = isSafe ? "≤" : ">"
-
-        return AnyView(
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Image(systemName: icon)
-                        .font(.caption)
-                    Text("Sleep Protection")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                    Spacer()
-                    Text(bedtime.formatted(date: .omitted, time: .shortened))
-                        .font(.caption2)
-                        .foregroundColor(.white.opacity(0.75))
-                }
-
-                HStack {
-                    Text(title)
-                        .font(.caption2)
-                        .foregroundColor(.white.opacity(0.9))
-                    Spacer()
-                    Text("\(predicted, specifier: "%.3f") \(comparator) \(sleepProtectionTargetMg, specifier: "%.1f") mg")
-                        .font(.caption2)
-                        .fontWeight(.medium)
-                        .foregroundColor(.white.opacity(0.9))
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(bannerColor)
-            .cornerRadius(10)
-        )
-    }
-
-    // LEGACY VIEW - No longer used in v2.1 (multi-pouch loading)
-    // Kept for reference/rollback purposes
-    /*
-    var quickButtonsView: some View {
-        VStack(spacing: 16) {
-            // Old horizontal scroll view implementation
-        }
-    }
-    */
-
-    var customRowView: some View {
-        HStack {
-            TextField("Enter mg", text: $input)
-                .keyboardType(.decimalPad)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 90)
-
-            Button("Save") {
-                guard let mg = Double(input), mg > 0 else { return }
-                LogService.ensureCustomButton(for: mg, in: ctx)
-                try? ctx.save()
-                input = ""
-                showInput = false
-                WidgetReloadCoordinator.reload()
-            }
-            .buttonStyle(.borderedProminent)
-
-            Button("Cancel") {
-                input = ""
-                showInput = false
-            }
-            .buttonStyle(.bordered)
-        }
-    }
-
-    // MARK: – Countdown Display
-    
-    @ViewBuilder
-    func compactCountdownPane(for pouch: PouchLog) -> some View {
-        let insertionTime = pouch.insertionTime ?? tick
-        let elapsed = max(0, tick.timeIntervalSince(insertionTime))
-        let actualDuration = TimeInterval(pouch.timerDuration * 60)
-        let remaining = max(min(actualDuration - elapsed, actualDuration), 0)
-        let progress = min(max(elapsed / actualDuration, 0), 1)
-        let isCompleted = remaining == 0
-
-        let currentAbsorption = AbsorptionConstants.shared
-            .calculateCurrentNicotineLevel(
-                nicotineContent: pouch.nicotineAmount,
-                elapsedTime: elapsed,
-                fullReleaseTime: actualDuration
-            )
-        let maxPossibleAbsorption = AbsorptionConstants.shared
-            .calculateAbsorbedNicotine(
-                nicotineContent: pouch.nicotineAmount,
-                useTime: actualDuration,
-                fullReleaseTime: actualDuration
-            )
-        let absorptionProgress = maxPossibleAbsorption > 0 ? currentAbsorption / maxPossibleAbsorption : 0
-
-        HStack(spacing: 12) {
-            VStack(spacing: 8) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        if let brand = pouch.can?.brand {
-                            Text(brand)
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                        }
-                        Text("\(String(format: "%.1f", pouch.nicotineAmount))mg")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    Spacer()
-                    
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text(isCompleted ? "Complete!" : formatMinutesSeconds(remaining))
-                            .font(.system(size: 16, weight: .bold, design: .monospaced))
-                            .foregroundColor(isCompleted ? .green : .blue)
-                        
-                        Text("\(String(format: "%.3f", currentAbsorption))mg (\(Int(absorptionProgress * 100))%)")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                ProgressView(value: progress)
-                    .scaleEffect(y: 1.2)
-            }
-            
-            // Remove button
-            Button(action: {
-                removePouch(pouch)
-            }) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 24))
-                    .foregroundColor(.red)
-            }
-            .buttonStyle(PlainButtonStyle())
-            .disabled(shouldDisableRemoveButton)
-            .opacity(shouldDisableRemoveButton ? 0.5 : 1.0)
-        }
-        .padding(12)
-        .glassEffect(.regular, in: .rect(cornerRadius: 10))
-    }
-
-    @ViewBuilder
-    func countdownPane(for pouch: PouchLog) -> some View {
-        let insertionTime = pouch.insertionTime ?? tick
-        let elapsed = max(0, tick.timeIntervalSince(insertionTime))
-        // Use the pouch's specific duration (stored in minutes, convert to seconds)
-        let actualDuration = TimeInterval(pouch.timerDuration * 60)
-        // Ensure remaining time never shows more than the pouch's duration
-        let remaining = max(min(actualDuration - elapsed, actualDuration), 0)
-        let progress = min(max(elapsed / actualDuration, 0), 1)
-        let isCompleted = remaining == 0
-
-        let currentAbsorption = AbsorptionConstants.shared
-            .calculateCurrentNicotineLevel(
-                nicotineContent: pouch.nicotineAmount,
-                elapsedTime: elapsed,
-                fullReleaseTime: actualDuration
-            )
-        let maxPossibleAbsorption = AbsorptionConstants.shared
-            .calculateAbsorbedNicotine(
-                nicotineContent: pouch.nicotineAmount,
-                useTime: actualDuration,
-                fullReleaseTime: actualDuration
-            )
-        let absorptionProgress = maxPossibleAbsorption > 0 ? currentAbsorption / maxPossibleAbsorption : 0
-
-        VStack(spacing: 12) {
-            Button("Remove Pouch") { 
-                removePouch(pouch) 
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(shouldDisableRemoveButton)
-            .opacity(shouldDisableRemoveButton ? 0.6 : 1.0)
-
-            Text(isCompleted ? "Timer Complete" : "Live Timer").font(.headline)
-
-            Text(isCompleted ? "Complete!" : formatMinutesSeconds(remaining))
-                .font(.system(size: 32, weight: .bold, design: .monospaced))
-                .foregroundColor(isCompleted ? .green : .blue)
-
-            Text("Time in: \(formatHoursMinutesSeconds(elapsed))")
-                .font(.caption).foregroundColor(.secondary)
-
-            ProgressView(value: progress).scaleEffect(y: 2)
-
-            Text("Absorbed: \(String(format: "%.3f", currentAbsorption)) mg (\(Int(absorptionProgress * 100))%)")
-                .font(.caption).foregroundColor(.secondary)
-
-            if isCompleted {
-                Text("Ready to remove!")
-                    .font(.caption)
-                    .foregroundColor(.green)
-                    .fontWeight(.semibold)
-            }
-        }
-        .padding()
-        .background(Color.gray.opacity(0.1))
-        .cornerRadius(12)
-    }
-
-    // MARK: – Multi-Pouch Loading Operations
-    
-    func incrementPouch(for canId: UUID) {
-        let current = loadedPouches[canId] ?? 0
-        loadedPouches[canId] = current + 1
-    }
-    
-    func decrementPouch(for canId: UUID) {
-        guard let current = loadedPouches[canId], current > 0 else { return }
-        if current == 1 {
-            loadedPouches.removeValue(forKey: canId)
-        } else {
-            loadedPouches[canId] = current - 1
-        }
-    }
-    
-    func startTimerWithLoadedPouches() {
-        guard canStartTimer else { return }
-
-        let generator = UIImpactFeedbackGenerator(style: .medium)
-        generator.impactOccurred()
-
-        // Build (can, count) loads and route through LogService — single save, rollback,
-        // per-pouch completion alerts, aggregated Live Activity, Watch push, inventory alerts.
-        var loads: [(can: Can, count: Int)] = []
-        for can in activeCans {
-            guard let canId = can.id, let count = loadedPouches[canId], count > 0 else { continue }
-            loads.append((can, count))
-        }
-
-        let successCount = LogService.logPouchesFromCans(loads: loads, ctx: ctx)
-
-        if successCount > 0 {
-            loadedPouches.removeAll()
-            tick = Date()
-            startLiveTimerIfNeeded()
-            startOptimizedTimer()
-            // Widget + LA already updated inside LogService.logPouchesFromCans.
-            canManager.fetchActiveCans(context: ctx)
-            let successGenerator = UINotificationFeedbackGenerator()
-            successGenerator.notificationOccurred(.success)
-        } else {
-            let errorGenerator = UINotificationFeedbackGenerator()
-            errorGenerator.notificationOccurred(.error)
-        }
-    }
-    
-    // MARK: – CRUD Operations
-    
-    func handleScannedBarcode(_ barcode: String) {
-        // Check if there's an active can with this barcode in inventory
-        if let activeCan = canManager.findActiveCanByBarcode(barcode, context: ctx) {
-            // Can exists with pouches, show dialog to ask user what to do
-            duplicateCanForAlert = activeCan
-            showingDuplicateCanAlert = true
-        } else {
-            // Either no can exists or can is empty
-            // Show add can screen with barcode and any template data pre-filled
-            scannedBarcode = barcode
-            showingAddCan = true
-        }
-    }
-
-    func logPouch(_ mg: Double) {
-        LogService.logPouch(amount: mg, ctx: ctx)
-        startLiveTimerIfNeeded()
-    }
-    
-    func logPouchFromCan(_ can: Can) {
-        guard can.pouchCount > 0 else { return }
-        
-        // Log the pouch with can association
-        // Round strength to avoid floating-point precision issues (9.0000000001 -> 9.0)
-        let roundedStrength = round(can.strength)
-        let success = canManager.logPouchFromCan(
-            can: can,
-            amount: roundedStrength,
-            context: ctx
-        )
-        
-        if success {
-            startLiveTimerIfNeeded()
-            canManager.fetchActiveCans(context: ctx)
-        }
-    }
-
-    func removeAllActivePouches() {
-        let generator = UINotificationFeedbackGenerator()
-
-        Task { @MainActor in
-            let removed = await PouchRemovalService.removeAllActivePouches(in: ctx)
-
-            if removed > 0 {
-                print("✅ Removed all \(removed) active pouches")
-                generator.notificationOccurred(.success)
-            }
-
-            // Refresh can list to show updated counts
-            canManager.fetchActiveCans(context: ctx)
-
-            // Restart/stop timers depending on whether anything is still active
-            if !self.activePouches.isEmpty {
-                self.tick = Date()
-                self.startLiveTimerIfNeeded()
-                self.startOptimizedTimer()
-            } else {
-                self.stopOptimizedTimer()
-                self.liveTimer?.invalidate()
-                self.liveTimer = nil
-            }
-        }
-    }
-    
-    func removePouch(_ pouch: PouchLog) {
-        Task { @MainActor in
-            await PouchRemovalService.removePouch(pouch, in: ctx)
-
-            // Refresh can list to show updated counts
-            canManager.fetchActiveCans(context: ctx)
-
-            // Restart/stop timers depending on whether anything is still active
-            if !self.activePouches.isEmpty {
-                self.tick = Date()
-                self.startLiveTimerIfNeeded()
-                self.startOptimizedTimer()
-            } else {
-                self.stopOptimizedTimer()
-                self.liveTimer?.invalidate()
-                self.liveTimer = nil
-            }
-        }
-    }
-    
-    func deleteCustomButton(_ button: CustomButton) {
-        // Delete the custom button from Core Data
-        ctx.delete(button)
-        
-        do {
-            try ctx.save()
-            print("✅ Deleted custom button: \(button.nicotineAmount)mg")
-        } catch {
-            print("❌ Failed to delete custom button: \(error)")
-        }
-    }
-
-    // MARK: – Live Activity tick (UI refresh loop)
-
-    private func startLiveTimerIfNeeded() {
-        liveTimer?.invalidate()
-        liveTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in 
-            Task { @MainActor in
-                await self.updateLiveActivityTick()
-            }
-        }
-        if let t = liveTimer { RunLoop.main.add(t, forMode: .common) }
-    }
-
-    private func endLiveActivityIfNeeded(for pouch: PouchLog) {
-        liveTimer?.invalidate()
-        liveTimer = nil
-        let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
-        Task {
-            await LiveActivityManager.endLiveActivity(for: pouchId)
-            WidgetReloadCoordinator.reload()
-        }
-    }
-
-    private func updateLiveActivityTick() async {
-        // startTimerWithLoadedPouches() creates ONE Live Activity for the LONGEST-running
-        // pouch (by end time), not the newest. Driving updates off activePouches.first
-        // (newest) would target the wrong pouchId in multi-can batches and silently freeze
-        // the activity. Select the activity-owning pouch by latest end time so the update
-        // always matches the Live Activity that was created.
-        guard let pouch = activePouches.max(by: { a, b in
-            let ea = (a.insertionTime ?? .distantPast).addingTimeInterval(TimeInterval(a.timerDuration * 60))
-            let eb = (b.insertionTime ?? .distantPast).addingTimeInterval(TimeInterval(b.timerDuration * 60))
-            return ea < eb
-        }), let insertionTime = pouch.insertionTime else { return }
-
-        // Use the pouch's specific duration (stored in minutes, convert to seconds)
-        let actualDuration = TimeInterval(pouch.timerDuration * 60)
-        let elapsed = Date().timeIntervalSince(insertionTime)
-        let remaining = max(actualDuration - elapsed, 0)
-        let progress = min(max(elapsed / actualDuration, 0), 1)
-
-        // Report the SUM across all active/decaying pouches. The activity was created with
-        // the TOTAL nicotine, so a single pouch's level would under-report the multi-pouch total.
-        let currentLevel = await NicotineCalculator().calculateTotalNicotineLevel(context: ctx)
-
-        let pouchId = pouch.pouchId?.uuidString ?? pouch.objectID.uriRepresentation().absoluteString
-        
-        // Update Live Activity with accurate timer interval based on current pouch data
-        let endTime = insertionTime.addingTimeInterval(actualDuration)
-        let timerInterval = insertionTime...endTime
-        
-        await LiveActivityManager.updateLiveActivity(
-            for: pouchId,
-            timerInterval: timerInterval,
-            absorptionProgress: progress,
-            currentNicotineLevel: currentLevel
-        )
-
-        if remaining == 0 {
-            endLiveActivityIfNeeded(for: pouch)
-            
-            // Auto-remove if enabled
-            if autoRemovePouches {
-                Task { @MainActor in
-                    // Apply user-configured delay (convert minutes to nanoseconds)
-                    let delayNanoseconds = UInt64(autoRemoveDelayMinutes * 60 * Double(NSEC_PER_SEC))
-                    // Always wait at least 1 second for the user to see completion
-                    let finalDelay = max(delayNanoseconds, NSEC_PER_SEC)
-                    try? await Task.sleep(nanoseconds: finalDelay)
-                    removePouch(pouch)
-                    print("🔄 Auto-removed completed pouch after \(autoRemoveDelayMinutes) minute delay")
-                }
-            }
-        } else {
-            WidgetReloadCoordinator.reload()
-        }
-    }
-
-    private func updateLiveActivityTickIfNeeded() async {
-        let now = Date()
-        let timeSinceLastLiveActivityUpdate = now.timeIntervalSince(lastLiveActivityUpdate)
-        
-        // Only update Live Activity every 15 seconds or when pouch completes
-        // More frequent updates ensure numeric text stays current
-        let shouldUpdateLiveActivity = timeSinceLastLiveActivityUpdate >= 15 || checkIfPouchCompleted()
-        
-        if shouldUpdateLiveActivity {
-            await updateLiveActivityTick()
-            lastLiveActivityUpdate = now
-        }
-    }
-
-    // MARK: – Optimized Timer Management
-    
-    private func startOptimizedTimer() {
-        stopOptimizedTimer() // Ensure no duplicate timers
-        optimizedTimer = Timer.scheduledTimer(withTimeInterval: TIMER_INTERVAL, repeats: true) { _ in
-            Task { @MainActor in
-                self.tick = Date()
-                // Update Live Activity less frequently to save battery
-                await self.updateLiveActivityTickIfNeeded()
-                // Only reload widgets when UI actually changes or every 2 minutes
-                self.smartWidgetReload()
-                // Auto-remove a completed pouch if the user enabled it (previously a
-                // hidden side effect of checkIfPouchCompleted).
-                self.autoRemoveCompletedPouchIfNeeded()
-            }
-        }
-        if let timer = optimizedTimer {
-            RunLoop.main.add(timer, forMode: .common)
-        }
-    }
-    
-    private func stopOptimizedTimer() {
-        optimizedTimer?.invalidate()
-        optimizedTimer = nil
-    }
-    
-    // MARK: – Helpers
-    
-    private func calculateBottomPadding() -> CGFloat {
-        var padding: CGFloat = 16
-        
-        // Add space for "Remove All Active Pouches" button if active pouches exist
-        if !activePouches.isEmpty {
-            padding += 70  // Button height + spacing
-        }
-        
-        // Add space for "Start Timer" button if loaded pouches exist
-        if canStartTimer {
-            padding += 90  // Button height + spacing
-        }
-        
-        return padding
-    }
-    
-    private func smartWidgetReload() {
-        let now = Date()
-        let timeSinceLastUpdate = now.timeIntervalSince(lastWidgetUpdate)
-        
-        // Only update widgets if:
-        // 1. It's been more than 2 minutes since last update (reduces battery drain)
-        // 2. OR if the pouch just completed (remaining time hit 0)
-        let shouldUpdate = timeSinceLastUpdate >= 120 || checkIfPouchCompleted()
-        
-        if shouldUpdate {
-            WidgetReloadCoordinator.reload()
-            lastWidgetUpdate = now
-        }
-    }
-    
-    private func checkIfPouchCompleted() -> Bool {
-        guard let pouch = activePouches.first,
-              let insertionTime = pouch.insertionTime else { return false }
-        // Use the pouch's specific duration, not the app's default
-        let actualDuration = TimeInterval(pouch.timerDuration * 60)  // Convert minutes to seconds
-        let elapsed = Date().timeIntervalSince(insertionTime)
-        return elapsed >= actualDuration
-    }
-
-    /// Auto-removes the active pouch once its timer duration plus the user-configured
-    /// delay has fully elapsed. Split out from `checkIfPouchCompleted()` so the boolean
-    /// completion query no longer mutates state as a hidden side effect.
-    /// `PouchRemovalService` de-dups by id + removalTime, so calling this every tick is safe.
-    private func autoRemoveCompletedPouchIfNeeded() {
-        guard autoRemovePouches,
-              let pouch = activePouches.first,
-              let insertionTime = pouch.insertionTime else { return }
-        let totalDuration = TimeInterval(pouch.timerDuration * 60) + autoRemoveDelayMinutes * 60
-        if Date().timeIntervalSince(insertionTime) >= totalDuration {
-            removePouch(pouch)   // PouchRemovalService de-dups by id + removalTime
-            print("🔄 Auto-removed completed pouch from timer check after \(autoRemoveDelayMinutes) minute delay")
-        }
-    }
-
-    func throttledWidgetReload(at now: Date) {
-        if now.timeIntervalSince(lastWidgetUpdate) >= 30 {
-            WidgetReloadCoordinator.reload()
-            lastWidgetUpdate = now
-        }
-    }
-
-    func formatHoursMinutesSeconds(_ timeInterval: TimeInterval) -> String {
-        let seconds = Int(max(timeInterval, 0))
-        return String(format: "%02d:%02d:%02d", seconds/3_600, (seconds%3_600)/60, seconds%60)
-    }
-
-    func formatMinutesSeconds(_ timeInterval: TimeInterval) -> String {
-        let seconds = Int(max(timeInterval, 0))
-        return String(format: "%02d:%02d", seconds/60, seconds%60)
-    }
-
-    func cleanUpStale() {
-        // Only clean up stale pouches if auto-remove is enabled
-        // AND the pouch has actually completed its timer duration + delay
-        guard autoRemovePouches else { return }
-        
-        let request = PouchLog.fetchRequest()
-        request.predicate = NSPredicate(format:"removalTime == nil")
-        
-        if let logs = try? ctx.fetch(request) {
-            for pouch in logs {
-                guard let insertionTime = pouch.insertionTime else { continue }
-                
-                // Use the pouch's specific timer duration (stored in minutes)
-                let pouchDurationSeconds = TimeInterval(pouch.timerDuration * 60)
-                let delaySeconds = autoRemoveDelayMinutes * 60
-                let totalDuration = pouchDurationSeconds + delaySeconds
-                let elapsed = Date().timeIntervalSince(insertionTime)
-                
-                // Only auto-remove if the timer + delay has completed
-                // Add 5 second grace period to avoid edge cases
-                if elapsed > (totalDuration + 5) {
-                    print("🧹 Cleaning up completed pouch from \(elapsed / 60) minutes ago (after \(autoRemoveDelayMinutes) min delay)")
-                    removePouch(pouch)
-                }
-            }
-        }
-    }
-    
-    // Updates nicotine level information for the Start Timer button
-    private func updateNicotineLevels() {
-        Task {
-            let calculator = NicotineCalculator()
-            let now = Date.now
-
-            // Current nicotine level (active + decaying)
-            let currentLevel = await calculator.calculateTotalNicotineLevel(context: ctx, at: now)
-
-            // Estimate the level at the time when:
-            // - all currently-active pouches finish absorbing, AND
-            // - all currently-loaded (planned) pouches would finish absorbing if started now.
-            // This fixes the issue where estimates ignored the *remaining* absorption from pouches already in use.
-            let estimatedLevel: Double?
-            if totalLoadedPouches > 0 {
-                let planned = plannedPouchesFromLoaded()
-                let plannedMaxDuration = planned.map(\.duration).max() ?? 0
-                var horizon = now.addingTimeInterval(plannedMaxDuration)
-
-                // Include current active pouches' completion times
-                let activeEndTimes: [Date] = activePouches.compactMap { pouch in
-                    guard let insertion = pouch.insertionTime else { return nil }
-                    let duration = pouch.timerDuration > 0 ? TimeInterval(pouch.timerDuration) * 60 : FULL_RELEASE_TIME
-                    return insertion.addingTimeInterval(duration)
-                }
-                if let maxActiveEnd = activeEndTimes.max(), maxActiveEnd > horizon {
-                    horizon = maxActiveEnd
-                }
-
-                let result = await SleepProtectionAnalyzer.predictTotalLevel(
-                    context: ctx,
-                    now: now,
-                    at: horizon,
-                    plannedPouches: planned
-                )
-
-                estimatedLevel = result.predictedLevel
-            } else {
-                estimatedLevel = nil
-            }
-
-            await MainActor.run {
-                self.currentNicotineLevel = currentLevel
-                self.estimatedNicotineLevel = estimatedLevel
-            }
-        }
-    }
-
-    // MARK: - Sleep Protection
-
-    private func plannedPouchesFromLoaded() -> [PlannedPouch] {
-        guard totalLoadedPouches > 0 else { return [] }
-
-        var planned: [PlannedPouch] = []
-
-        for can in activeCans {
-            guard let canId = can.id, let count = loadedPouches[canId], count > 0 else { continue }
-
-            let durationSeconds: TimeInterval
-            if can.duration > 0 {
-                durationSeconds = TimeInterval(can.duration * 60)
-            } else {
-                durationSeconds = FULL_RELEASE_TIME
-            }
-
-            for _ in 0..<count {
-                planned.append(PlannedPouch(nicotineAmount: can.strength, duration: durationSeconds))
-            }
-        }
-
-        return planned
-    }
-
-    private func updateSleepProtectionEvaluation() {
-        guard sleepProtectionEnabled, totalLoadedPouches > 0 else {
-            sleepProtectionBedtime = nil
-            sleepProtectionPredictedLevelAtBedtime = nil
-            isEvaluatingSleepProtection = false
-            return
-        }
-
-        isEvaluatingSleepProtection = true
-        let planned = plannedPouchesFromLoaded()
-        let now = Date.now
-
-        Task {
-            let result = await SleepProtectionAnalyzer.predictTotalLevelAtNextBedtime(
-                context: ctx,
-                now: now,
-                bedtimeSecondsFromMidnight: sleepProtectionBedtimeSecondsFromMidnight,
-                plannedPouches: planned
-            )
-
-            await MainActor.run {
-                self.sleepProtectionBedtime = result.bedtime
-                self.sleepProtectionPredictedLevelAtBedtime = result.predictedLevel
-                self.isEvaluatingSleepProtection = false
-            }
-        }
-    }
-    
-    // MARK: - Sync Overlay
-    
-    private var syncOverlay: some View {
-        let syncState = CloudKitSyncState.shared
-        return ZStack {
-            // Background blur
-            Color.black.opacity(0.4)
-                .ignoresSafeArea()
-                .transition(.opacity)
-            
-            // Sync status card
-            VStack(spacing: 20) {
-                // Icon or progress indicator
-                if syncState.syncCompleted {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 60))
-                        .foregroundColor(.green)
-                        .transition(.scale.combined(with: .opacity))
-                } else {
-                    ProgressView()
-                        .scaleEffect(1.5)
-                        .progressViewStyle(CircularProgressViewStyle(tint: .blue))
-                }
-                
-                // Status text
-                Text(syncState.syncCompleted ? "Sync Complete" : syncState.syncMessage)
-                    .font(.headline)
-                    .foregroundColor(.primary)
-                
-                // Progress bar
-                if !syncState.syncCompleted {
-                    ProgressView(value: syncState.syncProgress)
-                        .frame(width: 200)
-                        .progressViewStyle(.linear)
-                        .tint(.blue)
-                }
-                
-                // Additional info text
-                if !syncState.syncCompleted {
-                    Text("Please wait while we sync with your other devices")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 250)
-                }
-            }
-            .padding(30)
-            .glassEffect(.regular, in: .rect(cornerRadius: 20))
-            .scaleEffect(syncState.syncCompleted ? 1.05 : 1.0)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: syncState.syncCompleted)
-        }
-    }
-    
-    // MARK: - Computed Properties
-    
-    private var shouldDisableRemoveButton: Bool {
-        // Disable button if CloudKit is enabled and we haven't completed initial sync
-        return CloudKitSyncState.shared.isCloudKitEnabled && !CloudKitSyncState.shared.syncCompleted
-    }
-    
-
-}
-
-#Preview {
-    LogView()
-        .environment(\.managedObjectContext, PersistenceController.preview.container.viewContext)
 }

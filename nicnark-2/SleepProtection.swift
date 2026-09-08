@@ -3,7 +3,6 @@ import CoreData
 
 enum SleepProtectionKeys {
     static let enabled = "sleepProtectionEnabled"
-    /// Seconds from midnight local time (0...86399)
     static let bedtimeSecondsFromMidnight = "sleepProtectionBedtimeSecondsFromMidnight"
     static let targetMg = "sleepProtectionTargetMg"
 }
@@ -11,10 +10,12 @@ enum SleepProtectionKeys {
 struct PlannedPouch {
     let nicotineAmount: Double
     let duration: TimeInterval
+    let absorptionFraction: Double
 
-    init(nicotineAmount: Double, duration: TimeInterval) {
+    init(nicotineAmount: Double, duration: TimeInterval, absorptionFraction: Double = ABSORPTION_FRACTION) {
         self.nicotineAmount = nicotineAmount
         self.duration = duration
+        self.absorptionFraction = absorptionFraction
     }
 }
 
@@ -44,14 +45,12 @@ enum SleepProtectionHelper {
 
 @MainActor
 enum SleepProtectionAnalyzer {
-    /// Predicts total nicotine level at a specific time, including planned pouches (assumed inserted at `now`).
     static func predictTotalLevel(
         context: NSManagedObjectContext,
         now: Date = .now,
         at targetTime: Date,
         plannedPouches: [PlannedPouch]
     ) async -> (time: Date, predictedLevel: Double, baselineLevel: Double) {
-        // Baseline: whatever is already in the system (active + decaying pouches) at targetTime.
         let calculator = NicotineCalculator()
         let baseline = await calculator.calculateTotalNicotineLevel(context: context, at: targetTime)
 
@@ -64,14 +63,14 @@ enum SleepProtectionAnalyzer {
                 nicotineContent: pouch.nicotineAmount,
                 timeSinceInsertion: t,
                 timeInMouth: min(max(0, t), pouch.duration),
-                fullReleaseTime: pouch.duration
+                fullReleaseTime: pouch.duration,
+                absorptionFraction: pouch.absorptionFraction
             )
         }
 
         return (time: targetTime, predictedLevel: max(0, baseline + plannedContribution), baselineLevel: max(0, baseline))
     }
 
-    /// Predicts total nicotine level at the user's next bedtime, including the planned pouches (assumed inserted at `now`).
     static func predictTotalLevelAtNextBedtime(
         context: NSManagedObjectContext,
         now: Date = .now,
