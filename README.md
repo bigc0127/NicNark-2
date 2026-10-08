@@ -170,12 +170,12 @@ This project is licensed under the **Creative Commons Attribution-NonCommercial 
 ## 🎯 Roadmap
 
 ### Planned Features
-- [ ] **Apple Watch App** - Native watchOS companion
-- [ ] **Export Data** - CSV/JSON export functionality  
-- [ ] **Usage Goals** - Set and track reduction goals
-- [ ] **More Chart Types** - Additional data visualizations
+- [x] **Apple Watch App** - Native watchOS companion
+- [x] **Export Data** - CSV/JSON export functionality  
+- [x] **Usage Goals** - Set and track reduction goals
+- [x] **More Chart Types** - Additional data visualizations
 - [ ] **Themes** - Custom app themes and colors
-- [ ] **Advanced Analytics** - Deeper usage insights
+- [x] **Advanced Analytics** - Deeper usage insights
 
 ### Community Requests
 Have an idea? [Open an issue](https://github.com/bigc0127/NicNark-2/issues) and let's discuss it!
@@ -189,7 +189,7 @@ Have an idea? [Open an issue](https://github.com/bigc0127/NicNark-2/issues) and 
 - 💬 **Questions** - Use GitHub Discussions for general questions
 
 ### App Store Version
-The official App Store version is maintained by Connor Needling and may include additional features or optimizations.
+The official App Store version is not coming due to Apple not allowing nicotine apps that are not for the purpose of quitting nicotine. 
 
 ## ⚖️ Legal
 
