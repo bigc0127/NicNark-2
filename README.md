@@ -209,7 +209,6 @@ The official App Store version is not coming due to Apple not allowing nicotine 
 
 **Connor Needling**
 - GitHub: [@ConnorNeedling](https://github.com/ConnorNeedling)
-- App Store: [NicNark on App Store](https://apps.apple.com/app/nicnark) *(coming soon)*
 
 ---
 
